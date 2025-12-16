@@ -486,6 +486,10 @@ class Nautilus(abstract_nest.AbstractNest):
         )
 
     @property
+    def batch_size(self):
+        return self.config_dict_search.get("n_batch")
+
+    @property
     def config_dict(self):
         return conf.instance["non_linear"]["nest"][self.__class__.__name__]
 
