@@ -51,6 +51,7 @@ class Job(AbstractJob):
         self.info = info
 
     def perform(self):
+
         result = self.search_instance.fit(
             model=self.model,
             analysis=self.analysis,

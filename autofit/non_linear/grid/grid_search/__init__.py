@@ -219,8 +219,6 @@ class GridSearch:
         result: GridSearchResult
             The result of the grid search
         """
-        self.logger.info("...in parallel")
-
         grid_priors = model.sort_priors_alphabetically(set(grid_priors))
         lists = self.make_lists(grid_priors)
 

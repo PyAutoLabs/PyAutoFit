@@ -315,3 +315,41 @@ class Analysis(ABC):
 
     def perform_quick_update(self, paths, instance):
         raise NotImplementedError
+
+    def print_vram_use(self, model, batch_size : int) -> str:
+        """
+        Print JAX VRAM use for a given batch size.
+
+        Parameters
+        ----------
+        batch_size
+            The batch size to profile, which is the number of model evaluations JAX will perform simultaneously.
+        """
+        import jax
+        import jax.numpy as jnp
+
+        from autofit.non_linear.fitness import Fitness
+
+        fitness = Fitness(
+            model=model,
+            analysis=self,
+            fom_is_log_likelihood=True,
+            use_jax_vmap=True,
+            batch_size=batch_size,
+        )
+
+        parameters = np.zeros((batch_size, model.total_free_parameters))
+
+        for i in range(batch_size):
+            parameters[i, :] = model.physical_values_from_prior_medians
+
+        parameters = jnp.array(parameters)
+
+        batched_call = jax.jit(jax.vmap(fitness.call))
+        lowered = batched_call.lower(parameters)
+        compiled = lowered.compile()
+        memory_analysis = compiled.memory_analysis()
+
+        print(
+            f"VRAM USE = {(memory_analysis.output_size_in_bytes + memory_analysis.temp_size_in_bytes) / 1024 ** 3:.3f} GB"
+        )
