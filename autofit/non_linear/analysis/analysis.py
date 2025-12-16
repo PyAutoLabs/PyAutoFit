@@ -325,6 +325,10 @@ class Analysis(ABC):
         batch_size
             The batch size to profile, which is the number of model evaluations JAX will perform simultaneously.
         """
+        if not self._use_jax:
+            print("use_jax=False for this analysis, therefore does not use GPU and VRAM use cannot be profiled.")
+            return
+
         import jax
         import jax.numpy as jnp
 
