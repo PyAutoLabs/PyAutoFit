@@ -350,6 +350,17 @@ class Analysis(ABC):
         compiled = lowered.compile()
         memory_analysis = compiled.memory_analysis()
 
-        print(
-            f"VRAM USE = {(memory_analysis.output_size_in_bytes + memory_analysis.temp_size_in_bytes) / 1024 ** 3:.3f} GB"
+        vram_bytes = (
+                memory_analysis.output_size_in_bytes
+                + memory_analysis.temp_size_in_bytes
         )
+
+        if vram_bytes == 0:
+            print(
+                "VRAM USE = 0.000 GB "
+                "(this likely means JAX is running in CPU-only mode)"
+            )
+        else:
+            print(
+                f"VRAM USE = {vram_bytes / 1024 ** 3:.3f} GB"
+            )
