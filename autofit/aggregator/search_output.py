@@ -250,7 +250,7 @@ class SearchOutput(AbstractSearchOutput, fit_interface.Fit):
         try:
             return self.samples.max_log_likelihood()
         except (AttributeError, NotImplementedError):
-            return None
+            return self.samples_summary.instance
 
     @property
     def id(self) -> str:
