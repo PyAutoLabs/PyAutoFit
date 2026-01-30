@@ -108,7 +108,8 @@ class Fitness:
         self.model = model
         self.paths = paths
         self.fom_is_log_likelihood = fom_is_log_likelihood
-        self.resample_figure_of_merit = resample_figure_of_merit or -xp.inf
+
+        self.resample_figure_of_merit = resample_figure_of_merit or -self._xp.inf
         self.convert_to_chi_squared = convert_to_chi_squared
         self.store_history = store_history
 
@@ -135,7 +136,7 @@ class Fitness:
         self.batch_size = batch_size
         self.iterations_per_quick_update = iterations_per_quick_update
         self.quick_update_max_lh_parameters = None
-        self.quick_update_max_lh = -xp.inf
+        self.quick_update_max_lh = -self._xp.inf
         self.quick_update_count = 0
 
         if self.paths is not None:
