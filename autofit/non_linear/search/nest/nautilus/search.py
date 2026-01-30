@@ -225,10 +225,7 @@ class Nautilus(abstract_nest.AbstractNest):
         except KeyError:
             pass
 
-        if fitness.use_jax_vmap:
-            vectorized = True
-        else:
-            vectorized = False
+        vectorized = fitness.use_jax_vmap
 
         search_internal = self.sampler_cls(
             prior=PriorVectorized(model=model),
