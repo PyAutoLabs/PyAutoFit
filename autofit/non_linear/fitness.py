@@ -44,7 +44,6 @@ class Fitness:
         use_jax_vmap : bool = False,
         batch_size : Optional[int] = None,
         iterations_per_quick_update: Optional[int] = None,
-        xp=np,
     ):
         """
         Interfaces with any non-linear search to fit the model to the data and return a log likelihood via
@@ -122,6 +121,16 @@ class Fitness:
 
         if self.use_jax_vmap:
             self._call = self._vmap
+
+        if analysis._use_jax:
+
+            import jax
+
+            if jax.default_backend() == "cpu":
+
+                logger.info("JAX using CPU backend, batch size set to 1 which will improve performance.")
+
+                batch_size = 1
 
         self.batch_size = batch_size
         self.iterations_per_quick_update = iterations_per_quick_update
