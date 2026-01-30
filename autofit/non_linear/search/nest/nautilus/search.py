@@ -137,7 +137,7 @@ class Nautilus(abstract_nest.AbstractNest):
                 fom_is_log_likelihood=True,
                 resample_figure_of_merit=-1.0e99,
                 iterations_per_quick_update=self.iterations_per_quick_update,
-                use_jax_vmap=True,
+                use_jax_vmap=False,
                 batch_size=self.config_dict_search["n_batch"],
             )
 
@@ -225,13 +225,15 @@ class Nautilus(abstract_nest.AbstractNest):
         except KeyError:
             pass
 
+        vectorized = fitness.use_jax_vmap
+
         search_internal = self.sampler_cls(
             prior=PriorVectorized(model=model),
             likelihood=fitness.call_wrap,
             n_dim=model.prior_count,
             filepath=self.checkpoint_file,
             pool=None,
-            vectorized=True,
+            vectorized=vectorized,
             **config_dict,
         )
 
