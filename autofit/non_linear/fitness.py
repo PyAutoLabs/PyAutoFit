@@ -116,16 +116,6 @@ class Fitness:
         self.parameters_history_list = []
         self.log_likelihood_history_list = []
 
-        if analysis._use_jax:
-
-            import jax
-
-            if jax.default_backend() == "cpu":
-
-                logger.info("JAX using CPU backend, vmap disabled for faster performance.")
-
-                use_jax_vmap = False
-
         self.use_jax_vmap = use_jax_vmap
 
         self._call = self.call

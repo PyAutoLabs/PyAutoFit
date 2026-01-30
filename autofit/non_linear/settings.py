@@ -11,6 +11,7 @@ class SettingsSearch:
         number_of_cores: Optional[int] = 1,
         session: Optional[sa.orm.Session] = None,
         info: Optional[dict] = None,
+        use_jax_vmap: bool = True,
     ):
         """
         Stores all the input settings that are used in search's and their `fit functions.
@@ -40,6 +41,7 @@ class SettingsSearch:
         self.unique_tag = unique_tag
         self.number_of_cores = number_of_cores
         self.session = session
+        self.use_jax_vmap = use_jax_vmap
 
         self.info = info
 
@@ -50,6 +52,7 @@ class SettingsSearch:
             "unique_tag": self.unique_tag,
             "number_of_cores": self.number_of_cores,
             "session": self.session,
+            "use_jax_vmap": self.use_jax_vmap,
         }
 
     @property

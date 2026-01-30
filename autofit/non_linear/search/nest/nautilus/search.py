@@ -41,6 +41,7 @@ class Nautilus(abstract_nest.AbstractNest):
         iterations_per_full_update: int = None,
         number_of_cores: int = None,
         session: Optional[sa.orm.Session] = None,
+        use_jax_vmap : bool = True,
         **kwargs
     ):
         """
@@ -90,6 +91,8 @@ class Nautilus(abstract_nest.AbstractNest):
 
         self.logger.debug("Creating Nautilus Search")
 
+        self.use_jax_vmap = use_jax_vmap
+
     def _fit(self, model: AbstractPriorModel, analysis):
         """
         Fit a model using the search and the Analysis class which contains the data and returns the log likelihood from
@@ -137,7 +140,7 @@ class Nautilus(abstract_nest.AbstractNest):
                 fom_is_log_likelihood=True,
                 resample_figure_of_merit=-1.0e99,
                 iterations_per_quick_update=self.iterations_per_quick_update,
-                use_jax_vmap=False,
+                use_jax_vmap=self.use_jax_vmap,
                 batch_size=self.config_dict_search["n_batch"],
             )
 
