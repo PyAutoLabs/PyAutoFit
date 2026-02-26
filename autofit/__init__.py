@@ -141,4 +141,4 @@ def save_abc(pickler, obj):
     pickle._Pickler.save_type(pickler, obj)
 
 
-__version__ = "2026.2.26.3"
+__version__ = "2026.2.26.4"
