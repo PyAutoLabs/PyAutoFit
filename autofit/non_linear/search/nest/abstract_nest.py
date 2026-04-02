@@ -11,8 +11,7 @@ from autofit.non_linear.initializer import (
     InitializerParamBounds,
 )
 from autofit.non_linear.samples import SamplesNest
-from autofit.non_linear.plot.nest_plotters import NestPlotter
-from autofit.non_linear.plot.output import Output
+from autofit.non_linear.plot import corner_anesthetic
 
 
 class AbstractNest(NonLinearSearch, ABC):
@@ -70,20 +69,16 @@ class AbstractNest(NonLinearSearch, ABC):
     def samples_cls(self):
         return SamplesNest
 
-    @property
-    def plotter_cls(self):
-        return NestPlotter
-
     def plot_results(self, samples):
 
         def should_plot(name):
             return conf.instance["visualize"]["plots_search"]["nest"][name]
 
-        plotter = self.plotter_cls(
-            samples=samples,
-            output=Output(path=self.paths.image_path / "search", format="png"),
-        )
         if should_plot("corner_anesthetic"):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                plotter.corner_anesthetic()
+                corner_anesthetic(
+                    samples=samples,
+                    path=self.paths.image_path / "search",
+                    format="png",
+                )

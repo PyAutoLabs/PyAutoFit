@@ -6,8 +6,7 @@ from autofit.non_linear.search.abstract_search import NonLinearSearch
 from autofit.non_linear.initializer import Initializer
 from autofit.non_linear.samples import SamplesMCMC
 from autofit.non_linear.search.mcmc.auto_correlations import AutoCorrelationsSettings
-from autofit.non_linear.plot.mcmc_plotters import MCMCPlotter
-from autofit.non_linear.plot.output import Output
+from autofit.non_linear.plot import corner_cornerpy
 
 class AbstractMCMC(NonLinearSearch):
 
@@ -50,10 +49,6 @@ class AbstractMCMC(NonLinearSearch):
     def samples_cls(self):
         return SamplesMCMC
 
-    @property
-    def plotter_cls(self):
-        return MCMCPlotter
-
     def plot_results(self, samples):
 
         if not samples.pdf_converged:
@@ -62,10 +57,9 @@ class AbstractMCMC(NonLinearSearch):
         def should_plot(name):
             return conf.instance["visualize"]["plots_search"]["mcmc"][name]
 
-        plotter = self.plotter_cls(
-            samples=samples,
-            output=Output(path=self.paths.image_path / "search", format="png"),
-        )
-
         if should_plot("corner_cornerpy"):
-            plotter.corner_cornerpy()
+            corner_cornerpy(
+                samples=samples,
+                path=self.paths.image_path / "search",
+                format="png",
+            )
