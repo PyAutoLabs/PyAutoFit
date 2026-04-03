@@ -31,11 +31,28 @@ class Collection(AbstractPriorModel):
                 return name
 
     def tree_flatten(self):
+        """Flatten this collection into a JAX-compatible PyTree representation.
+
+        Returns
+        -------
+        tuple
+            A (children, aux_data) pair where children are the values and
+            aux_data are the corresponding keys.
+        """
         keys, values = zip(*self.items())
         return values, keys
 
     @classmethod
     def tree_unflatten(cls, aux_data, children):
+        """Reconstruct a Collection from a flattened PyTree.
+
+        Parameters
+        ----------
+        aux_data
+            The keys of the collection items.
+        children
+            The values of the collection items.
+        """
         instance = cls()
 
         for key, value in zip(aux_data, children):
@@ -46,6 +63,14 @@ class Collection(AbstractPriorModel):
         return item in self._dict or item in self._dict.values()
 
     def __getitem__(self, item):
+        """Retrieve an item by string key or integer index.
+
+        Parameters
+        ----------
+        item : str or int
+            A string key for dict-style access, or an integer index
+            for positional access into the values list.
+        """
         if isinstance(item, str):
             return self._dict[item]
         return self.values[item]
@@ -64,9 +89,11 @@ class Collection(AbstractPriorModel):
 
     @property
     def values(self):
+        """The model components in this collection as a list."""
         return list(self._dict.values())
 
     def items(self):
+        """The (key, model_component) pairs in this collection."""
         return self._dict.items()
 
     def with_prefix(self, prefix: str):
@@ -79,6 +106,11 @@ class Collection(AbstractPriorModel):
         )
 
     def as_model(self):
+        """Convert all prior models in this collection to Model instances.
+
+        Returns a new Collection where each AbstractPriorModel child has
+        been converted via its own as_model() method.
+        """
         return Collection(
             {
                 key: value.as_model()
@@ -162,6 +194,13 @@ class Collection(AbstractPriorModel):
 
     @assert_not_frozen
     def add_dict_items(self, item_dict):
+        """Add all entries from a dictionary, converting values to prior models.
+
+        Parameters
+        ----------
+        item_dict
+            A dictionary mapping string keys to classes, instances, or prior models.
+        """
         for key, value in item_dict.items():
             if isinstance(key, tuple):
                 key = ".".join(key)
@@ -179,11 +218,20 @@ class Collection(AbstractPriorModel):
 
     @assert_not_frozen
     def append(self, item):
+        """Append an item to the collection with an auto-incremented numeric key.
+
+        The item is converted to an AbstractPriorModel if it is not already one.
+        """
         setattr(self, str(self.item_number), AbstractPriorModel.from_object(item))
         self.item_number += 1
 
     @assert_not_frozen
     def __setitem__(self, key, value):
+        """Set an item by key, converting the value to a prior model.
+
+        Preserves the id of any existing item at the same key so that
+        prior identity is maintained across replacements.
+        """
         obj = AbstractPriorModel.from_object(value)
         try:
             obj.id = getattr(self, str(key)).id
@@ -193,6 +241,12 @@ class Collection(AbstractPriorModel):
 
     @assert_not_frozen
     def __setattr__(self, key, value):
+        """Set an attribute, automatically converting values to prior models.
+
+        Private attributes (starting with ``_``) are set directly. All other
+        values are wrapped via ``AbstractPriorModel.from_object`` so that
+        plain classes become ``Model`` instances and floats become fixed values.
+        """
         if key.startswith("_"):
             super().__setattr__(key, value)
         else:
@@ -202,6 +256,14 @@ class Collection(AbstractPriorModel):
                 pass
 
     def remove(self, item):
+        """Remove an item from the collection by value equality.
+
+        Parameters
+        ----------
+        item
+            The item to remove. All entries whose value equals this item
+            are deleted.
+        """
         for key, value in self.__dict__.copy().items():
             if value == item:
                 del self.__dict__[key]
@@ -271,6 +333,11 @@ class Collection(AbstractPriorModel):
 
     @property
     def prior_class_dict(self):
+        """Map each prior to the class it will produce when instantiated.
+
+        For child prior models, delegates to their own prior_class_dict.
+        Direct priors on the collection itself map to ModelInstance.
+        """
         return {
             **{
                 prior: cls

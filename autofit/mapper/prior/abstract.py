@@ -61,6 +61,18 @@ class Prior(Variable, ABC, ArithmeticMixin):
         return self.message.cdf(physical_value)
 
     def with_message(self, message):
+        """Return a copy of this prior with a different message (distribution).
+
+        Parameters
+        ----------
+        message
+            The new message object defining the prior's distribution.
+
+        Returns
+        -------
+        Prior
+            A copy of this prior using the new message.
+        """
         new = copy(self)
         new.message = message
         return new
@@ -88,6 +100,23 @@ class Prior(Variable, ABC, ArithmeticMixin):
 
     @staticmethod
     def for_class_and_attribute_name(cls, attribute_name):
+        """Create a prior from the configuration for a given class and attribute.
+
+        Looks up the prior type and parameters in the prior config files
+        for the specified class and attribute name.
+
+        Parameters
+        ----------
+        cls
+            The model class whose config is looked up.
+        attribute_name
+            The name of the attribute on that class.
+
+        Returns
+        -------
+        Prior
+            A prior instance constructed from the config entry.
+        """
         prior_dict = conf.instance.prior_config.for_class_and_suffix_path(
             cls, [attribute_name]
         )
@@ -129,10 +158,31 @@ class Prior(Variable, ABC, ArithmeticMixin):
         arguments,
         ignore_assertions=False,
     ):
+        """Look up this prior's value in an arguments dictionary.
+
+        Parameters
+        ----------
+        arguments
+            A dictionary mapping Prior objects to physical values.
+        ignore_assertions
+            Unused for priors (present for interface compatibility).
+        """
         _ = ignore_assertions
         return arguments[self]
 
     def project(self, samples, weights):
+        """Project this prior given samples and log weights from a search.
+
+        Returns a copy of this prior whose message has been updated to
+        reflect the posterior information from the samples.
+
+        Parameters
+        ----------
+        samples
+            Array of sample values for this parameter.
+        weights
+            Log weights for each sample.
+        """
         result = copy(self)
         result.message = self.message.project(
             samples=samples,
@@ -170,6 +220,11 @@ class Prior(Variable, ABC, ArithmeticMixin):
     @property
     @abstractmethod
     def parameter_string(self) -> str:
+        """A human-readable string summarizing this prior's parameters.
+
+        Subclasses must implement this to return a description such as
+        ``"mean = 0.0, sigma = 1.0"`` or ``"lower_limit = 0.0, upper_limit = 1.0"``.
+        """
         pass
 
     def __float__(self):
@@ -254,7 +309,22 @@ class Prior(Variable, ABC, ArithmeticMixin):
 
     @property
     def limits(self) -> Tuple[float, float]:
+        """The (lower, upper) bounds of this prior.
+
+        Returns (-inf, inf) by default. Subclasses with finite bounds
+        (e.g. UniformPrior) override this.
+        """
         return (float("-inf"), float("inf"))
 
     def gaussian_prior_model_for_arguments(self, arguments):
+        """Look up this prior in an arguments dict and return the mapped value.
+
+        Used during prior replacement workflows where each prior is mapped
+        to a new prior or fixed value via an arguments dictionary.
+
+        Parameters
+        ----------
+        arguments
+            A dictionary mapping Prior objects to their replacement values.
+        """
         return arguments[self]

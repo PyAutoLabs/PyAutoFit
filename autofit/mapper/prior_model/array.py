@@ -197,6 +197,7 @@ class Array(AbstractPriorModel):
 
     @property
     def prior_class_dict(self):
+        """Map each prior to the class it produces (np.ndarray for direct priors)."""
         return {
             **{
                 prior: cls
