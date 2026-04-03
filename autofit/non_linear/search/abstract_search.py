@@ -470,7 +470,20 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         """
         self.check_model(model=model)
 
-        logger.info(f"Starting non-linear search with {self.number_of_cores} cores.")
+        if getattr(analysis, "_use_jax", False):
+            try:
+                import jax
+                devices = jax.devices()
+                device = devices[0]
+                backend = device.platform.upper()
+                device_name = getattr(device, "device_kind", backend)
+                logger.info(
+                    f"Starting non-linear search with JAX ({backend}: {device_name})."
+                )
+            except Exception:
+                logger.info("Starting non-linear search with JAX.")
+        else:
+            logger.info(f"Starting non-linear search with {self.number_of_cores} cores.")
         self._log_process_state()
 
         model = analysis.modify_model(model)

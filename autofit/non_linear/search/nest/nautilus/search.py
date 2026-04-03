@@ -216,11 +216,14 @@ class Nautilus(abstract_nest.AbstractNest):
             the log likelihood the search maximizes.
         """
 
-        self.logger.info(
-            """
-            Running search where parallelization is disabled.
-            """
-        )
+        if analysis._use_jax:
+            self.logger.info(
+                "Running search with JAX vectorization (parallelization handled by JAX)."
+            )
+        else:
+            self.logger.info(
+                "Running search where parallelization is disabled."
+            )
 
         config_dict = self.config_dict_search
         try:
