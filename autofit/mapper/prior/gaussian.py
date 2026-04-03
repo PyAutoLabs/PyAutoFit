@@ -57,6 +57,13 @@ class GaussianPrior(Prior):
         )
 
     def tree_flatten(self):
+        """Flatten this prior into a JAX-compatible PyTree representation.
+
+        Returns
+        -------
+        tuple
+            A (children, aux_data) pair where children are (mean, sigma, id).
+        """
         return (self.mean, self.sigma, self.id), ()
 
     @classmethod

@@ -41,6 +41,20 @@ logger = logging.getLogger(__name__)
 class Limits:
     @staticmethod
     def for_class_and_attributes_name(cls, attribute_name):
+        """Look up the (lower, upper) limits for a class attribute from config.
+
+        Parameters
+        ----------
+        cls
+            The model class.
+        attribute_name
+            The name of the attribute on that class.
+
+        Returns
+        -------
+        tuple
+            A (lower, upper) pair of limit values.
+        """
         limit_dict = conf.instance.prior_config.for_class_and_suffix_path(
             cls, [attribute_name, "limits"]
         )
@@ -165,6 +179,11 @@ class AbstractPriorModel(AbstractModel):
 
     @property
     def assertions(self):
+        """The list of assertion constraints attached to this model.
+
+        Assertions are checked when creating instances; a failed assertion
+        raises FitException, causing the non-linear search to resample.
+        """
         return self._assertions
 
     @assertions.setter
@@ -441,11 +460,28 @@ class AbstractPriorModel(AbstractModel):
 
     @property
     def name(self):
+        """The class name of this prior model (e.g. ``"Model"`` or ``"Collection"``)."""
         return self.__class__.__name__
 
     # noinspection PyUnusedLocal
     @staticmethod
     def from_object(t, *args, **kwargs):
+        """Convert an arbitrary object into an appropriate prior model representation.
+
+        - Classes become ``Model`` instances.
+        - Lists and dicts become ``Collection`` instances.
+        - Floats become ``Constant`` instances.
+        - Existing prior models and other objects are returned as-is.
+
+        Parameters
+        ----------
+        t
+            A class, list, dict, float, or existing prior model.
+
+        Returns
+        -------
+        An AbstractPriorModel, Constant, or the original object.
+        """
         if inspect.isclass(t):
             from .prior_model import Model
 
@@ -606,6 +642,7 @@ class AbstractPriorModel(AbstractModel):
 
     @property
     def priors_ordered_by_id(self):
+        """Unique priors sorted by their id, defining the canonical parameter ordering."""
         return [prior for _, prior in self.prior_tuples_ordered_by_id]
 
     def vector_from_unit_vector(self, unit_vector):
@@ -836,6 +873,16 @@ class AbstractPriorModel(AbstractModel):
         return len(cls_models) > 0 and len(cls_models) == len(other_models)
 
     def replacing(self, arguments):
+        """Return a new model with some priors replaced.
+
+        This is a convenience alias for ``mapper_from_partial_prior_arguments``.
+        Priors not present in the arguments dict are kept unchanged.
+
+        Parameters
+        ----------
+        arguments : dict
+            A dictionary mapping existing Prior objects to new priors or fixed values.
+        """
         return self.mapper_from_partial_prior_arguments(arguments)
 
     @classmethod
@@ -1211,6 +1258,10 @@ class AbstractPriorModel(AbstractModel):
         return result
 
     def items(self):
+        """Return (name, value) pairs for all public, non-internal attributes.
+
+        Excludes private attributes (prefixed with ``_``), ``cls``, and ``id``.
+        """
         return [
             (key, value)
             for key, value in self.__dict__.items()
@@ -1225,6 +1276,7 @@ class AbstractPriorModel(AbstractModel):
     @property
     @cast_collection(InstanceNameValue)
     def direct_instance_tuples(self):
+        """(name, value) tuples for direct float and Constant attributes."""
         return self.direct_tuples_with_type(float) + self.direct_tuples_with_type(
             Constant
         )
@@ -1232,16 +1284,19 @@ class AbstractPriorModel(AbstractModel):
     @property
     @cast_collection(PriorModelNameValue)
     def prior_model_tuples(self):
+        """(name, prior_model) tuples for direct child AbstractPriorModel attributes."""
         return self.direct_tuples_with_type(AbstractPriorModel)
 
     @property
     @cast_collection(PriorModelNameValue)
     def direct_prior_model_tuples(self):
+        """(name, prior_model) tuples for immediate child prior models (non-recursive)."""
         return self.direct_tuples_with_type(AbstractPriorModel)
 
     @property
     @cast_collection(PriorModelNameValue)
     def direct_tuple_priors(self):
+        """(name, tuple_prior) tuples for direct TuplePrior attributes."""
         return self.direct_tuples_with_type(TuplePrior)
 
     @property
@@ -1267,6 +1322,7 @@ class AbstractPriorModel(AbstractModel):
     @property
     @cast_collection(DeferredNameValue)
     def direct_deferred_tuples(self):
+        """(name, deferred_argument) tuples for direct DeferredArgument attributes."""
         return self.direct_tuples_with_type(DeferredArgument)
 
     @property
@@ -1298,6 +1354,11 @@ class AbstractPriorModel(AbstractModel):
 
     @property
     def prior_class_dict(self):
+        """Map each prior to the class it will produce when instantiated.
+
+        Direct priors on this model map to ``self.cls``. Child prior models
+        contribute their own mappings recursively.
+        """
         from autofit.mapper.prior_model.annotation import AnnotationPriorModel
 
         d = {prior[1]: self.cls for prior in self.prior_tuples}
@@ -1467,6 +1528,7 @@ class AbstractPriorModel(AbstractModel):
 
     @property
     def priors(self):
+        """A list of all Prior objects in this model (may contain duplicates for shared priors)."""
         return [prior_tuple.prior for prior_tuple in self.prior_tuples]
 
     @property
@@ -1474,9 +1536,41 @@ class AbstractPriorModel(AbstractModel):
         return {prior.id: prior for prior in self.priors}
 
     def prior_with_id(self, prior_id):
+        """Retrieve a prior by its unique integer id.
+
+        Parameters
+        ----------
+        prior_id : int
+            The id of the prior to find.
+
+        Returns
+        -------
+        Prior
+            The prior with the matching id.
+
+        Raises
+        ------
+        KeyError
+            If no prior with the given id exists in this model.
+        """
         return self._prior_id_map[prior_id]
 
     def name_for_prior(self, prior):
+        """Get the underscore-separated name for a prior in this model.
+
+        Searches child prior models recursively. Returns None if the prior
+        is not found.
+
+        Parameters
+        ----------
+        prior : Prior
+            The prior to find.
+
+        Returns
+        -------
+        str or None
+            The name path joined by underscores, e.g. ``"galaxy_centre"``.
+        """
         for prior_model_name, prior_model in self.direct_prior_model_tuples:
             prior_name = prior_model.name_for_prior(prior)
             if prior_name is not None:
@@ -1525,6 +1619,11 @@ class AbstractPriorModel(AbstractModel):
 
     @property
     def path_priors_tuples(self) -> List[Tuple[Path, Prior]]:
+        """All (path, prior) tuples in this model, sorted by prior id.
+
+        Unlike ``unique_path_prior_tuples``, this includes duplicate entries
+        when a prior appears at multiple paths (shared priors).
+        """
         path_priors_tuples = self.path_instance_tuples_for_class(Prior)
         return sorted(path_priors_tuples, key=lambda item: item[1].id)
 
@@ -1546,6 +1645,10 @@ class AbstractPriorModel(AbstractModel):
 
     @property
     def composition(self):
+        """A list of dot-separated path strings for each prior, ordered by prior id.
+
+        For example: ``["galaxy.centre", "galaxy.normalization", "galaxy.sigma"]``.
+        """
         return [".".join(path) for path in self.paths]
 
     def sort_priors_alphabetically(self, priors: Iterable[Prior]) -> List[Prior]:
@@ -1617,14 +1720,20 @@ class AbstractPriorModel(AbstractModel):
 
     @property
     def path_float_tuples(self):
+        """(path, float) tuples for all fixed float values, excluding Prior objects."""
         return self.path_instance_tuples_for_class(float, ignore_class=Prior)
 
     @property
     def unique_prior_paths(self):
+        """Paths to each unique prior (deduplicated for shared priors), ordered by id."""
         return [item[0] for item in self.unique_path_prior_tuples]
 
     @property
     def unique_path_prior_tuples(self):
+        """(path, prior) tuples deduplicated by prior identity, ordered by id.
+
+        When a prior is shared across multiple paths, only one path is kept.
+        """
         unique = {item[1]: item for item in self.path_priors_tuples}.values()
         return sorted(unique, key=lambda item: item[1].id)
 
@@ -1645,6 +1754,18 @@ class AbstractPriorModel(AbstractModel):
         }
 
     def log_prior_list_from(self, parameter_lists: List[List]) -> List:
+        """Compute the total log prior for each parameter vector in a list.
+
+        Parameters
+        ----------
+        parameter_lists
+            A list of physical parameter vectors.
+
+        Returns
+        -------
+        list
+            The summed log prior for each vector.
+        """
         return [
             sum(self.log_prior_list_from_vector(vector=vector))
             for vector in parameter_lists
@@ -1809,6 +1930,7 @@ class AbstractPriorModel(AbstractModel):
 
     @property
     def joined_paths(self) -> List[str]:
+        """Dot-joined path strings for each unique prior, ordered by id."""
         prior_paths = self.unique_prior_paths
 
         return [".".join(path) for path in prior_paths]

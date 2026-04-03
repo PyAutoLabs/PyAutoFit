@@ -64,10 +64,18 @@ class UniformPrior(Prior):
         )
 
     def tree_flatten(self):
+        """Flatten this prior into a JAX-compatible PyTree representation.
+
+        Returns
+        -------
+        tuple
+            A (children, aux_data) pair where children are (lower_limit, upper_limit, id).
+        """
         return (self.lower_limit, self.upper_limit, self.id), ()
 
     @property
     def width(self):
+        """The width of the uniform distribution (upper_limit - lower_limit)."""
         return self.upper_limit - self.lower_limit
 
     def with_limits(
@@ -75,12 +83,31 @@ class UniformPrior(Prior):
         lower_limit: float,
         upper_limit: float,
     ) -> "Prior":
+        """Create a new UniformPrior with different bounds.
+
+        Parameters
+        ----------
+        lower_limit
+            The new lower bound.
+        upper_limit
+            The new upper bound.
+        """
         return UniformPrior(
             lower_limit=lower_limit,
             upper_limit=upper_limit,
         )
 
     def logpdf(self, x):
+        """Compute the log probability density at x.
+
+        Adjusts boundary values by epsilon to avoid evaluating exactly at
+        the distribution edges where the PDF is undefined.
+
+        Parameters
+        ----------
+        x
+            The value at which to evaluate the log PDF.
+        """
         # TODO: handle x as a numpy array
         if x == self.lower_limit:
             x += epsilon
@@ -102,6 +129,7 @@ class UniformPrior(Prior):
 
     @property
     def parameter_string(self) -> str:
+        """A human-readable string summarizing the prior's lower and upper limits."""
         return f"lower_limit = {self.lower_limit}, upper_limit = {self.upper_limit}"
 
     def value_for(self, unit: float) -> float:
@@ -142,4 +170,5 @@ class UniformPrior(Prior):
 
     @property
     def limits(self) -> Tuple[float, float]:
+        """The (lower_limit, upper_limit) bounds of this uniform prior."""
         return self.lower_limit, self.upper_limit
