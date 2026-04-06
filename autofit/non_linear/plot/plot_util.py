@@ -1,9 +1,11 @@
-import os
 import logging
+import os
 from functools import wraps
 from pathlib import Path
 
 import numpy as np
+
+from autofit.non_linear.test_mode import is_test_mode
 
 logger = logging.getLogger(__name__)
 
@@ -11,7 +13,7 @@ logger = logging.getLogger(__name__)
 def skip_in_test_mode(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
-        if os.environ.get("PYAUTOFIT_TEST_MODE") == "1":
+        if is_test_mode():
             return
         return func(*args, **kwargs)
 

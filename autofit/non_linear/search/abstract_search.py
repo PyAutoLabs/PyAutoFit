@@ -49,6 +49,7 @@ from autofit.graphical.declarative.abstract import PriorFactor
 from autofit.graphical.expectation_propagation import AbstractFactorOptimiser
 
 from autofit.non_linear.fitness import get_timeout_seconds
+from autofit.non_linear.test_mode import is_test_mode, test_mode_level
 
 logger = logging.getLogger(__name__)
 
@@ -650,6 +651,14 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         ):
             self.timer.start()
 
+        mode = test_mode_level()
+        if mode >= 2:
+            return self._fit_bypass_test_mode(
+                model=model,
+                analysis=analysis,
+                call_likelihood=(mode == 2),
+            )
+
         model.freeze()
         search_internal, fitness = self._fit(
             model=model,
@@ -770,13 +779,124 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         if not conf.instance["output"]["search_internal"]:
             self.logger.info("Removing search internal folder.")
             self.paths.remove_search_internal()
-        else:
+        elif search_internal is not None:
             self.output_search_internal(search_internal=search_internal)
 
         if not self.disable_output:
             self.logger.info("Removing all files except for .zip file")
 
         self.paths.zip_remove()
+
+    def _fit_bypass_test_mode(
+        self,
+        model: AbstractPriorModel,
+        analysis: Analysis,
+        call_likelihood: bool = True,
+    ):
+        """
+        Bypass the sampler entirely in test mode (levels 2 and 3).
+
+        Generates fake samples and writes all expected output files so that
+        downstream code sees a complete result folder.
+
+        Parameters
+        ----------
+        model
+            The model being fitted.
+        analysis
+            The analysis object with the log likelihood function.
+        call_likelihood
+            If True (mode 2), call the likelihood function once to verify it
+            works. If False (mode 3), skip the likelihood call entirely.
+        """
+        from autofit.non_linear.samples.pdf import SamplesPDF
+        from autofit.non_linear.samples.sample import Sample
+
+        mode = test_mode_level()
+        if mode == 2:
+            logger.warning(
+                "TEST MODE 2 (bypass + likelihood): Skipping sampler, "
+                "calling likelihood function once to verify it works."
+            )
+        else:
+            logger.warning(
+                "TEST MODE 3 (full bypass): Skipping sampler and likelihood "
+                "entirely for maximum speed. No likelihood verification."
+            )
+
+        model.freeze()
+
+        unit_vector = [0.5] * model.prior_count
+        parameter_vector = [
+            float(v) for v in model.vector_from_unit_vector(
+                unit_vector=unit_vector,
+            )
+        ]
+
+        log_likelihood = -1.0e99
+        if call_likelihood:
+            instance = model.instance_from_vector(vector=parameter_vector)
+            log_likelihood = float(
+                analysis.log_likelihood_function(instance)
+            )
+
+        sample_list = self._build_fake_samples(
+            model=model,
+            parameter_vector=parameter_vector,
+            log_likelihood=log_likelihood,
+        )
+
+        samples = SamplesPDF(
+            model=model,
+            sample_list=sample_list,
+            samples_info={
+                "total_iterations": 1,
+                "time": 0.0,
+            },
+        )
+
+        samples_summary = samples.summary()
+        self.paths.save_samples_summary(samples_summary=samples_summary)
+        self.paths.save_samples(samples=samples)
+
+        result = analysis.make_result(
+            samples_summary=samples_summary,
+            paths=self.paths,
+            samples=samples,
+            search_internal=None,
+        )
+
+        analysis.save_results(paths=self.paths, result=result)
+        analysis.save_results_combined(paths=self.paths, result=result)
+
+        model.unfreeze()
+
+        self.paths.completed()
+
+        return result
+
+    @staticmethod
+    def _build_fake_samples(model, parameter_vector, log_likelihood):
+        """
+        Build a minimal list of fake Sample objects for test mode bypass.
+
+        Creates two samples: the "best" at the prior median and a second
+        with slightly perturbed parameters and worse likelihood, so that
+        SamplesPDF methods like median_pdf work correctly.
+        """
+        from autofit.non_linear.samples.sample import Sample
+
+        perturbed = [
+            p * 1.001 if p != 0.0 else 0.001 for p in parameter_vector
+        ]
+
+        return Sample.from_lists(
+            model=model,
+            parameter_lists=[parameter_vector, perturbed],
+            log_likelihood_list=[log_likelihood, log_likelihood - 1.0],
+            log_prior_list=[0.0, 0.0],
+            weight_list=[1.0, 0.5],
+        )
 
     @abstractmethod
     def _fit(self, model: AbstractPriorModel, analysis: Analysis):
@@ -815,8 +935,11 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             except KeyError:
                 pass
 
-        if os.environ.get("PYAUTOFIT_TEST_MODE") == "1":
-            logger.warning(f"TEST MODE ON: SEARCH WILL SKIP SAMPLING\n\n")
+        if is_test_mode():
+            logger.warning(
+                "TEST MODE 1 (reduced iterations): Sampler will run with "
+                "minimal iterations for faster completion."
+            )
 
             config_dict = self.config_dict_test_mode_from(config_dict=config_dict)
 
