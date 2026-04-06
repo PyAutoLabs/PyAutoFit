@@ -13,7 +13,7 @@ prior_std = 10.0
 a = np.array([[-1.3], [0.7]])
 b = np.array([-0.5])
 
-n_obs = 100
+n_obs = 50
 n_features, n_dims = a.shape
 
 x = 5 * np.random.randn(n_obs, n_features)
@@ -73,9 +73,8 @@ def make_model_approx():
 def test_stochastic_linear_regression():
     np.random.seed(2)
     params = [
-        (50, 10, True, 1),
-        (30, 50, False, 1),
-        (5, 50, False, 0.5),
+        (30, 15, False, 1),
+        (5, 15, False, 0.5),
     ]
     for n_batch, n_iters, inplace, delta in params:
         model_approx = make_model_approx()

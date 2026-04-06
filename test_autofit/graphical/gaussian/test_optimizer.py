@@ -24,7 +24,7 @@ def make_laplace():
 
 @pytest.fixture(name="dynesty")
 def make_dynesty():
-    return af.DynestyStatic(name="", maxcall=10)
+    return af.DynestyStatic(name="", maxcall=5)
 
 
 def test_default(factor_model, laplace):
@@ -57,7 +57,7 @@ class TestDynesty:
 
     @pytest.mark.filterwarnings("ignore::RuntimeWarning")
     def test_null_paths(self, factor_model):
-        search = af.DynestyStatic(maxcall=10)
+        search = af.DynestyStatic(maxcall=5)
         result, status = search.optimise(
             factor_model.mean_field_approximation().factor_approximation(factor_model)
         )

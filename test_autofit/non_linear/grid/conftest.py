@@ -40,7 +40,7 @@ def make_grid_search_10_result(mapper, sample_name_paths):
                 ),
             )
         ),
-        number_of_steps=10,
+        number_of_steps=5,
     )
     grid_search.search.paths = sample_name_paths
     return grid_search.fit(

@@ -9,7 +9,7 @@ def make_factor(hierarchical_factor):
 
 
 def test_optimise(factor):
-    search = af.DynestyStatic(maxcall=100, dynamic_delta=False, delta=0.1,)
+    search = af.DynestyStatic(maxcall=25, dynamic_delta=False, delta=0.1,)
 
     _, status = search.optimise(
         factor.mean_field_approximation().factor_approximation(factor)

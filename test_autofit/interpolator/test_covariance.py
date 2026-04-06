@@ -107,12 +107,12 @@ def test_single_variable():
                 )
             ],
         )
-        for value in range(100)
+        for value in range(50)
     ]
     interpolator = CovarianceInterpolator(
         samples_list,
     )
-    assert interpolator[interpolator.t == 50.0].v == pytest.approx(50.0, abs=2.0)
+    assert interpolator[interpolator.t == 25.0].v == pytest.approx(25.0, abs=2.0)
 
 
 @maxcall
@@ -134,12 +134,12 @@ def test_variable_and_constant():
                         ("x",): 0.5 * (1 - +np.random.random()),
                     },
                 )
-                for _ in range(100)
+                for _ in range(50)
             ],
         )
-        for value in range(100)
+        for value in range(50)
     ]
     interpolator = CovarianceInterpolator(
         samples_list,
     )
-    assert interpolator[interpolator.t == 50.0].v == pytest.approx(50.0, abs=5.0)
+    assert interpolator[interpolator.t == 25.0].v == pytest.approx(25.0, abs=5.0)

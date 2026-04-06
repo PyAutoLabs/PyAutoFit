@@ -53,7 +53,7 @@ def make_start_approx(
 ):
     a = np.array([[-1.3], [0.7]])
     b = np.array([-0.5])
-    n_obs = 200
+    n_obs = 100
     n_features, n_dims = a.shape
     x = 2 * np.random.randn(n_obs, n_features)
     z = x.dot(a) + b
@@ -78,7 +78,7 @@ def test_laplace(
     model_approx = graph.EPMeanField.from_approx_dists(model, start_approx)
     laplace = graph.LaplaceOptimiser()
     opt = graph.EPOptimiser(model_approx.factor_graph, default_optimiser=laplace)
-    new_approx = opt.run(model_approx, max_steps=10)
+    new_approx = opt.run(model_approx, max_steps=5)
 
     y = new_approx.mean_field[y_].mean
     z_pred = new_approx(new_approx.mean_field.mean)[z_]

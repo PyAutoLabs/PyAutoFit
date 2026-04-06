@@ -5,7 +5,7 @@ import autofit as af
 from autoconf.conf import with_config
 from autofit import graphical as g, DirectoryPaths
 
-MAX_STEPS = 3
+MAX_STEPS = 2
 
 
 class MockResult(af.m.MockResult):

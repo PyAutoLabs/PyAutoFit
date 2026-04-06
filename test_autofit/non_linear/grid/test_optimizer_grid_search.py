@@ -193,9 +193,9 @@ class TestGridNLOBehaviour:
         assert result.no_dimensions == 2
 
     def test_results_10(self, grid_search_10_result):
-        assert len(grid_search_10_result.samples) == 100
+        assert len(grid_search_10_result.samples) == 25
         assert grid_search_10_result.no_dimensions == 2
-        assert grid_search_10_result.log_likelihoods().native.shape == (10, 10)
+        assert grid_search_10_result.log_likelihoods().native.shape == (5, 5)
 
     def test_passes_attributes(self):
         search = af.DynestyStatic()

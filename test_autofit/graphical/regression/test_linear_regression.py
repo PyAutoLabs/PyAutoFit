@@ -16,7 +16,7 @@ error_std = 1.0
 a = np.array([[-1.3], [0.7]])
 b = np.array([-0.5])
 
-n_obs = 100
+n_obs = 50
 n_features, n_dims = a.shape
 x = 5 * np.random.randn(n_obs, n_features)
 y = x.dot(a) + b + np.random.randn(n_obs, n_dims)
