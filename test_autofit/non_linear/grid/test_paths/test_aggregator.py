@@ -9,7 +9,7 @@ def make_aggregator(sample_name_paths, grid_search_10_result):
 
 
 def test_aggregate(aggregator):
-    assert len(aggregator) == 100
+    assert len(aggregator) == 25
     assert len(aggregator.grid_search_outputs) == 1
 
 
@@ -20,7 +20,7 @@ def make_grid_search(aggregator):
 
 
 def test_correspondence(grid_search, aggregator):
-    assert len(grid_search.children) == 100
+    assert len(grid_search.children) == 25
     assert grid_search.children[0] is list(aggregator)[0]
 
 

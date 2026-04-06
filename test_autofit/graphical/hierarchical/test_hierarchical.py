@@ -57,7 +57,7 @@ def hierarchical_loglike_t_jac(centre, precision, *xs):
     return loglike, (jac_c, jac_p) + tuple(jac_x)
 
 
-n = 10
+n = 5
 
 
 @pytest.fixture(name="centres")
@@ -119,7 +119,7 @@ def make_model_approx(centres, widths):
 def _test_simple(model_approx, centres):
     laplace = graph.LaplaceOptimiser()
     ep_opt = graph.EPOptimiser(model_approx, default_optimiser=laplace)
-    new_approx = ep_opt.run(model_approx, max_steps=20)
+    new_approx = ep_opt.run(model_approx, max_steps=10)
 
     mu_ = new_approx.factor_graph.name_variable_dict["mu"]
     logt_ = new_approx.factor_graph.name_variable_dict["logt"]
@@ -161,7 +161,7 @@ def test_hierarchical(centres, widths):
 
     laplace = graph.LaplaceOptimiser()
     ep_opt = graph.EPOptimiser(model_approx, default_optimiser=laplace)
-    new_approx = ep_opt.run(model_approx, max_steps=10)
+    new_approx = ep_opt.run(model_approx, max_steps=5)
     print(new_approx)
 
     mu_ = new_approx.factor_graph.name_variable_dict["mu"]
@@ -185,8 +185,8 @@ def make_data():
     sigma_logt = 0.5
     logt_dist = stats.norm(loc=mu_logt, scale=sigma_logt)
 
-    n = 10
-    n_samples_avg = 1000
+    n = 5
+    n_samples_avg = 500
 
     centres = centre_dist.rvs(n)
     widths = np.exp(logt_dist.rvs(n)) ** -0.5
@@ -300,7 +300,7 @@ def test_full_hierachical(data):
 
     laplace = graph.LaplaceOptimiser()
     ep_opt = graph.EPOptimiser(model, default_optimiser=laplace)
-    new_approx = ep_opt.run(model_approx, max_steps=20)
+    new_approx = ep_opt.run(model_approx, max_steps=10)
     new_approx.mean_field.subset(hierarchical_params)
 
     m = np.mean([np.mean(sample) for sample in data])

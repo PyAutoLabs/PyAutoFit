@@ -96,15 +96,17 @@ class AbstractJacobian(VariableLinearOperator):
         return f"{cls_name}({out_var} → ∂({in_var})ᵀ {out_var})"
 
     def grad(self, values=None):
-        grad = VariableData({FactorValue: 1.0})
+        seed = VariableData({FactorValue: 1.0})
         if values:
-            grad.update(values)
+            seed.update(values)
 
-        jac = self(grad)
+        jac = self(seed)
+
+        grad = VariableData(values) if values else VariableData()
         for v, g in jac.items():
-            grad[v] = grad.get(v, 0) + g
+            if v is not FactorValue:
+                grad[v] = grad.get(v, 0) + g
 
-        grad.pop(FactorValue)
         return grad
 
 
