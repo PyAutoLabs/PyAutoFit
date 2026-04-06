@@ -456,7 +456,8 @@ class Fitness:
         """
         import numpy as np
 
-        if os.environ.get("PYAUTOFIT_TEST_MODE") == "1":
+        from autofit.non_linear.test_mode import is_test_mode
+        if is_test_mode():
             return
 
         if not conf.instance["general"]["test"]["check_likelihood_function"]:

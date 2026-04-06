@@ -13,6 +13,7 @@ from autofit.non_linear.initializer import Initializer
 from autofit.non_linear.search.mcmc.abstract_mcmc import AbstractMCMC
 from autofit.non_linear.search.mcmc.auto_correlations import AutoCorrelationsSettings
 from autofit.non_linear.search.mcmc.auto_correlations import AutoCorrelations
+from autofit.non_linear.test_mode import is_test_mode
 from autofit.non_linear.samples.sample import Sample
 from autofit.non_linear.samples.mcmc import SamplesMCMC
 
@@ -266,7 +267,7 @@ class Emcee(AbstractMCMC):
 
         search_internal = search_internal or self.backend
 
-        if os.environ.get("PYAUTOFIT_TEST_MODE") == "1":
+        if is_test_mode():
             samples_after_burn_in = search_internal.get_chain(
                 discard=5, thin=5, flat=True
             )

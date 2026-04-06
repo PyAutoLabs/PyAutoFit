@@ -8,6 +8,7 @@ from typing import Dict, Tuple, List, Optional
 import numpy as np
 
 from autofit import exc
+from autofit.non_linear.test_mode import is_test_mode
 from autofit.non_linear.paths.abstract import AbstractPaths
 from autofit.mapper.prior.abstract import Prior
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
@@ -61,7 +62,7 @@ class AbstractInitializer(ABC):
             of free dimensions of the model.
         """
 
-        if os.environ.get("PYAUTOFIT_TEST_MODE") == "1" and test_mode_samples:
+        if is_test_mode() and test_mode_samples:
             return self.samples_in_test_mode(total_points=total_points, model=model)
 
         if n_cores == 1:
@@ -219,7 +220,8 @@ class AbstractInitializer(ABC):
         """
 
         logger.warning(
-            f"TEST MODE ON: SAMPLES BEING ASSIGNED ABRITRARY LARGE LIKELIHOODS"
+            "TEST MODE 1 (reduced iterations): Initial samples assigned "
+            "arbitrary large likelihoods to accelerate sampler convergence."
         )
 
         unit_parameter_lists = []

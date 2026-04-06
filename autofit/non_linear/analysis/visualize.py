@@ -6,6 +6,7 @@ from autofit.non_linear.paths.abstract import AbstractPaths
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.paths.database import DatabasePaths
 from autofit.non_linear.paths.null import NullPaths
+from autofit.non_linear.test_mode import is_test_mode
 
 class Visualizer:
 
@@ -40,7 +41,7 @@ class Visualizer:
         A bool determining whether visualization should be performed or not.
         """
 
-        if os.environ.get("PYAUTOFIT_TEST_MODE") == "1":
+        if is_test_mode():
             return False
 
         if isinstance(paths, DatabasePaths) or isinstance(paths, NullPaths):
