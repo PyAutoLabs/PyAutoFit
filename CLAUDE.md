@@ -6,6 +6,13 @@
 - Requires Python >= 3.9
 - Package name: `autofit`
 
+## Dependency Graph
+
+PyAutoFit depends on **autoconf** (shared configuration and utilities).
+PyAutoFit does **NOT** depend on PyAutoArray, PyAutoGalaxy, or PyAutoLens.
+Never import from `autoarray`, `autogalaxy`, or `autolens` in this repo.
+Shared utilities (e.g. `test_mode`, `jax_wrapper`) belong in autoconf.
+
 ## Repository Structure
 
 - `autofit/` - Main package
