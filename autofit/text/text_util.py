@@ -55,6 +55,11 @@ def result_info_from(samples) -> str:
     Output the full model.results file, which include the most-likely model, most-probable model at 1 and 3
     sigma confidence and information on the maximum log likelihood.
     """
+    from autofit.non_linear.test_mode import test_mode_level
+
+    if test_mode_level() >= 2:
+        return "[test mode — result info skipped]"
+
     results = []
 
     if hasattr(samples, "log_evidence"):

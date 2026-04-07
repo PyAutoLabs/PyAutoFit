@@ -35,6 +35,9 @@ class Analysis(ABC):
     def __init__(
         self, use_jax : bool = False, **kwargs
     ):
+        import os
+        if os.environ.get("PYAUTO_DISABLE_JAX") == "1":
+            use_jax = False
 
         self._use_jax = use_jax
         self.kwargs = kwargs
@@ -325,6 +328,11 @@ class Analysis(ABC):
         batch_size
             The batch size to profile, which is the number of model evaluations JAX will perform simultaneously.
         """
+        from autofit.non_linear.test_mode import test_mode_level
+
+        if test_mode_level() >= 2:
+            return
+
         if not self._use_jax:
             print("use_jax=False for this analysis, therefore does not use GPU and VRAM use cannot be profiled.")
             return

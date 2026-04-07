@@ -1778,6 +1778,10 @@ class AbstractPriorModel(AbstractModel):
         parameter of the overall model.
         This information is extracted from each priors *model_info* property.
         """
+        from autofit.non_linear.test_mode import test_mode_level
+
+        if test_mode_level() >= 2:
+            return f"Total Free Parameters = {self.prior_count}\n\n[test mode — info skipped]"
 
         formatter = TextFormatter(line_length=info_whitespace())
 

@@ -497,11 +497,13 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         analysis = analysis.modify_before_fit(paths=self.paths, model=model)
         model.unfreeze()
 
-        self.pre_fit_output(
-            analysis=analysis,
-            model=model,
-            info=info,
-        )
+        mode = test_mode_level()
+        if mode < 2:
+            self.pre_fit_output(
+                analysis=analysis,
+                model=model,
+                info=info,
+            )
 
         if not self.paths.is_complete:
             result = self.start_resume_fit(
@@ -514,13 +516,14 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
                 model=model,
             )
 
-        analysis = analysis.modify_after_fit(
-            paths=self.paths, model=model, result=result
-        )
+        if mode < 2:
+            analysis = analysis.modify_after_fit(
+                paths=self.paths, model=model, result=result
+            )
 
-        self.post_fit_output(
-            search_internal=result.search_internal,
-        )
+            self.post_fit_output(
+                search_internal=result.search_internal,
+            )
 
         gc.collect()
 
@@ -856,8 +859,6 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         )
 
         samples_summary = samples.summary()
-        self.paths.save_samples_summary(samples_summary=samples_summary)
-        self.paths.save_samples(samples=samples)
 
         result = analysis.make_result(
             samples_summary=samples_summary,
@@ -866,12 +867,7 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             search_internal=None,
         )
 
-        analysis.save_results(paths=self.paths, result=result)
-        analysis.save_results_combined(paths=self.paths, result=result)
-
         model.unfreeze()
-
-        self.paths.completed()
 
         return result
 
