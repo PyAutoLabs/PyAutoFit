@@ -1,5 +1,4 @@
 import numpy as np
-from scipy.stats import norm
 
 from autofit.mapper.prior.gaussian import GaussianPrior
 from autofit.mapper.prior.truncated_gaussian import TruncatedGaussianPrior
@@ -97,6 +96,8 @@ class PriorVectorized:
                         uppers - self.truncated_gaussian_means
                 ) / self.truncated_gaussian_sigmas
 
+            from scipy.stats import norm
+
             self.truncated_gaussian_cdf_a = norm.cdf(a)
             self.truncated_gaussian_cdf_b = norm.cdf(b)
 
@@ -153,6 +154,8 @@ class PriorVectorized:
 
         # 3) Batch‐process all GaussianPriors
         if self.gaussian_idx:
+            from scipy.stats import norm
+
             subcube = cube[:, self.gaussian_idx]  # (n_samples, n_gaussians)
 
             inv = norm.ppf(subcube)  # inverse CDF of standard normal
@@ -162,6 +165,8 @@ class PriorVectorized:
         if self.truncated_gaussian_idx:
 
             subcube = cube[:, self.truncated_gaussian_idx]  # (n_samples, n_truncs)
+
+            from scipy.stats import norm
 
             truncated_cdf = self.truncated_gaussian_cdf_a + subcube * (
                     self.truncated_gaussian_cdf_b - self.truncated_gaussian_cdf_a
