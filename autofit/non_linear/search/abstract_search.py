@@ -504,6 +504,9 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
                 model=model,
                 info=info,
             )
+        else:
+            if hasattr(self.paths, '_save_model_info'):
+                self.paths._save_model_info(model=model)
 
         if not self.paths.is_complete:
             result = self.start_resume_fit(
