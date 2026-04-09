@@ -105,7 +105,7 @@ The interpolate at the end of the fits uses the maximum log likelihood model of 
         __Search__
 
         The model is fitted to the data using the nested sampling algorithm
-        Dynesty (https://johannesbuchner.github.io/UltraNest/readme.html).
+        Dynesty (https://dynesty.readthedocs.io/en/latest/).
         """
         search = af.DynestyStatic(
             path_prefix=path.join("interpolate"),

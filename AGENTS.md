@@ -24,7 +24,7 @@ NUMBA_CACHE_DIR=/tmp/numba_cache MPLCONFIGDIR=/tmp/matplotlib python -m pytest t
 
 ## Key Architecture
 
-- **Non-linear searches** (`non_linear/search/`): MCMC (emcee), nested sampling (dynesty, nautilus), MLE (LBFGS, pyswarms)
+- **Non-linear searches** (`non_linear/search/`): MCMC (emcee), nested sampling (dynesty, nautilus), MLE (LBFGS, BFGS, drawer)
 - **Model composition** (`mapper/`): `af.Model`, `af.Collection`, prior distributions
 - **Analysis** (`non_linear/analysis/`): base `af.Analysis` class with `log_likelihood_function`
 - **Aggregator** (`aggregator/`): results aggregation across runs

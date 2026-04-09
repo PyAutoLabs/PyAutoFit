@@ -34,7 +34,7 @@ dependencies = [
     "gprof2dot==2021.2.21",
     "matplotlib",
     "numpydoc>=1.0.0",
-    "pyswarms==1.3.0",
+
     "h5py>=3.11.0",
     "SQLAlchemy==2.0.32",
     "scipy<=1.14.0",
@@ -66,7 +66,7 @@ optional=[
     "astropy>=5.0",
     "getdist==1.4",
     "nautilus-sampler==1.0.5",
-    "ultranest==4.3.2",
+
     "zeus-mcmc==2.5.4",
 ]
 docs=[

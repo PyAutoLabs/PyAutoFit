@@ -26,7 +26,6 @@ Nested Samplers
 
    DynestyDynamic
    DynestyStatic
-   UltraNest
 
 MCMC
 ----
@@ -53,8 +52,6 @@ Maximum Likelihood Estimators
 
    BFGS
    LBFGS
-   PySwarmsLocal
-   PySwarmsGlobal
 
 There are also a number of tools which are used to customize the behaviour of non-linear searches in **PyAutoFit**,
 including directory output structure, parameter sample initialization and MCMC auto correlation analysis.

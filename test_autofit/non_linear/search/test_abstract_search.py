@@ -80,6 +80,38 @@ class TestResult:
             )
 
 
+class TestSearchConfig:
+    def test__config_dict_search_accessible(self):
+        search = af.DynestyStatic(nlive=100)
+        assert search.config_dict_search["nlive"] == 100
+
+    def test__config_dict_run_accessible(self):
+        search = af.DynestyStatic(dlogz=0.5)
+        assert search.config_dict_run["dlogz"] == 0.5
+
+    def test__unique_tag(self):
+        search = af.DynestyStatic(unique_tag="my_tag")
+        assert search.unique_tag == "my_tag"
+
+    def test__path_prefix_and_name(self):
+        from pathlib import Path
+
+        search = af.DynestyStatic(
+            path_prefix="prefix",
+            name="my_search",
+        )
+        assert search.path_prefix == Path("prefix")
+        assert search.name == "my_search"
+
+    def test__identifier_fields_differ_across_searches(self):
+        emcee = af.Emcee()
+        dynesty = af.DynestyStatic()
+
+        assert emcee.__identifier_fields__ != dynesty.__identifier_fields__
+        assert "nwalkers" in emcee.__identifier_fields__
+        assert "nlive" in dynesty.__identifier_fields__
+
+
 class TestLabels:
     def test_param_names(self):
         model = af.Model(af.m.MockClassx4)

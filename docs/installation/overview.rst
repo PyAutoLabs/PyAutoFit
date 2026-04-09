@@ -34,8 +34,6 @@ Dependencies
 
 **emcee** https://github.com/dfm/emcee
 
-**PySwarms** https://github.com/ljvmiranda921/pyswarms
-
 **astropy** https://www.astropy.org/
 
 **corner.py** https://github.com/dfm/corner.py
