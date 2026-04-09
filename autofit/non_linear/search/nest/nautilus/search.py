@@ -47,8 +47,8 @@ class Nautilus(abstract_nest.AbstractNest):
         """
         A Nautilus non-linear search.
 
-        Nautilus is an optional requirement and must be installed manually via the command `pip install ultranest`.
-        It is optional as it has certain dependencies which are generally straight forward to install (e.g. Cython).
+        Nautilus is an optional requirement and must be installed manually via the command `pip install nautilus-sampler`.
+        It is optional as it has certain dependencies which are generally straight forward to install.
 
         For a full description of Nautilus checkout its Github and documentation webpages:
 
@@ -451,7 +451,7 @@ class Nautilus(abstract_nest.AbstractNest):
         self, model: AbstractPriorModel, search_internal=None
     ):
         """
-        Returns a `Samples` object from the ultranest internal results.
+        Returns a `Samples` object from the nautilus internal results.
 
         The samples contain all information on the parameter space sampling (e.g. the parameters,
         log likelihoods, etc.).

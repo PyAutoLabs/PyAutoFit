@@ -12,15 +12,6 @@ plots_search:
     likelihood_series: false  # Whether to output the Emcee likelihood series figure during a non-linear search fit.
     time_series: false        # Whether to output the Emcee time series figure during a non-linear search fit.
     trajectories: false       # Whether to output the Emcee trajectories figure during a non-linear search fit.
-  pyswarms:
-    contour: false            # Whether to output the PySwarms contour figure during a non-linear search fit.
-    cost_history: false       # Whether to output the PySwarms cost_history figure during a non-linear search fit.
-    time_series: false        # Whether to output the PySwarms time_series figure during a non-linear search fit.
-    trajectories: false       # Whether to output the PySwarms trajectories figure during a non-linear search fit.
-  ultranest:
-    corner: false         # Whether to output the Ultranest corner figure during a non-linear search fit.
-    runplot: false            # Whether to output the Ultranest runplot figure during a non-linear search fit.
-    traceplot: false          # Whether to output the Ultranest traceplot figure during a non-linear search fit.
   zeus:
     corner: false             # Whether to output the Zeus corner figure during a non-linear search fit.
     likelihood_series: false  # Whether to output the Zeus likelihood series figure during a non-linear search fit.

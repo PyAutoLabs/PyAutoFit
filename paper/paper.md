@@ -71,7 +71,7 @@ define the model and associated parameters in an expressive way that is tied to 
 model fit then requires that a `PyAutoFit` `Analysis` class is written, which combines the data, model and likelihood 
 function and defines how the model-fit is performed using a `NonLinearSearch`. The `NonLinearSearch`
 procedure is defined using an external inference library such as `dynesty` [@dynesty], `emcee` [@emcee]
-or `PySwarms` [@pyswarms]. 
+or `scipy` [@scipy]. 
 
 The `Analysis` class provides a model specific interface between `PyAutoFit` and the modeling software, allowing it 
 to handle the 'heavy lifting' that comes with writing model-fitting software. This includes interfacing with the 
@@ -145,7 +145,7 @@ taken without a local `PyAutoFit` installation.
 - `matplotlib` https://github.com/matplotlib/matplotlib [@matplotlib]
 - `NumPy` https://github.com/numpy/numpy [@numpy]
 - `PyMultiNest` https://github.com/JohannesBuchner/PyMultiNest [@multinest] [@pymultinest]
-- `PySwarms` https://github.com/ljvmiranda921/pyswarms [@pyswarms]
+
 - `Scipy` https://github.com/scipy/scipy [@scipy]
 
 # Related Probabilistic Programming Languages

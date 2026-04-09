@@ -15,9 +15,9 @@ This work uses the following software packages:
 - `NumPy` https://github.com/numpy/numpy [@numpy]
 - `PyAutoFit` https://github.com/rhayes777/PyAutoFit [@pyautofit]
 - `PyMultiNest` https://github.com/JohannesBuchner/PyMultiNest [@multinest] [@pymultinest]
-- `PySwarms` https://github.com/ljvmiranda921/pyswarms [@pyswarms]
+
 - `Python` https://www.python.org/ [@python]
 - `Scipy` https://github.com/scipy/scipy [@scipy]
 - `SQLite` https://www.sqlite.org/index.html [@sqlite]
-- `UltraNest` https://github.com/JohannesBuchner/UltraNest [@ultranest]
+
 - `Zeus` https://github.com/minaskar/zeus [@zeus1] [@zeus2]

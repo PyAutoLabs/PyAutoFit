@@ -2,7 +2,6 @@
 
 # - Dynesty: https://github.com/joshspeagle/dynesty / https://dynesty.readthedocs.io/en/latest/index.html
 # - Nautilus https://https://github.com/johannesulf/nautilus / https://nautilus-sampler.readthedocs.io/en/stable/index.html
-# - UltraNest: https://github.com/JohannesBuchner/UltraNest / https://johannesbuchner.github.io/UltraNest/readme.html
 
 # Settings in the [search] and [run] entries are specific to each nested algorithm and should be determined by
 # consulting that MCMC method's own readthedocs.
@@ -85,49 +84,5 @@ Nautilus:
   parallel:
     number_of_cores: 1              # The number of cores the search is parallelized over by default, using Python multiprocessing.
     force_x1_cpu: false             # Force Dynesty to not use Python multiprocessing Pool, which can fix issues on certain operating systems.
-  printing:
-    silence: false                  # If True, the default print output of the non-linear search is silenced and not printed by the Python interpreter.
-UltraNest:
-  search:
-    draw_multiple: true
-    ndraw_max: 65536
-    ndraw_min: 128
-    num_bootstraps: 30
-    num_test_samples: 2
-    resume: true
-    run_num: null
-    storage_backend: hdf5
-    vectorized: false
-    warmstart_max_tau: -1.0
-  run:
-    cluster_num_live_points: 40
-    dkl: 0.5
-    dlogz: 0.5
-    frac_remain: 0.01
-    insertion_test_window: 10
-    insertion_test_zscore_threshold: 2
-    lepsilon: 0.001
-    log_interval: null
-    max_iters: null
-    max_ncalls: null
-    max_num_improvement_loops: -1.0
-    min_ess: 400
-    min_num_live_points: 400
-    show_status: true
-    update_interval_ncall: null
-    update_interval_volume_fraction: 0.8
-    viz_callback: auto
-  stepsampler:
-    adaptive_nsteps: false
-    log: false
-    max_nsteps: 1000
-    nsteps: 25
-    region_filter: false
-    scale: 1.0
-    stepsampler_cls: null
-  initialize:                       # The method used to generate where walkers are initialized in parameter space {prior}.
-    method: prior                   # priors: samples are initialized by randomly drawing from each parameter's prior.
-  parallel:
-    number_of_cores: 1              # The number of cores the search is parallelized over by default, using Python multiprocessing.
   printing:
     silence: false                  # If True, the default print output of the non-linear search is silenced and not printed by the Python interpreter.

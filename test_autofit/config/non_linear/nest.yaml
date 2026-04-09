@@ -25,6 +25,32 @@ DynestyDynamic:
     slices: 6
     update_interval: 2.0
     walks: 26
+Nautilus:
+  search:
+    n_live: 200
+    n_update: null
+    enlarge_per_dim: 1.2
+    n_points_min: null
+    split_threshold: 50
+    n_networks: 2
+    n_batch: 50
+    n_like_new_bound: null
+    vectorized: false
+    seed: null
+  run:
+    f_live: 0.02
+    n_shell: 1
+    n_eff: 250
+    n_like_max: .inf
+    discard_exploration: false
+    verbose: false
+  initialize:
+    method: prior
+  parallel:
+    number_of_cores: 2
+    force_x1_cpu: false
+  printing:
+    silence: false
 DynestyStatic:
   initialize:
     method: prior

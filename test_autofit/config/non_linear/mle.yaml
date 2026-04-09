@@ -26,39 +26,3 @@ LBFGS:
     silence: false
   search:
     tol: null
-PySwarmsGlobal:
-  initialize:
-    ball_lower_limit: 0.49
-    ball_upper_limit: 0.51
-    method: prior
-  parallel:
-    number_of_cores: 1
-  printing:
-    silence: false
-  run:
-    iters: 2000
-  search:
-    cognitive: 0.1
-    ftol: -.inf
-    inertia: 0.3
-    n_particles: 50
-    social: 0.2
-PySwarmsLocal:
-  initialize:
-    ball_lower_limit: 0.49
-    ball_upper_limit: 0.51
-    method: prior
-  parallel:
-    number_of_cores: 1
-  printing:
-    silence: false
-  run:
-    iters: 2000
-  search:
-    cognitive: 0.1
-    ftol: -.inf
-    inertia: 0.3
-    minkowski_p_norm: 2
-    n_particles: 50
-    number_of_k_neighbors: 3
-    social: 0.2

@@ -18,8 +18,8 @@ Shared utilities (e.g. `test_mode`, `jax_wrapper`) belong in autoconf.
 - `autofit/` - Main package
   - `non_linear/` - Non-linear search algorithms
     - `search/mcmc/` - MCMC (emcee, zeus)
-    - `search/mle/` - Maximum likelihood (LBFGS, pyswarms)
-    - `search/nest/` - Nested sampling (dynesty, nautilus, ultranest)
+    - `search/mle/` - Maximum likelihood (LBFGS, BFGS, drawer)
+    - `search/nest/` - Nested sampling (dynesty, nautilus)
     - `samples/` - Posterior samples handling
     - `paths/` - Output path management
     - `analysis/` - Analysis base classes
@@ -39,11 +39,10 @@ Shared utilities (e.g. `test_mode`, `jax_wrapper`) belong in autoconf.
 
 - `dynesty==2.1.4` - Nested sampling
 - `emcee>=3.1.6` - MCMC
-- `pyswarms==1.3.0` - Particle swarm optimisation
 - `scipy<=1.14.0` - Optimisation
 - `SQLAlchemy==2.0.32` - Database backend
 - `anesthetic==2.8.14` - Posterior analysis/plotting
-- Optional: `nautilus-sampler`, `ultranest`, `zeus-mcmc`, `getdist`
+- Optional: `nautilus-sampler`, `zeus-mcmc`, `getdist`
 
 ## Running Tests
 

@@ -82,12 +82,9 @@ from .non_linear.search.mcmc.zeus.search import Zeus
 from .non_linear.search.nest.nautilus.search import Nautilus
 from .non_linear.search.nest.dynesty.search.dynamic import DynestyDynamic
 from .non_linear.search.nest.dynesty.search.static import DynestyStatic
-from .non_linear.search.nest.ultranest.search import UltraNest
 from .non_linear.search.mle.drawer.search import Drawer
 from .non_linear.search.mle.bfgs.search import BFGS
 from .non_linear.search.mle.bfgs.search import LBFGS
-from .non_linear.search.mle.pyswarms.search.globe import PySwarmsGlobal
-from .non_linear.search.mle.pyswarms.search.local import PySwarmsLocal
 from .non_linear.paths.abstract import AbstractPaths
 from .non_linear.paths import DirectoryPaths
 from .non_linear.paths import DatabasePaths

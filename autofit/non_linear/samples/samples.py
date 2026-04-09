@@ -39,7 +39,7 @@ class Samples(SamplesInterface, ABC):
         individual sample by the `NonLinearSearch` and return information on the likelihoods, errors, etc.
 
         This class stores samples of searches which provide maximum likelihood estimates of the  model-fit (e.g.
-        PySwarms, LBFGS).
+        LBFGS).
 
         Parameters
         ----------
