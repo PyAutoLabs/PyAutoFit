@@ -505,8 +505,16 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
                 info=info,
             )
         else:
-            if hasattr(self.paths, '_save_model_info'):
-                self.paths._save_model_info(model=model)
+            # Bypass mode still needs the metadata + identifier files written
+            # so downstream aggregator scraping can discover the search
+            # directory. `save_all` is lightweight (a handful of JSON dumps)
+            # and skips the expensive `analysis.save_attributes` /
+            # `visualize_before_fit` calls that `pre_fit_output` would add.
+            if hasattr(self.paths, "save_all"):
+                self.paths.save_all(
+                    search_config_dict=self.config_dict_search,
+                    info=info,
+                )
 
         if not self.paths.is_complete:
             result = self.start_resume_fit(
@@ -852,16 +860,28 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             log_likelihood=log_likelihood,
         )
 
+        # Stub log_evidence in samples_info so downstream arithmetic
+        # (grid search log_evidences, subhalo Bayesian model comparison,
+        # scrape aggregator assertions) doesn't crash on None. SamplesPDF
+        # reads log_evidence from samples_info.
         samples = SamplesPDF(
             model=model,
             sample_list=sample_list,
             samples_info={
                 "total_iterations": 1,
                 "time": 0.0,
+                "log_evidence": log_likelihood,
             },
         )
 
         samples_summary = samples.summary()
+
+        # Persist samples + summary to disk so downstream code that reads
+        # from the output folder (database scrape, paths.load_samples_summary)
+        # sees a complete result. Matches the docstring's promise. NullPaths
+        # and DatabasePaths both handle these calls safely.
+        self.paths.save_samples_summary(samples_summary=samples_summary)
+        self.paths.save_samples(samples=samples)
 
         result = analysis.make_result(
             samples_summary=samples_summary,
