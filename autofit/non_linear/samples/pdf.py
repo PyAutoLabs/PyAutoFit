@@ -429,7 +429,7 @@ class SamplesPDF(Samples):
 
     @property
     def log_evidence(self):
-        return None
+        return self.samples_info.get("log_evidence")
 
 
 def marginalize(
