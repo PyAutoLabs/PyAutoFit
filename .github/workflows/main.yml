@@ -63,8 +63,7 @@ jobs:
         if [ "${{ matrix.python-version }}" = "3.12" ]; then
           pip install ./PyAutoConf "./PyAutoFit[optional]"
         else
-          pip install --only-binary :all: scipy numpy matplotlib h5py contourpy
-          pip install ./PyAutoConf ./PyAutoFit
+          pip install --only-binary scipy,numpy,matplotlib,h5py,contourpy ./PyAutoConf ./PyAutoFit
         fi
     - name: Run tests
       run: |
