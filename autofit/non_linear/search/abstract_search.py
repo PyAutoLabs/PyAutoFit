@@ -49,7 +49,7 @@ from autofit.graphical.declarative.abstract import PriorFactor
 from autofit.graphical.expectation_propagation import AbstractFactorOptimiser
 
 from autofit.non_linear.fitness import get_timeout_seconds
-from autofit.non_linear.test_mode import is_test_mode, test_mode_level
+from autofit.non_linear.test_mode import is_test_mode, test_mode_level, skip_fit_output
 
 logger = logging.getLogger(__name__)
 
@@ -497,15 +497,14 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         analysis = analysis.modify_before_fit(paths=self.paths, model=model)
         model.unfreeze()
 
-        mode = test_mode_level()
-        if mode < 2:
+        if not skip_fit_output():
             self.pre_fit_output(
                 analysis=analysis,
                 model=model,
                 info=info,
             )
         else:
-            # Bypass mode still needs the metadata + identifier files written
+            # Skip mode still needs the metadata + identifier files written
             # so downstream aggregator scraping can discover the search
             # directory. `save_all` is lightweight (a handful of JSON dumps)
             # and skips the expensive `analysis.save_attributes` /
@@ -527,7 +526,7 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
                 model=model,
             )
 
-        if mode < 2:
+        if not skip_fit_output():
             analysis = analysis.modify_after_fit(
                 paths=self.paths, model=model, result=result
             )

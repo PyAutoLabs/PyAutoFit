@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 
-from autofit.non_linear.test_mode import is_test_mode
+from autofit.non_linear.test_mode import skip_visualization
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 def skip_in_test_mode(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
-        if is_test_mode():
+        if skip_visualization():
             return
         return func(*args, **kwargs)
 

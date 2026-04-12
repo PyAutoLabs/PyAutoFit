@@ -328,9 +328,9 @@ class Analysis(ABC):
         batch_size
             The batch size to profile, which is the number of model evaluations JAX will perform simultaneously.
         """
-        from autofit.non_linear.test_mode import test_mode_level
+        from autofit.non_linear.test_mode import skip_fit_output
 
-        if test_mode_level() >= 2:
+        if skip_fit_output():
             return
 
         if not self._use_jax:

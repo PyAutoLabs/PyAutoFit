@@ -6,7 +6,7 @@ from autofit.non_linear.paths.abstract import AbstractPaths
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.paths.database import DatabasePaths
 from autofit.non_linear.paths.null import NullPaths
-from autofit.non_linear.test_mode import is_test_mode
+from autofit.non_linear.test_mode import skip_visualization
 
 class Visualizer:
 
@@ -41,7 +41,7 @@ class Visualizer:
         A bool determining whether visualization should be performed or not.
         """
 
-        if is_test_mode():
+        if skip_visualization():
             return False
 
         if isinstance(paths, DatabasePaths) or isinstance(paths, NullPaths):
