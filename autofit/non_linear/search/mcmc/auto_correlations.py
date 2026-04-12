@@ -9,10 +9,10 @@ class AutoCorrelationsSettings:
 
     def __init__(
             self,
-            check_for_convergence: Optional[bool] = None,
-            check_size: Optional[int] = None,
-            required_length: Optional[int] = None,
-            change_threshold: Optional[float] = None,
+            check_for_convergence: bool = True,
+            check_size: int = 100,
+            required_length: int = 50,
+            change_threshold: float = 0.01,
     ):
         """
         Class for performing and customizing AutoCorrelation calculations, which are used:
@@ -42,18 +42,8 @@ class AutoCorrelationsSettings:
         self.required_length = required_length
         self.change_threshold = change_threshold
 
-    def update_via_config(self, config):
-
-        config_dict = config
-
-        self.check_for_convergence = self.check_for_convergence if self.check_for_convergence is not None else config_dict["check_for_convergence"]
-        self.check_size = self.check_size or config_dict["check_size"]
-
         if is_test_mode():
             self.check_size = 1
-
-        self.required_length = self.required_length or config_dict["required_length"]
-        self.change_threshold = self.change_threshold or config_dict["change_threshold"]
 
 
 class AutoCorrelations(AutoCorrelationsSettings):

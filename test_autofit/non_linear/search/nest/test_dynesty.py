@@ -4,6 +4,7 @@ import autofit as af
 
 pytestmark = pytest.mark.filterwarnings("ignore::FutureWarning")
 
+
 class MockDynestyResults:
     def __init__(self, samples, logl, logwt, ncall, logz, nlive):
         self.samples = samples
@@ -19,7 +20,7 @@ class MockDynestySampler:
         self.results = results
 
 
-def test__loads_from_config_file_if_not_input():
+def test__explicit_params():
 
     search = af.DynestyStatic(
         nlive=151,
@@ -30,16 +31,14 @@ def test__loads_from_config_file_if_not_input():
 
     assert search.iterations_per_full_update == 501
 
-    assert search.config_dict_search["nlive"] == 151
-    assert search.config_dict_run["dlogz"] == 0.1
+    assert search.nlive == 151
+    assert search.dlogz == 0.1
     assert search.number_of_cores == 2
 
     search = af.DynestyStatic()
 
-    assert search.iterations_per_full_update == 1e99
-
-    assert search.config_dict_search["nlive"] == 150
-    assert search.config_dict_run["dlogz"] == None
+    assert search.nlive == 50
+    assert search.dlogz is None
     assert search.number_of_cores == 1
 
     search = af.DynestyDynamic(
@@ -51,14 +50,12 @@ def test__loads_from_config_file_if_not_input():
 
     assert search.iterations_per_full_update == 501
 
-    assert search.config_dict_search["facc"] == 0.4
-    assert search.config_dict_run["dlogz_init"] == 0.2
+    assert search.facc == 0.4
+    assert search.dlogz_init == 0.2
     assert search.number_of_cores == 3
 
     search = af.DynestyDynamic()
 
-    assert search.iterations_per_full_update == 1e99
-
-    assert search.config_dict_search["facc"] == 0.6
-    assert search.config_dict_run["dlogz_init"] == 0.01
-    assert search.number_of_cores == 4
+    assert search.facc == 0.2
+    assert search.dlogz_init == 0.01
+    assert search.number_of_cores == 1

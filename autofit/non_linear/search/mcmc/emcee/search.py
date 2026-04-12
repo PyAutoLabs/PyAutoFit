@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import Dict, Optional
 
@@ -17,6 +18,8 @@ from autofit.non_linear.test_mode import is_test_mode
 from autofit.non_linear.samples.sample import Sample
 from autofit.non_linear.samples.mcmc import SamplesMCMC
 
+logger = logging.getLogger(__name__)
+
 
 class Emcee(AbstractMCMC):
     __identifier_fields__ = ("nwalkers",)
@@ -26,11 +29,14 @@ class Emcee(AbstractMCMC):
         name: Optional[str] = None,
         path_prefix: Optional[str] = None,
         unique_tag: Optional[str] = None,
+        nwalkers: int = 50,
+        nsteps: int = 2000,
         initializer: Optional[Initializer] = None,
         auto_correlation_settings=AutoCorrelationsSettings(),
         iterations_per_quick_update: int = None,
         iterations_per_full_update: int = None,
-        number_of_cores: int = None,
+        number_of_cores: int = 1,
+        silence: bool = False,
         session: Optional[sa.orm.Session] = None,
         **kwargs,
     ):
@@ -55,21 +61,21 @@ class Emcee(AbstractMCMC):
         unique_tag
             The name of a unique tag for this model-fit, which will be given a unique entry in the sqlite database
             and also acts as the folder after the path prefix and before the search name.
+        nwalkers
+            The number of walkers in the ensemble used to sample parameter space.
+        nsteps
+            The number of steps that must be taken by every walker.
         initializer
             Generates the initialize samples of non-linear parameter space (see autofit.non_linear.initializer).
         auto_correlation_settings
             Customizes and performs auto correlation calculations performed during and after the search.
         number_of_cores
             The number of cores sampling is performed using a Python multiprocessing Pool instance.
+        silence
+            If True, the default print output of the non-linear search is silenced.
         session
             An SQLalchemy session instance so the results of the model-fit are written to an SQLite database.
         """
-
-        number_of_cores = (
-            self._config("parallel", "number_of_cores")
-            if number_of_cores is None
-            else number_of_cores
-        )
 
         super().__init__(
             name=name,
@@ -80,16 +86,28 @@ class Emcee(AbstractMCMC):
             iterations_per_quick_update=iterations_per_quick_update,
             iterations_per_full_update=iterations_per_full_update,
             number_of_cores=number_of_cores,
+            silence=silence,
             session=session,
             **kwargs,
         )
 
+        self.nwalkers = nwalkers
+        self.nsteps = nsteps
+
+        if is_test_mode():
+            self.apply_test_mode()
+
         self.logger.debug("Creating Emcee Search")
 
-        # TODO : Emcee visualization tools rely on the .hdf file and thus require that the search internal is
-        # TODO : On hard-disk, which this forces to occur.
-
         conf.instance["output"]["search_internal"] = True
+
+    def apply_test_mode(self):
+        logger.warning(
+            "TEST MODE 1 (reduced iterations): Sampler will run with "
+            "minimal iterations for faster completion."
+        )
+        self.nwalkers = 20
+        self.nsteps = 10
 
     def _fit(self, model: AbstractPriorModel, analysis):
         """
@@ -127,7 +145,7 @@ class Emcee(AbstractMCMC):
             backend = None
 
         search_internal = emcee.EnsembleSampler(
-            nwalkers=self.config_dict_search["nwalkers"],
+            nwalkers=self.nwalkers,
             ndim=model.prior_count,
             log_prob_fn=fitness.call_wrap,
             backend=backend,
@@ -143,7 +161,7 @@ class Emcee(AbstractMCMC):
             if samples.converged:
                 iterations_remaining = 0
             else:
-                iterations_remaining = self.config_dict_run["nsteps"] - total_iterations
+                iterations_remaining = self.nsteps - total_iterations
 
                 self.logger.info(
                     "Resuming Emcee non-linear search (previous samples found)."
@@ -178,7 +196,7 @@ class Emcee(AbstractMCMC):
                 state[index, :] = np.asarray(parameters)
 
             total_iterations = 0
-            iterations_remaining = self.config_dict_run["nsteps"]
+            iterations_remaining = self.nsteps
 
         while iterations_remaining > 0:
             if self.iterations_per_full_update > iterations_remaining:
@@ -198,7 +216,7 @@ class Emcee(AbstractMCMC):
             state = search_internal.get_last_sample()
 
             total_iterations += iterations
-            iterations_remaining = self.config_dict_run["nsteps"] - total_iterations
+            iterations_remaining = self.nsteps - total_iterations
 
             samples = self.samples_from(model=model, search_internal=search_internal)
 
@@ -339,30 +357,6 @@ class Emcee(AbstractMCMC):
             times=times,
             previous_times=previous_auto_correlation_times,
         )
-
-    def config_dict_test_mode_from(self, config_dict: Dict) -> Dict:
-        """
-        Returns a configuration dictionary for test mode meaning that the sampler terminates as quickly as possible.
-
-        Entries which set the total number of samples of the sampler (e.g. maximum calls, maximum likelihood
-        evaluations) are reduced to low values meaning it terminates nearly immediately.
-
-        Parameters
-        ----------
-        config_dict
-            The original configuration dictionary for this sampler which includes entries controlling how fast the
-            sampler terminates.
-
-        Returns
-        -------
-        A configuration dictionary where settings which control the sampler's number of samples are reduced so it
-        terminates as quickly as possible.
-        """
-        return {
-            **config_dict,
-            "nwalkers": 20,
-            "nsteps": 10,
-        }
 
     @property
     def backend_filename(self):

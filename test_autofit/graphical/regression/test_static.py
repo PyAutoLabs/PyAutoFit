@@ -23,10 +23,6 @@ class StaticSearch(af.NonLinearSearch):
         pass
 
     @property
-    def config_type(self):
-        pass
-
-    @property
     def samples_cls(self):
         pass
 

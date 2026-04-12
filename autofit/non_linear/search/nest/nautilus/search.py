@@ -6,7 +6,6 @@ from typing import Dict, Optional, Tuple
 
 from autofit.database.sqlalchemy_ import sa
 
-from autoconf import conf
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.mapper.prior.vectorized import PriorVectorized
 from autofit.non_linear.fitness import Fitness
@@ -14,6 +13,7 @@ from autofit.non_linear.paths.null import NullPaths
 from autofit.non_linear.search.nest import abstract_nest
 from autofit.non_linear.samples.sample import Sample
 from autofit.non_linear.samples.nest import SamplesNest
+from autofit.non_linear.test_mode import is_test_mode
 
 
 logger = logging.getLogger(__name__)
@@ -37,12 +37,30 @@ class Nautilus(abstract_nest.AbstractNest):
         name: Optional[str] = None,
         path_prefix: Optional[str] = None,
         unique_tag: Optional[str] = None,
+        n_live: int = 3000,
+        n_update: Optional[int] = None,
+        enlarge_per_dim: float = 1.1,
+        n_points_min: Optional[int] = None,
+        split_threshold: int = 100,
+        n_networks: int = 4,
+        n_batch: int = 100,
+        n_like_new_bound: Optional[int] = None,
+        vectorized: bool = False,
+        seed: Optional[int] = None,
+        f_live: float = 0.01,
+        n_shell: int = 1,
+        n_eff: int = 500,
+        n_like_max: float = float("inf"),
+        discard_exploration: bool = False,
+        verbose: bool = True,
         iterations_per_quick_update: Optional[int] = None,
         iterations_per_full_update: int = None,
-        number_of_cores: int = None,
+        number_of_cores: int = 1,
+        silence: bool = False,
+        force_x1_cpu: bool = False,
         session: Optional[sa.orm.Session] = None,
-        use_jax_vmap : bool = True,
-        **kwargs
+        use_jax_vmap: bool = True,
+        **kwargs,
     ):
         """
         A Nautilus non-linear search.
@@ -64,19 +82,27 @@ class Nautilus(abstract_nest.AbstractNest):
         unique_tag
             The name of a unique tag for this model-fit, which will be given a unique entry in the sqlite database
             and also acts as the folder after the path prefix and before the search name.
+        n_live
+            Number of live points used for sampling.
+        n_batch
+            Number of likelihood evaluations performed at each step.
+        n_like_max
+            Maximum number of likelihood evaluations before stopping.
+        f_live
+            Maximum fraction of evidence in the live set before terminating.
+        n_eff
+            Minimum effective sample size before stopping.
         iterations_per_full_update
             The number of iterations performed between update (e.g. output latest model to hard-disk, visualization).
         number_of_cores
             The number of cores sampling is performed using a Python multiprocessing Pool instance.
+        silence
+            If True, the default print output of the non-linear search is silenced.
+        force_x1_cpu
+            If True, force single-CPU mode even when number_of_cores > 1.
         session
             An SQLalchemy session instance so the results of the model-fit are written to an SQLite database.
         """
-
-        number_of_cores = (
-            self._config("parallel", "number_of_cores")
-            if number_of_cores is None
-            else number_of_cores
-        )
 
         super().__init__(
             name=name,
@@ -85,13 +111,43 @@ class Nautilus(abstract_nest.AbstractNest):
             iterations_per_full_update=iterations_per_full_update,
             iterations_per_quick_update=iterations_per_quick_update,
             number_of_cores=number_of_cores,
+            silence=silence,
             session=session,
             **kwargs,
         )
 
+        self.n_live = n_live
+        self.n_update = n_update
+        self.enlarge_per_dim = enlarge_per_dim
+        self.n_points_min = n_points_min
+        self.split_threshold = split_threshold
+        self.n_networks = n_networks
+        self.n_batch = n_batch
+        self.n_like_new_bound = n_like_new_bound
+        self.vectorized = vectorized
+        self.seed = seed
+
+        self.f_live = f_live
+        self.n_shell = n_shell
+        self.n_eff = n_eff
+        self.n_like_max = n_like_max
+        self.discard_exploration = discard_exploration
+        self.verbose = verbose
+
+        self.force_x1_cpu = force_x1_cpu
+        self.use_jax_vmap = use_jax_vmap
+
+        if is_test_mode():
+            self.apply_test_mode()
+
         self.logger.debug("Creating Nautilus Search")
 
-        self.use_jax_vmap = use_jax_vmap
+    def apply_test_mode(self):
+        logger.warning(
+            "TEST MODE 1 (reduced iterations): Sampler will run with "
+            "minimal iterations for faster completion."
+        )
+        self.n_like_max = 1
 
     def _fit(self, model: AbstractPriorModel, analysis):
         """
@@ -127,11 +183,7 @@ class Nautilus(abstract_nest.AbstractNest):
                 "Starting new Nautilus non-linear search (no previous samples found)."
             )
 
-        if (
-            self.config_dict.get("force_x1_cpu")
-            or self.kwargs.get("force_x1_cpu")
-            or analysis._use_jax
-        ):
+        if self.force_x1_cpu or analysis._use_jax:
 
             fitness = Fitness(
                 model=model,
@@ -141,7 +193,7 @@ class Nautilus(abstract_nest.AbstractNest):
                 resample_figure_of_merit=-1.0e99,
                 iterations_per_quick_update=self.iterations_per_quick_update,
                 use_jax_vmap=self.use_jax_vmap,
-                batch_size=self.config_dict_search["n_batch"],
+                batch_size=self.n_batch,
             )
 
             search_internal = self.fit_x1_cpu(
@@ -225,22 +277,22 @@ class Nautilus(abstract_nest.AbstractNest):
                 "Running search where parallelization is disabled."
             )
 
-        config_dict = self.config_dict_search
-        try:
-            config_dict.pop("vectorized")
-        except KeyError:
-            pass
-
-        vectorized = fitness.use_jax_vmap
-
         search_internal = self.sampler_cls(
             prior=PriorVectorized(model=model),
             likelihood=fitness.call_wrap,
             n_dim=model.prior_count,
             filepath=self.checkpoint_file,
             pool=None,
-            vectorized=vectorized,
-            **config_dict,
+            vectorized=fitness.use_jax_vmap,
+            n_live=self.n_live,
+            n_update=self.n_update,
+            enlarge_per_dim=self.enlarge_per_dim,
+            n_points_min=self.n_points_min,
+            split_threshold=self.split_threshold,
+            n_networks=self.n_networks,
+            n_batch=self.n_batch,
+            n_like_new_bound=self.n_like_new_bound,
+            seed=self.seed,
         )
 
         return self.call_search(search_internal=search_internal, model=model, analysis=analysis, fitness=fitness)
@@ -272,7 +324,16 @@ class Nautilus(abstract_nest.AbstractNest):
             n_dim=model.prior_count,
             filepath=self.checkpoint_file,
             pool=self.number_of_cores,
-            **self.config_dict_search,
+            n_live=self.n_live,
+            n_update=self.n_update,
+            enlarge_per_dim=self.enlarge_per_dim,
+            n_points_min=self.n_points_min,
+            split_threshold=self.split_threshold,
+            n_networks=self.n_networks,
+            n_batch=self.n_batch,
+            n_like_new_bound=self.n_like_new_bound,
+            vectorized=self.vectorized,
+            seed=self.seed,
         )
 
         search_internal = self.call_search(
@@ -310,7 +371,7 @@ class Nautilus(abstract_nest.AbstractNest):
 
         finished = False
 
-        minimum_iterations_per_full_updates = 3 * self.config_dict_search["n_live"]
+        minimum_iterations_per_full_updates = 3 * self.n_live
 
         if self.iterations_per_full_update < minimum_iterations_per_full_updates:
 
@@ -334,14 +395,12 @@ class Nautilus(abstract_nest.AbstractNest):
                 search_internal=search_internal
             )
 
-            config_dict_run = {
-                key: value
-                for key, value in self.config_dict_run.items()
-                if key != "n_like_max"
-            }
-
             search_internal.run(
-                **config_dict_run,
+                f_live=self.f_live,
+                n_shell=self.n_shell,
+                n_eff=self.n_eff,
+                discard_exploration=self.discard_exploration,
+                verbose=self.verbose,
                 n_like_max=iterations,
             )
 
@@ -349,7 +408,7 @@ class Nautilus(abstract_nest.AbstractNest):
 
             if (
                     total_iterations == iterations_after_run
-                    or iterations_after_run == self.config_dict_run["n_like_max"]
+                    or iterations_after_run == self.n_like_max
             ):
                 finished = True
 
@@ -388,10 +447,8 @@ class Nautilus(abstract_nest.AbstractNest):
         """
 
         if isinstance(self.paths, NullPaths):
-            n_like_max = self.config_dict_run.get("n_like_max")
-
-            if n_like_max is not None:
-                return n_like_max, n_like_max
+            if self.n_like_max is not None and self.n_like_max != float("inf"):
+                return int(self.n_like_max), int(self.n_like_max)
             return int(1e99), int(1e99)
 
         try:
@@ -401,9 +458,9 @@ class Nautilus(abstract_nest.AbstractNest):
 
         iterations = total_iterations + self.iterations_per_full_update
 
-        if self.config_dict_run["n_like_max"] is not None:
-            if iterations > self.config_dict_run["n_like_max"]:
-                iterations = self.config_dict_run["n_like_max"]
+        if self.n_like_max is not None and self.n_like_max != float("inf"):
+            if iterations > self.n_like_max:
+                iterations = int(self.n_like_max)
 
         return iterations, total_iterations
 
@@ -495,31 +552,4 @@ class Nautilus(abstract_nest.AbstractNest):
 
     @property
     def batch_size(self):
-        return self.config_dict_search.get("n_batch")
-
-    @property
-    def config_dict(self):
-        return conf.instance["non_linear"]["nest"][self.__class__.__name__]
-
-    def config_dict_test_mode_from(self, config_dict : Dict) -> Dict:
-        """
-        Returns a configuration dictionary for test mode meaning that the sampler terminates as quickly as possible.
-
-        Entries which set the total number of samples of the sampler (e.g. maximum calls, maximum likelihood
-        evaluations) are reduced to low values meaning it terminates nearly immediately.
-
-        Parameters
-        ----------
-        config_dict
-            The original configuration dictionary for this sampler which includes entries controlling how fast the
-            sampler terminates.
-
-        Returns
-        -------
-        A configuration dictionary where settings which control the sampler's number of samples are reduced so it
-        terminates as quickly as possible.
-        """
-        return {
-            **config_dict,
-            "n_like_max": 1,
-        }
+        return self.n_batch

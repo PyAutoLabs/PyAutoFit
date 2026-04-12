@@ -18,7 +18,7 @@ import psutil
 if TYPE_CHECKING:
     from autofit.non_linear.result import Result
 
-from autoconf import conf, cached_property
+from autoconf import conf
 
 from autoconf.output import should_output
 
@@ -49,7 +49,7 @@ from autofit.graphical.declarative.abstract import PriorFactor
 from autofit.graphical.expectation_propagation import AbstractFactorOptimiser
 
 from autofit.non_linear.fitness import get_timeout_seconds
-from autofit.non_linear.test_mode import is_test_mode, test_mode_level, skip_fit_output
+from autofit.non_linear.test_mode import test_mode_level, skip_fit_output
 
 logger = logging.getLogger(__name__)
 
@@ -131,12 +131,13 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         iterations_per_quick_update: Optional[int] = None,
         iterations_per_full_update: int = None,
         number_of_cores: int = 1,
+        silence: bool = False,
         session: Optional[sa.orm.Session] = None,
         paths: Optional[AbstractPaths] = None,
         **kwargs,
     ):
         """
-        Abstract base class for non-linear searches.L
+        Abstract base class for non-linear searches.
 
         This class sets up the file structure for the non-linear search, which are standardized across all non-linear
         searches.
@@ -152,6 +153,8 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             and also acts as the folder after the path prefix and before the search name.
         initializer
             Generates the initialize samples of non-linear parameter space (see autofit.non_linear.initializer).
+        silence
+            If True, the default print output of the non-linear search is silenced.
         session
             An SQLAlchemy session instance so the results of the model-fit are written to an SQLite database.
         """
@@ -202,15 +205,11 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             "force_visualize_overwrite"
         ]
 
-        if initializer is None:
-            self.logger.debug("Creating initializer ")
-            self.initializer = Initializer.from_config(config=self._config)
-        else:
+        if initializer is not None:
             self.initializer = initializer
 
         self.iterations_per_quick_update = float((iterations_per_quick_update or
             conf.instance["general"]["updates"]["iterations_per_quick_update"]))
-        
 
         self.iterations_per_full_update = float((iterations_per_full_update or
             conf.instance["general"]["updates"]["iterations_per_full_update"]))
@@ -227,21 +226,12 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
 
         self.should_profile = conf.instance["general"]["profiling"]["should_profile"]
 
-        self.silence = self._config("printing", "silence")
+        self.silence = silence
 
         if conf.instance["general"]["hpc"]["hpc_mode"]:
             self.silence = True
 
         self.kwargs = kwargs
-
-        for key, value in self.config_dict_search.items():
-            setattr(self, key, value)
-
-        try:
-            for key, value in self.config_dict_run.items():
-                setattr(self, key, value)
-        except KeyError:
-            pass
 
         self.number_of_cores = number_of_cores
 
@@ -511,7 +501,6 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             # `visualize_before_fit` calls that `pre_fit_output` would add.
             if hasattr(self.paths, "save_all"):
                 self.paths.save_all(
-                    search_config_dict=self.config_dict_search,
                     info=info,
                 )
 
@@ -609,7 +598,6 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
                 )
 
             self.paths.save_all(
-                search_config_dict=self.config_dict_search,
                 info=info,
             )
             analysis.save_attributes(paths=self.paths)
@@ -924,68 +912,15 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         if model is not None and model.prior_count == 0:
             raise AssertionError("Model has no priors! Cannot fit a 0 dimension model.")
 
-    def config_dict_test_mode_from(self, config_dict: Dict) -> Dict:
-        raise NotImplementedError
-
-    @property
-    def _class_config(self) -> Dict:
-        return self.config_type[self.__class__.__name__]
-
-    @cached_property
-    def config_dict_search(self) -> Dict:
-        config_dict = copy.deepcopy(self._class_config["search"])
-
-        for key, value in config_dict.items():
-            try:
-                config_dict[key] = self.kwargs[key]
-            except KeyError:
-                pass
-
-        return config_dict
-
-    @cached_property
-    def config_dict_run(self) -> Dict:
-        config_dict = copy.deepcopy(self._class_config["run"])
-
-        for key, value in config_dict.items():
-            try:
-                config_dict[key] = self.kwargs[key]
-            except KeyError:
-                pass
-
-        if is_test_mode():
-            logger.warning(
-                "TEST MODE 1 (reduced iterations): Sampler will run with "
-                "minimal iterations for faster completion."
-            )
-
-            config_dict = self.config_dict_test_mode_from(config_dict=config_dict)
-
-        return config_dict
-
-    @property
-    def config_dict_settings(self) -> Dict:
-        return self._class_config["settings"]
-
-    @property
-    def config_type(self):
-        raise NotImplementedError()
-
-    def _config(self, section, attribute_name):
+    def apply_test_mode(self):
         """
-        Get a config field from this search's section in non_linear.ini by a key and value type.
+        Override in subclasses to reduce sampler iterations for test mode.
 
-        Parameters
-        ----------
-        attribute_name: str
-            The analysis_path of the field
-
-        Returns
-        -------
-        attribute
-            An attribute for the key with the specified type.
+        Called during __init__ when test mode is active (level 1).
+        Subclasses should directly mutate instance attributes to minimize
+        the number of iterations the sampler performs.
         """
-        return self._class_config[section][attribute_name]
+        pass
 
     def output_search_internal(self, search_internal):
         self.paths.save_search_internal(

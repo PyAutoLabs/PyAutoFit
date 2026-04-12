@@ -89,8 +89,8 @@ def test_database_info(
     assert (
         (output_directory / "database.info").read_text()
         == """                         unique_id,name,unique_tag,total_free_parameters,is_complete
-  d05be1e6380082adea5c918af392d2b9,    ,          ,                    4,       True
-d05be1e6380082adea5c918af392d2b9_0,    ,          ,                    0,           
-d05be1e6380082adea5c918af392d2b9_1,    ,          ,                    0,           
+  e97671c16b0b1070fb51af9d229d69cd,    ,          ,                    4,       True
+e97671c16b0b1070fb51af9d229d69cd_0,    ,          ,                    0,           
+e97671c16b0b1070fb51af9d229d69cd_1,    ,          ,                    0,           
 """
     )

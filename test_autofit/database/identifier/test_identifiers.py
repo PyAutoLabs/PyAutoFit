@@ -390,7 +390,7 @@ def test_dynesty_static():
     assert Identifier(af.DynestyStatic()).hash_list == [
         "DynestyStatic",
         "nlive",
-        "150",
+        "50",
         "bound",
         "multi",
         "sample",
@@ -400,7 +400,7 @@ def test_dynesty_static():
         "walks",
         "5",
         "facc",
-        "0.5",
+        "0.2",
         "slices",
         "5",
         "fmove",
