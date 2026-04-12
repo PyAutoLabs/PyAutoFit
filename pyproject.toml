@@ -25,7 +25,8 @@ keywords = ["cli"]
 dependencies = [
     "autoconf",
     "array_api_compat",
-    "anesthetic>=2.8.14",
+    "anesthetic==2.8.14; python_version < '3.13'",
+    "anesthetic>=2.9.0; python_version >= '3.13'",
     "corner==2.2.2",
     "decorator>=4.2.1",
     "dill>=0.3.1.1",
