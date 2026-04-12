@@ -2,14 +2,20 @@ from abc import ABC
 
 from autoconf import conf
 from autofit.non_linear.search.abstract_search import NonLinearSearch
+from autofit.non_linear.initializer import InitializerBall
 from autofit.non_linear.samples import Samples
 from autofit.non_linear.plot import subplot_parameters, log_likelihood_vs_iteration
 
 
 class AbstractMLE(NonLinearSearch, ABC):
-    @property
-    def config_type(self):
-        return conf.instance["non_linear"]["mle"]
+
+    def __init__(self, initializer=None, **kwargs):
+        super().__init__(
+            initializer=initializer or InitializerBall(
+                lower_limit=0.49, upper_limit=0.51
+            ),
+            **kwargs,
+        )
 
     @property
     def samples_cls(self):

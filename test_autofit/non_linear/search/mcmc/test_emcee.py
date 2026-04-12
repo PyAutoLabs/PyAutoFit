@@ -1,5 +1,3 @@
-from os import path
-
 import pytest
 
 import autofit as af
@@ -7,7 +5,7 @@ import autofit as af
 pytestmark = pytest.mark.filterwarnings("ignore::FutureWarning")
 
 
-def test__config__loads_from_file_correctly():
+def test__explicit_params():
 
     search = af.Emcee(
         nwalkers=51,
@@ -22,8 +20,8 @@ def test__config__loads_from_file_correctly():
         number_of_cores=2,
     )
 
-    assert search.config_dict_search["nwalkers"] == 51
-    assert search.config_dict_run["nsteps"] == 2001
+    assert search.nwalkers == 51
+    assert search.nsteps == 2001
     assert isinstance(search.initializer, af.InitializerBall)
     assert search.initializer.lower_limit == 0.2
     assert search.initializer.upper_limit == 0.8
@@ -35,12 +33,11 @@ def test__config__loads_from_file_correctly():
 
     search = af.Emcee()
 
-    assert search.config_dict_search["nwalkers"] == 50
-    assert search.config_dict_run["nsteps"] == 2000
-    assert isinstance(search.initializer, af.InitializerPrior)
+    assert search.nwalkers == 50
+    assert search.nsteps == 2000
+    assert isinstance(search.initializer, af.InitializerBall)
     assert search.auto_correlation_settings.check_for_convergence is True
     assert search.auto_correlation_settings.check_size == 100
     assert search.auto_correlation_settings.required_length == 50
     assert search.auto_correlation_settings.change_threshold == 0.01
     assert search.number_of_cores == 1
-

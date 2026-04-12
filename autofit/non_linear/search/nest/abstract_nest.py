@@ -23,6 +23,7 @@ class AbstractNest(NonLinearSearch, ABC):
         iterations_per_quick_update: Optional[int] = None,
         iterations_per_full_update: Optional[int] = None,
         number_of_cores: Optional[int] = None,
+        silence: bool = False,
         session: Optional[sa.orm.Session] = None,
         initializer: Optional[AbstractInitializer] = None,
         **kwargs
@@ -57,13 +58,10 @@ class AbstractNest(NonLinearSearch, ABC):
             iterations_per_quick_update=iterations_per_quick_update,
             iterations_per_full_update=iterations_per_full_update,
             number_of_cores=number_of_cores,
+            silence=silence,
             session=session,
             **kwargs
         )
-
-    @property
-    def config_type(self):
-        return conf.instance["non_linear"]["nest"]
 
     @property
     def samples_cls(self):

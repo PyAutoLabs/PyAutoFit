@@ -1,13 +1,14 @@
 import logging
+from unittest.mock import patch
 
 import pytest
 import scipy
 
-from autoconf.conf import with_config
 import numpy as np
 
 from autofit import CovarianceInterpolator
 import autofit as af
+from autofit.non_linear.search.nest.dynesty.search.static import DynestyStatic
 
 
 @pytest.fixture(autouse=True)
@@ -35,18 +36,24 @@ def test_covariance_matrix(interpolator):
     )
 
 
-def maxcall(func):
-    return with_config(
-        "non_linear",
-        "nest",
-        "DynestyStatic",
-        "run",
-        "maxcall",
-        value=1,
-    )(func)
+def _maxcall_dynesty(*args, **kwargs):
+    """Create a DynestyStatic with maxcall=1 for fast test execution."""
+    kwargs.setdefault("maxcall", 1)
+    return DynestyStatic.__new_orig__(*args, **kwargs)
 
 
-@maxcall
+@pytest.fixture(autouse=True)
+def limit_maxcall(monkeypatch):
+    """Limit DynestyStatic to maxcall=1 so interpolator tests run fast."""
+    original_init = DynestyStatic.__init__
+
+    def patched_init(self, *args, **kwargs):
+        kwargs.setdefault("maxcall", 1)
+        original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(DynestyStatic, "__init__", patched_init)
+
+
 def test_interpolate(interpolator):
     try:
         assert isinstance(interpolator[interpolator.t == 0.5].gaussian.centre, float)
@@ -54,7 +61,6 @@ def test_interpolate(interpolator):
         logging.warning(e)
 
 
-@maxcall
 def test_relationships(interpolator):
     try:
         relationships = interpolator.relationships(interpolator.t)
@@ -63,7 +69,6 @@ def test_relationships(interpolator):
         logging.warning(e)
 
 
-@maxcall
 def test_interpolate_other_field(interpolator):
     try:
         assert isinstance(
@@ -88,7 +93,6 @@ def test_model(interpolator):
     assert model.prior_count == 6
 
 
-@maxcall
 def test_single_variable():
     samples_list = [
         af.SamplesPDF(
@@ -115,7 +119,6 @@ def test_single_variable():
     assert interpolator[interpolator.t == 25.0].v == pytest.approx(25.0, abs=2.0)
 
 
-@maxcall
 def test_variable_and_constant():
     samples_list = [
         af.SamplesPDF(

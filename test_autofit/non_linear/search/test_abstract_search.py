@@ -81,13 +81,13 @@ class TestResult:
 
 
 class TestSearchConfig:
-    def test__config_dict_search_accessible(self):
+    def test__explicit_params_accessible(self):
         search = af.DynestyStatic(nlive=100)
-        assert search.config_dict_search["nlive"] == 100
+        assert search.nlive == 100
 
-    def test__config_dict_run_accessible(self):
+    def test__run_params_accessible(self):
         search = af.DynestyStatic(dlogz=0.5)
-        assert search.config_dict_run["dlogz"] == 0.5
+        assert search.dlogz == 0.5
 
     def test__unique_tag(self):
         search = af.DynestyStatic(unique_tag="my_tag")

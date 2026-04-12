@@ -1,6 +1,5 @@
 from typing import Optional, Tuple
 
-from autoconf import conf
 from autofit import exc
 from autofit.graphical import FactorApproximation
 from autofit.graphical.utils import Status
@@ -68,14 +67,6 @@ class MockSearch(NonLinearSearch):
 
     def check_model(self, model):
         pass
-
-    @property
-    def config_type(self):
-        return conf.instance["non_linear"]["mock"]
-
-    @property
-    def config_dict_search(self):
-        return {}
 
     def _fit_fast(self, model, analysis):
         class Fitness:

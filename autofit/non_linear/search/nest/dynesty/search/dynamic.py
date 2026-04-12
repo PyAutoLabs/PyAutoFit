@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional
+from typing import Dict, Optional
 
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 
@@ -24,9 +24,16 @@ class DynestyDynamic(AbstractDynesty):
             name: Optional[str] = None,
             path_prefix: Optional[str] = None,
             unique_tag: Optional[str] = None,
+            nlive_init: int = 500,
+            dlogz_init: float = 0.01,
+            logl_max_init: float = float("inf"),
+            maxcall_init: Optional[int] = None,
+            maxiter: Optional[int] = None,
+            maxiter_init: Optional[int] = None,
             iterations_per_quick_update: int = None,
             iterations_per_full_update: int = None,
-            number_of_cores: int = None,
+            number_of_cores: int = 1,
+            silence: bool = False,
             **kwargs
     ):
         """
@@ -46,12 +53,14 @@ class DynestyDynamic(AbstractDynesty):
         unique_tag
             The name of a unique tag for this model-fit, which will be given a unique entry in the sqlite database
             and also acts as the folder after the path prefix and before the search name.
+        nlive_init
+            Number of live points used during the initial exploration phase.
+        dlogz_init
+            Stopping criterion for the initial baseline run.
         iterations_per_full_update
             The number of iterations performed between update (e.g. output latest model to hard-disk, visualization).
         number_of_cores
             The number of cores sampling is performed using a Python multiprocessing Pool instance.
-        session
-            An SQLalchemy session instance so the results of the model-fit are written to an SQLite database.
         """
 
         super().__init__(
@@ -61,10 +70,33 @@ class DynestyDynamic(AbstractDynesty):
             iterations_per_quick_update=iterations_per_quick_update,
             iterations_per_full_update=iterations_per_full_update,
             number_of_cores=number_of_cores,
+            silence=silence,
             **kwargs
         )
 
+        self.nlive_init = nlive_init
+        self.dlogz_init = dlogz_init
+        self.logl_max_init = logl_max_init
+        self.maxcall_init = maxcall_init
+        self.maxiter = maxiter
+        self.maxiter_init = maxiter_init
+
+        from autofit.non_linear.test_mode import is_test_mode
+        if is_test_mode():
+            self.apply_test_mode()
+
         self.logger.debug("Creating DynestyDynamic Search")
+
+    @property
+    def run_kwargs(self) -> Dict:
+        return {
+            "dlogz_init": self.dlogz_init,
+            "logl_max_init": self.logl_max_init,
+            "maxcall_init": self.maxcall_init,
+            "maxiter": self.maxiter,
+            "maxiter_init": self.maxiter_init,
+            "nlive_init": self.nlive_init,
+        }
 
     @property
     def search_internal(self):
@@ -128,7 +160,7 @@ class DynestyDynamic(AbstractDynesty):
                     ndim=model.prior_count,
                     queue_size=queue_size,
                     pool=pool,
-                    **self.config_dict_search
+                    **self.search_kwargs,
                 )
 
             self.write_uses_pool(uses_pool=False)
@@ -139,9 +171,9 @@ class DynestyDynamic(AbstractDynesty):
                 ndim=model.prior_count,
                 logl_args=[model, fitness],
                 ptform_args=[model],
-                **self.config_dict_search
+                **self.search_kwargs,
             )
 
     @property
     def number_live_points(self):
-        return self.config_dict_run["nlive_init"]
+        return self.nlive_init

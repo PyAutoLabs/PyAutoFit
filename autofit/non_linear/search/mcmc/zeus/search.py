@@ -16,6 +16,8 @@ from autofit.non_linear.samples.sample import Sample
 from autofit.non_linear.test_mode import is_test_mode
 from autofit.non_linear.samples.mcmc import SamplesMCMC
 
+logger = logging.getLogger(__name__)
+
 
 class Zeus(AbstractMCMC):
     __identifier_fields__ = (
@@ -32,16 +34,30 @@ class Zeus(AbstractMCMC):
         name: Optional[str] = None,
         path_prefix: Optional[str] = None,
         unique_tag: Optional[str] = None,
+        nwalkers: int = 50,
+        nsteps: int = 2000,
+        tune: bool = True,
+        tolerance: float = 0.05,
+        patience: int = 5,
+        mu: float = 1.0,
+        light_mode: bool = False,
+        maxsteps: int = 10000,
+        maxiter: int = 10000,
+        vectorize: bool = False,
+        shuffle_ensemble: bool = True,
+        check_walkers: bool = True,
+        maxcall: Optional[int] = None,
         initializer: Optional[Initializer] = None,
         auto_correlation_settings=AutoCorrelationsSettings(),
         iterations_per_quick_update: int = None,
         iterations_per_full_update: int = None,
-        number_of_cores: int = None,
+        number_of_cores: int = 1,
+        silence: bool = False,
         session: Optional[sa.orm.Session] = None,
         **kwargs
     ):
         """
-        An Zeus non-linear search.
+        A Zeus non-linear search.
 
         For a full description of Zeus, checkout its Github and readthedocs webpages:
 
@@ -64,20 +80,18 @@ class Zeus(AbstractMCMC):
         nwalkers
             The number of walkers in the ensemble used to sample parameter space.
         nsteps
-            The number of steps that must be taken by every walker. The `NonLinearSearch` will thus run for nwalkers *
-            nsteps iterations.
+            The number of steps that must be taken by every walker.
         initializer
             Generates the initialize samples of non-linear parameter space (see autofit.non_linear.initializer).
-        auto_correlation_settings : AutoCorrelationsSettings
+        auto_correlation_settings
             Customizes and performs auto correlation calculations performed during and after the search.
         number_of_cores
-            The number of cores Zeus sampling is performed using a Python multiprocessing Pool instance. If 1, a
-            pool instance is not created and the job runs in serial.
+            The number of cores Zeus sampling is performed using a Python multiprocessing Pool instance.
+        silence
+            If True, the default print output of the non-linear search is silenced.
         session
             An SQLalchemy session instance so the results of the model-fit are written to an SQLite database.
         """
-
-        number_of_cores = number_of_cores or self._config("parallel", "number_of_cores")
 
         super().__init__(
             name=name,
@@ -88,11 +102,37 @@ class Zeus(AbstractMCMC):
             iterations_per_quick_update=iterations_per_quick_update,
             iterations_per_full_update=iterations_per_full_update,
             number_of_cores=number_of_cores,
+            silence=silence,
             session=session,
             **kwargs
         )
 
+        self.nwalkers = nwalkers
+        self.nsteps = nsteps
+        self.tune = tune
+        self.tolerance = tolerance
+        self.patience = patience
+        self.mu = mu
+        self.light_mode = light_mode
+        self.maxsteps = maxsteps
+        self.maxiter = maxiter
+        self.vectorize = vectorize
+        self.shuffle_ensemble = shuffle_ensemble
+        self.check_walkers = check_walkers
+        self.maxcall = maxcall
+
+        if is_test_mode():
+            self.apply_test_mode()
+
         self.logger.debug("Creating Zeus Search")
+
+    def apply_test_mode(self):
+        logger.warning(
+            "TEST MODE 1 (reduced iterations): Sampler will run with "
+            "minimal iterations for faster completion."
+        )
+        self.nwalkers = 20
+        self.nsteps = 10
 
     def _fit(self, model: AbstractPriorModel, analysis):
         """
@@ -148,7 +188,7 @@ class Zeus(AbstractMCMC):
             if samples.converged:
                 iterations_remaining = 0
             else:
-                iterations_remaining = self.config_dict_run["nsteps"] - total_iterations
+                iterations_remaining = self.nsteps - total_iterations
 
                 self.logger.info(
                     "Resuming Zeus non-linear search (previous samples found)."
@@ -156,7 +196,7 @@ class Zeus(AbstractMCMC):
 
         except (FileNotFoundError, AttributeError):
             search_internal = zeus.EnsembleSampler(
-                nwalkers=self.config_dict_search["nwalkers"],
+                nwalkers=self.nwalkers,
                 ndim=model.prior_count,
                 logprob_fn=fitness.call_wrap,
                 pool=pool,
@@ -193,7 +233,7 @@ class Zeus(AbstractMCMC):
                 state[index, :] = np.asarray(parameters)
 
             total_iterations = 0
-            iterations_remaining = self.config_dict_run["nsteps"]
+            iterations_remaining = self.nsteps
 
         while iterations_remaining > 0:
             if self.iterations_per_full_update > iterations_remaining:
@@ -219,7 +259,7 @@ class Zeus(AbstractMCMC):
             log_posterior_list = search_internal.get_last_log_prob()
 
             total_iterations += iterations
-            iterations_remaining = self.config_dict_run["nsteps"] - total_iterations
+            iterations_remaining = self.nsteps - total_iterations
 
             samples = self.samples_from(model=model, search_internal=search_internal)
 
@@ -239,8 +279,8 @@ class Zeus(AbstractMCMC):
             thin = int(np.max(auto_correlation_time) / 2.0)
             chain = search_internal.get_chain(discard=discard, thin=thin, flat=True)
 
-            if "maxcall" in self.kwargs:
-                if search_internal.ncall_total > self.kwargs["maxcall"]:
+            if self.maxcall is not None:
+                if search_internal.ncall_total > self.maxcall:
                     iterations_remaining = 0
 
             if iterations_remaining > 0:
@@ -373,26 +413,3 @@ class Zeus(AbstractMCMC):
             previous_times=previous_auto_correlation_times,
         )
 
-    def config_dict_test_mode_from(self, config_dict: Dict) -> Dict:
-        """
-        Returns a configuration dictionary for test mode meaning that the sampler terminates as quickly as possible.
-
-        Entries which set the total number of samples of the sampler (e.g. maximum calls, maximum likelihood
-        evaluations) are reduced to low values meaning it terminates nearly immediately.
-
-        Parameters
-        ----------
-        config_dict
-            The original configuration dictionary for this sampler which includes entries controlling how fast the
-            sampler terminates.
-
-        Returns
-        -------
-        A configuration dictionary where settings which control the sampler's number of samples are reduced so it
-        terminates as quickly as possible.
-        """
-        return {
-            **config_dict,
-            "nwalkers": 20,
-            "nsteps": 10,
-        }

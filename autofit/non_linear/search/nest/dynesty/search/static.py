@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, Union
+from typing import Dict, Optional, Union
 
 
 from autofit.database.sqlalchemy_ import sa
@@ -29,9 +29,14 @@ class DynestyStatic(AbstractDynesty):
         name: Optional[str] = None,
         path_prefix: Optional[Union[str, Path]] = None,
         unique_tag: Optional[str] = None,
+        nlive: int = 50,
+        dlogz: Optional[float] = None,
+        maxiter: Optional[int] = None,
+        logl_max: float = float("inf"),
         iterations_per_quick_update: int = None,
         iterations_per_full_update: int = None,
-        number_of_cores: int = None,
+        number_of_cores: int = 1,
+        silence: bool = False,
         session: Optional[sa.orm.Session] = None,
         **kwargs,
     ):
@@ -52,6 +57,15 @@ class DynestyStatic(AbstractDynesty):
         unique_tag
             The name of a unique tag for this model-fit, which will be given a unique entry in the sqlite database
             and also acts as the folder after the path prefix and before the search name.
+        nlive
+            Number of live points used for sampling.
+        dlogz
+            Stopping criterion: iteration stops when the estimated contribution of the remaining prior volume
+            to the total evidence falls below this threshold.
+        maxiter
+            Maximum number of iterations.
+        logl_max
+            Maximum log-likelihood value allowed.
         iterations_per_full_update
             The number of iterations performed between update (e.g. output latest model to hard-disk, visualization).
         number_of_cores
@@ -67,9 +81,27 @@ class DynestyStatic(AbstractDynesty):
             iterations_per_quick_update=iterations_per_quick_update,
             iterations_per_full_update=iterations_per_full_update,
             number_of_cores=number_of_cores,
+            silence=silence,
             session=session,
             **kwargs,
         )
+
+        self.nlive = nlive
+        self.dlogz = dlogz
+        self.maxiter = maxiter
+        self.logl_max = logl_max
+
+        from autofit.non_linear.test_mode import is_test_mode
+        if is_test_mode():
+            self.apply_test_mode()
+
+    @property
+    def run_kwargs(self) -> Dict:
+        return {
+            "dlogz": self.dlogz,
+            "maxiter": self.maxiter,
+            "logl_max": self.logl_max,
+        }
 
     @property
     def search_internal(self):
@@ -131,7 +163,8 @@ class DynestyStatic(AbstractDynesty):
                     live_points=live_points,
                     queue_size=queue_size,
                     pool=pool,
-                    **self.config_dict_search,
+                    nlive=self.nlive,
+                    **self.search_kwargs,
                 )
 
             self.write_uses_pool(uses_pool=False)
@@ -142,9 +175,10 @@ class DynestyStatic(AbstractDynesty):
                 logl_args=[model, fitness],
                 ptform_args=[model],
                 live_points=live_points,
-                **self.config_dict_search,
+                nlive=self.nlive,
+                **self.search_kwargs,
             )
 
     @property
     def number_live_points(self):
-        return self.config_dict_search["nlive"]
+        return self.nlive

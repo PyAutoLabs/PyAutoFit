@@ -1,3 +1,4 @@
+import logging
 import os
 from abc import ABC
 from typing import Dict, Optional, Tuple, Union
@@ -5,7 +6,6 @@ from typing import Dict, Optional, Tuple, Union
 import numpy as np
 import warnings
 
-from autoconf import conf
 from autofit import exc
 from autofit.database.sqlalchemy_ import sa
 from autofit.non_linear.fitness import Fitness
@@ -14,6 +14,9 @@ from autofit.non_linear.paths.null import NullPaths
 from autofit.non_linear.search.nest.abstract_nest import AbstractNest
 from autofit.non_linear.samples.sample import Sample
 from autofit.non_linear.samples.nest import SamplesNest
+from autofit.non_linear.test_mode import is_test_mode
+
+logger = logging.getLogger(__name__)
 
 
 def prior_transform(cube, model):
@@ -33,9 +36,23 @@ class AbstractDynesty(AbstractNest, ABC):
         name: Optional[str] = None,
         path_prefix: Optional[str] = None,
         unique_tag: Optional[str] = None,
+        bound: str = "multi",
+        sample: str = "auto",
+        bootstrap: Optional[int] = None,
+        enlarge: Optional[float] = None,
+        walks: int = 5,
+        facc: float = 0.2,
+        slices: int = 5,
+        fmove: float = 0.9,
+        max_move: int = 100,
+        update_interval: Optional[float] = None,
+        first_update: Optional[dict] = None,
+        maxcall: Optional[int] = None,
         iterations_per_quick_update: int = None,
         iterations_per_full_update: int = None,
-        number_of_cores: int = None,
+        number_of_cores: int = 1,
+        silence: bool = False,
+        force_x1_cpu: bool = False,
         session: Optional[sa.orm.Session] = None,
         **kwargs,
     ):
@@ -56,20 +73,23 @@ class AbstractDynesty(AbstractNest, ABC):
         unique_tag
             The name of a unique tag for this model-fit, which will be given a unique entry in the sqlite database
             and also acts as the folder after the path prefix and before the search name.
+        bound
+            Method used to approximately bound the prior using the current set of live points.
+        sample
+            Method used to sample uniformly within the likelihood constraint.
+        maxcall
+            Maximum number of likelihood evaluations.
         iterations_per_full_update
-            The number of iterations performed between every Dynesty back-up (via dumping the Dynesty instance as a
-            pickle)
+            The number of iterations performed between every Dynesty back-up.
         number_of_cores
             The number of cores sampling is performed using a Python multiprocessing Pool instance.
+        silence
+            If True, the default print output of the non-linear search is silenced.
+        force_x1_cpu
+            If True, force single-CPU mode even when number_of_cores > 1.
         session
             An SQLalchemy session instance so the results of the model-fit are written to an SQLite database.
         """
-
-        number_of_cores = (
-            self._config("parallel", "number_of_cores")
-            if number_of_cores is None
-            else number_of_cores
-        )
 
         super().__init__(
             name=name,
@@ -78,11 +98,49 @@ class AbstractDynesty(AbstractNest, ABC):
             iterations_per_quick_update=iterations_per_quick_update,
             iterations_per_full_update=iterations_per_full_update,
             number_of_cores=number_of_cores,
+            silence=silence,
             session=session,
             **kwargs,
         )
 
+        self.bound = bound
+        self.sample = sample
+        self.bootstrap = bootstrap
+        self.enlarge = enlarge
+        self.walks = walks
+        self.facc = facc
+        self.slices = slices
+        self.fmove = fmove
+        self.max_move = max_move
+        self.update_interval = update_interval
+        self.first_update = first_update
+
+        self.maxcall = maxcall
+        self.force_x1_cpu = force_x1_cpu
+
         self.logger.debug(f"Creating {self.__class__.__name__} Search")
+
+    @property
+    def search_kwargs(self) -> Dict:
+        """Shared search kwargs passed to both Static and Dynamic Dynesty samplers."""
+        return {
+            "bound": self.bound,
+            "sample": self.sample,
+            "bootstrap": self.bootstrap,
+            "enlarge": self.enlarge,
+            "walks": self.walks,
+            "facc": self.facc,
+            "slices": self.slices,
+            "fmove": self.fmove,
+            "max_move": self.max_move,
+            "update_interval": self.update_interval,
+            "first_update": self.first_update,
+        }
+
+    @property
+    def run_kwargs(self) -> Dict:
+        """Run kwargs specific to each subclass, excluding maxcall."""
+        raise NotImplementedError()
 
     def _fit(
         self,
@@ -141,13 +199,7 @@ class AbstractDynesty(AbstractNest, ABC):
 
         while not finished:
             try:
-                if (
-                    conf.instance["non_linear"]["nest"][self.__class__.__name__][
-                        "parallel"
-                    ].get("force_x1_cpu")
-                    or self.kwargs.get("force_x1_cpu")
-                    or analysis._use_jax
-                ):
+                if self.force_x1_cpu or analysis._use_jax:
                     raise RuntimeError
 
                 from dynesty.pool import Pool
@@ -284,10 +336,8 @@ class AbstractDynesty(AbstractNest, ABC):
         """
 
         if isinstance(self.paths, NullPaths):
-            maxcall = self.config_dict_run.get("maxcall")
-
-            if maxcall is not None:
-                return maxcall, maxcall
+            if self.maxcall is not None:
+                return self.maxcall, self.maxcall
             return int(1e99), int(1e99)
 
         try:
@@ -295,8 +345,8 @@ class AbstractDynesty(AbstractNest, ABC):
         except AttributeError:
             total_iterations = 0
 
-        if self.config_dict_run.get("maxcall") is not None:
-            iterations = self.config_dict_run["maxcall"] - total_iterations
+        if self.maxcall is not None:
+            iterations = self.maxcall - total_iterations
 
             return int(iterations), int(total_iterations)
         return self.iterations_per_full_update, int(total_iterations)
@@ -328,12 +378,6 @@ class AbstractDynesty(AbstractNest, ABC):
             search_internal=search_internal
         )
 
-        config_dict_run = {
-            key: value
-            for key, value in self.config_dict_run.items()
-            if key != "maxcall"
-        }
-
         if iterations > 0:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
@@ -342,7 +386,7 @@ class AbstractDynesty(AbstractNest, ABC):
                     maxcall=iterations,
                     print_progress=not self.silence,
                     checkpoint_file=self.checkpoint_file,
-                    **config_dict_run,
+                    **self.run_kwargs,
                 )
 
         iterations_after_run = np.sum(search_internal.results.ncall)
@@ -352,7 +396,7 @@ class AbstractDynesty(AbstractNest, ABC):
 
         return (
             total_iterations == iterations_after_run
-            or total_iterations == self.config_dict_run.get("maxcall")
+            or total_iterations == self.maxcall
         )
 
     def write_uses_pool(self, uses_pool: bool) -> str:
@@ -395,29 +439,12 @@ class AbstractDynesty(AbstractNest, ABC):
         except TypeError:
             pass
 
-    def config_dict_test_mode_from(self, config_dict: Dict) -> Dict:
-        """
-        Returns a configuration dictionary for test mode meaning that the sampler terminates as quickly as possible.
-
-        Entries which set the total number of samples of the sampler (e.g. maximum calls, maximum likelihood
-        evaluations) are reduced to low values meaning it terminates nearly immediately.
-
-        Parameters
-        ----------
-        config_dict
-            The original configuration dictionary for this sampler which includes entries controlling how fast the
-            sampler terminates.
-
-        Returns
-        -------
-        A configuration dictionary where settings which control the sampler's number of samples are reduced so it
-        terminates as quickly as possible.
-        """
-        return {
-            **config_dict,
-            "maxiter": 1,
-            "maxcall": 1,
-        }
+    def apply_test_mode(self):
+        logger.warning(
+            "TEST MODE 1 (reduced iterations): Sampler will run with "
+            "minimal iterations for faster completion."
+        )
+        self.maxcall = 1
 
     def live_points_init_from(self, model, fitness):
         """

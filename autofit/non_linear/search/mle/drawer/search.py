@@ -18,9 +18,11 @@ class Drawer(AbstractMLE):
         name: Optional[str] = None,
         path_prefix: Optional[str] = None,
         unique_tag: Optional[str] = None,
+        total_draws: int = 50,
         initializer: Optional[AbstractInitializer] = None,
         iterations_per_full_update: int = None,
         iterations_per_quick_update: int = None,
+        silence: bool = False,
         session: Optional[sa.orm.Session] = None,
         **kwargs,
     ):
@@ -64,8 +66,6 @@ class Drawer(AbstractMLE):
             An SQLalchemy session instance so the results of the model-fit are written to an SQLite database.
         """
 
-        number_of_cores = 1
-
         super().__init__(
             name=name,
             path_prefix=path_prefix,
@@ -73,10 +73,13 @@ class Drawer(AbstractMLE):
             initializer=initializer,
             iterations_per_quick_update=iterations_per_quick_update,
             iterations_per_full_update=iterations_per_full_update,
-            number_of_cores=number_of_cores,
+            number_of_cores=1,
+            silence=silence,
             session=session,
             **kwargs,
         )
+
+        self.total_draws = total_draws
 
         self.logger.debug("Creating Drawer Search")
 
@@ -108,7 +111,7 @@ class Drawer(AbstractMLE):
             convert_to_chi_squared=False,
         )
 
-        total_draws = self.config_dict_search["total_draws"]
+        total_draws = self.total_draws
 
         self.logger.info(
             f"Performing DrawerSearch for a total of {total_draws} points."
@@ -119,7 +122,7 @@ class Drawer(AbstractMLE):
             parameter_lists,
             log_posterior_list,
         ) = self.initializer.samples_from_model(
-            total_points=self.config_dict_search["total_draws"],
+            total_points=self.total_draws,
             model=model,
             fitness=fitness,
             paths=self.paths,
