@@ -36,10 +36,10 @@ dependencies = [
     "numpydoc>=1.0.0",
 
     "h5py>=3.11.0",
-    "SQLAlchemy==2.0.32",
-    "scipy<=1.15.2",
+    "SQLAlchemy>=2.0.32,<2.1.0",
+    "scipy<=1.17.1",
     "astunparse==1.6.3",
-    "threadpoolctl>=3.1.0,<=3.2.0",
+    "threadpoolctl>=3.1.0",
     "timeout-decorator==0.5.0",
     "xxhash<=3.4.1",
     "networkx==3.1",
