@@ -55,10 +55,10 @@ def result_info_from(samples) -> str:
     Output the full model.results file, which include the most-likely model, most-probable model at 1 and 3
     sigma confidence and information on the maximum log likelihood.
     """
-    from autofit.non_linear.test_mode import test_mode_level
+    from autofit.non_linear.test_mode import skip_fit_output
 
-    if test_mode_level() >= 2:
-        return "[test mode — result info skipped]"
+    if skip_fit_output():
+        return "[fit output skipped — PYAUTO_SKIP_FIT_OUTPUT=1]"
 
     results = []
 

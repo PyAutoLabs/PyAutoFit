@@ -80,7 +80,7 @@ def test__priors__samples_from_model__raise_exception_if_all_likelihoods_identic
 
 
 def test__priors__samples_in_test_mode():
-    os.environ["PYAUTOFIT_TEST_MODE"] = "1"
+    os.environ["PYAUTO_TEST_MODE"] = "1"
 
     model = af.Model(af.m.MockClassx4)
     model.one = af.UniformPrior(lower_limit=0.099, upper_limit=0.101)
@@ -121,7 +121,7 @@ def test__priors__samples_in_test_mode():
 
     assert figure_of_merit_list == [-1.0e99, -1.0e100]
 
-    os.environ["PYAUTOFIT_TEST_MODE"] = "0"
+    os.environ["PYAUTO_TEST_MODE"] = "0"
 
 
 def test__ball__samples_sample_centre_of_priors():

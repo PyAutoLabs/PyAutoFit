@@ -456,8 +456,8 @@ class Fitness:
         """
         import numpy as np
 
-        from autofit.non_linear.test_mode import is_test_mode
-        if is_test_mode():
+        from autofit.non_linear.test_mode import skip_fit_output
+        if skip_fit_output():
             return
 
         if not conf.instance["general"]["test"]["check_likelihood_function"]:

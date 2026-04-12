@@ -13,7 +13,7 @@ from autoconf import conf
 from autoconf.class_path import get_class_path
 from autofit import exc
 from autofit.mapper.model import ModelInstance
-from autofit.non_linear.test_mode import is_test_mode
+from autofit.non_linear.test_mode import skip_checks
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.samples.sample import Sample
 
@@ -379,7 +379,7 @@ class Samples(SamplesInterface, ABC):
         if weight_threshold is None:
             weight_threshold = conf.instance["output"]["samples_weight_threshold"]
 
-        if is_test_mode():
+        if skip_checks():
             weight_threshold = None
 
         if weight_threshold is None:
