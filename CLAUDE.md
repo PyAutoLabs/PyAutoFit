@@ -37,7 +37,7 @@ Shared utilities (e.g. `test_mode`, `jax_wrapper`) belong in autoconf.
 
 ## Key Dependencies
 
-- `dynesty==2.1.4` - Nested sampling
+- `dynesty==2.1.5` - Nested sampling
 - `emcee>=3.1.6` - MCMC
 - `scipy<=1.14.0` - Optimisation
 - `SQLAlchemy==2.0.32` - Database backend
