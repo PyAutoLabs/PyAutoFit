@@ -303,7 +303,12 @@ class GridSearchResult(AbstractGridSearchResult):
             The value to subtract from every log likelihood, for example if Bayesian model comparison is performed
             on the grid search and the subtracted value is the maximum log likelihood of a previous search.
         """
-        return [sample.log_evidence - relative_to_value for sample in self.samples]
+        return [
+            sample.log_evidence - relative_to_value
+            if sample.log_evidence is not None
+            else None
+            for sample in self.samples
+        ]
 
     def figure_of_merits(
         self, use_log_evidences: bool, relative_to_value: float = 0.0

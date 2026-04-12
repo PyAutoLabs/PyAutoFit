@@ -95,6 +95,11 @@ class AbstractInterpolator(ABC):
             value_map = self._value_map(item.path)
             x = sorted(value_map)
 
+            if not self.instances:
+                raise IndexError(
+                    "Cannot interpolate: no instances have been added to the interpolator."
+                )
+
             instance = self.instances[0]
             new_instance = copy.copy(instance)
 
