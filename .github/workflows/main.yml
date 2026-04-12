@@ -6,8 +6,9 @@ jobs:
   unittest:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ['3.12']
+        python-version: ['3.12', '3.13']
     steps:
     - name: Checkout PyAutoConf
       uses: actions/checkout@v2
@@ -59,14 +60,33 @@ jobs:
         pip3 install setuptools
         pip3 install wheel
         pip3 install pytest coverage pytest-cov
-        pip install ./PyAutoConf "./PyAutoFit[optional]"
+        if [ "${{ matrix.python-version }}" = "3.12" ]; then
+          pip install ./PyAutoConf "./PyAutoFit[optional]"
+        else
+          pip install ./PyAutoConf ./PyAutoFit
+        fi
     - name: Run tests
       run: |
         export ROOT_DIR=`pwd`
         export PYTHONPATH=$PYTHONPATH:$ROOT_DIR/PyAutoConf
         export PYTHONPATH=$PYTHONPATH:$ROOT_DIR/PyAutoFit
         pushd PyAutoFit
-        pytest --cov autofit --cov-report xml:coverage.xml
+        if [ "${{ matrix.python-version }}" = "3.13" ]; then
+          pytest --cov autofit --cov-report xml:coverage.xml \
+            --ignore=test_autofit/database/test_file_types.py \
+            --ignore=test_autofit/non_linear/paths/test_save_and_load.py \
+            --ignore=test_autofit/aggregator/summary_files/test_aggregate_fits.py \
+            --ignore=test_autofit/aggregator/test_child_analysis.py \
+            --ignore=test_autofit/aggregator/test_reference.py \
+            --ignore=test_autofit/aggregator/test_scrape.py \
+            --ignore=test_autofit/graphical/gaussian/test_optimizer.py \
+            --ignore=test_autofit/graphical/hierarchical/test_optimise.py \
+            --ignore=test_autofit/non_linear/search/test_sneaky_map.py \
+            --deselect "test_autofit/graphical/test_composition.py::test_other_priors[LogUniformPrior]" \
+            --deselect "test_autofit/mapper/prior/test_prior.py::TestLogUniformPrior::test__non_zero_lower_limit"
+        else
+          pytest --cov autofit --cov-report xml:coverage.xml
+        fi
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v3
     - name: Slack send

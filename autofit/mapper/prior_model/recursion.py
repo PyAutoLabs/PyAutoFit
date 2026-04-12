@@ -45,7 +45,7 @@ def replace_promise(promise: RecursionPromise, obj, true_value, seen_objects=Non
     if obj is promise:
         return true_value
     try:
-        for key, value in obj.__dict__.items():
+        for key, value in list(obj.__dict__.items()):
             setattr(
                 obj,
                 key,

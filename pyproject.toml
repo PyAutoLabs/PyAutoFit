@@ -18,13 +18,15 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Physics",
   "Natural Language :: English",
   "Operating System :: OS Independent",
-  "Programming Language :: Python :: 3.12"
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13"
 ]
 keywords = ["cli"]
 dependencies = [
     "autoconf",
     "array_api_compat",
-    "anesthetic==2.8.14",
+    "anesthetic==2.8.14; python_version < '3.13'",
+    "anesthetic>=2.9.0; python_version >= '3.13'",
     "corner==2.2.2",
     "decorator>=4.2.1",
     "dill>=0.3.1.1",
