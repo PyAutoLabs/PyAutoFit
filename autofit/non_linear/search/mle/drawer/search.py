@@ -143,7 +143,7 @@ class Drawer(AbstractMLE):
 
         return search_internal, fitness
 
-    def samples_from(self, model, search_internal):
+    def samples_via_internal_from(self, model, search_internal=None):
         search_internal_dict = self.paths.load_search_internal()
 
         parameter_lists = search_internal_dict["parameter_lists"]

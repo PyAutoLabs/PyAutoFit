@@ -22,10 +22,6 @@ class StaticSearch(af.NonLinearSearch):
     def _fit(self, model, analysis):
         pass
 
-    @property
-    def samples_cls(self):
-        pass
-
     def samples_from(self, model):
         pass
 
