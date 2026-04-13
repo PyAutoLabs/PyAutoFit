@@ -1211,10 +1211,6 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             paths_override=paths,
         )
 
-    @property
-    def samples_cls(self):
-        raise NotImplementedError()
-
     def samples_from(self, model: AbstractPriorModel, search_internal=None) -> Samples:
         """
         Loads the samples of a non-linear search from its output files.

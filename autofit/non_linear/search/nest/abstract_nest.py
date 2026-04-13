@@ -10,7 +10,6 @@ from autofit.non_linear.initializer import (
     AbstractInitializer,
     InitializerParamBounds,
 )
-from autofit.non_linear.samples import SamplesNest
 from autofit.non_linear.plot import corner_anesthetic
 
 
@@ -62,10 +61,6 @@ class AbstractNest(NonLinearSearch, ABC):
             session=session,
             **kwargs
         )
-
-    @property
-    def samples_cls(self):
-        return SamplesNest
 
     def plot_results(self, samples):
 
