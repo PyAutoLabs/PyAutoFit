@@ -21,7 +21,6 @@ parallel:
   warn_environment_variables: false # If True, a warning is displayed when the search's number of CPU > 1 and enviromment variables related to threading are also > 1.
 profiling:
   parallel_profile: false           # If True, the parallelization of the fit is profiled outputting a cPython graph.
-  should_profile: false             # If True, the ``profile_log_likelihood_function()`` function of an analysis class is called throughout a model-fit, profiling run times.
   repeats: 1                        # The number of repeat function calls used to measure run-times when profiling.
 test:
   check_likelihood_function: false  # if True, when a search is resumed the likelihood of a previous sample is recalculated to ensure it is consistent with the previous run.
