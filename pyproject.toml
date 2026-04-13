@@ -23,7 +23,7 @@ classifiers = [
 ]
 keywords = ["cli"]
 dependencies = [
-    "autoconf==2026.4.13.3",
+    "autoconf",
     "array_api_compat",
     "anesthetic==2.8.14; python_version < '3.13'",
     "anesthetic>=2.9.0; python_version >= '3.13'",
