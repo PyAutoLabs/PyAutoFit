@@ -299,6 +299,16 @@ class Analysis(ABC):
             analysis=analysis,
         )
 
+    @property
+    def supports_background_update(self) -> bool:
+        """Whether this analysis supports background quick updates."""
+        return False
+
+    @property
+    def supports_jax_visualization(self) -> bool:
+        """Whether the visualizer can work directly with JAX arrays."""
+        return False
+
     def perform_quick_update(self, paths, instance):
         raise NotImplementedError
 
