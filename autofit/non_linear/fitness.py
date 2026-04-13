@@ -44,6 +44,7 @@ class Fitness:
         use_jax_vmap : bool = False,
         batch_size : Optional[int] = None,
         iterations_per_quick_update: Optional[int] = None,
+        background_quick_update: bool = False,
     ):
         """
         Interfaces with any non-linear search to fit the model to the data and return a log likelihood via
@@ -128,6 +129,20 @@ class Fitness:
         self.quick_update_max_lh_parameters = None
         self.quick_update_max_lh = -self._xp.inf
         self.quick_update_count = 0
+
+        self._background_quick_update = None
+
+        if background_quick_update and self.iterations_per_quick_update is not None:
+            from autofit.non_linear.quick_update import BackgroundQuickUpdate
+
+            convert_jax = (
+                getattr(self.analysis, "_use_jax", False)
+                and not getattr(self.analysis, "supports_jax_visualization", False)
+            )
+
+            self._background_quick_update = BackgroundQuickUpdate(
+                convert_jax=convert_jax,
+            )
 
         if self.paths is not None:
             self.check_log_likelihood(fitness=self)
@@ -314,10 +329,15 @@ class Fitness:
 
             instance = self.model.instance_from_vector(vector=self.quick_update_max_lh_parameters, xp=self._xp)
 
-            try:
-                self.analysis.perform_quick_update(self.paths, instance)
-            except NotImplementedError:
-                pass
+            if self._background_quick_update is not None:
+                self._background_quick_update.submit(
+                    self.analysis, self.paths, instance,
+                )
+            else:
+                try:
+                    self.analysis.perform_quick_update(self.paths, instance)
+                except NotImplementedError:
+                    pass
 
             result_info = text_util.result_max_lh_info_from(
                 max_log_likelihood_sample=self.quick_update_max_lh_parameters.tolist(),
@@ -332,6 +352,12 @@ class Fitness:
             self.quick_update_count = 0
 
             logger.info(f"Quick update complete in {time.time() - start_time} seconds.")
+
+    def shutdown_quick_update(self):
+        """Shut down the background quick-update worker, if one is running."""
+        if self._background_quick_update is not None:
+            self._background_quick_update.shutdown()
+            self._background_quick_update = None
 
     @timeout(timeout_seconds)
     def __call__(self, parameters, *kwargs):

@@ -192,6 +192,7 @@ class Nautilus(abstract_nest.AbstractNest):
                 fom_is_log_likelihood=True,
                 resample_figure_of_merit=-1.0e99,
                 iterations_per_quick_update=self.iterations_per_quick_update,
+                background_quick_update=self.quick_update_background,
                 use_jax_vmap=self.use_jax_vmap,
                 batch_size=self.n_batch,
             )
@@ -210,7 +211,8 @@ class Nautilus(abstract_nest.AbstractNest):
                 paths=self.paths,
                 fom_is_log_likelihood=True,
                 resample_figure_of_merit=-1.0e99,
-                iterations_per_quick_update=self.iterations_per_quick_update
+                iterations_per_quick_update=self.iterations_per_quick_update,
+                background_quick_update=self.quick_update_background,
             )
 
             search_internal = self.fit_multiprocessing(

@@ -214,6 +214,12 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         self.iterations_per_full_update = float((iterations_per_full_update or
             conf.instance["general"]["updates"]["iterations_per_full_update"]))
 
+        self.quick_update_background = bool(
+            conf.instance["general"]["updates"].get(
+                "quick_update_background", False,
+            )
+        )
+
         if conf.instance["general"]["hpc"]["hpc_mode"]:
             self.iterations_per_quick_update = float(conf.instance["general"]["hpc"][
                 "iterations_per_quick_update"
@@ -663,6 +669,9 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             model=model,
             analysis=analysis,
         )
+
+        if hasattr(fitness, "shutdown_quick_update"):
+            fitness.shutdown_quick_update()
 
         samples = self.perform_update(
             model=model,
