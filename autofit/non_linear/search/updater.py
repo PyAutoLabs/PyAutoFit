@@ -44,7 +44,6 @@ class SearchUpdater:
         search_logger: logging.Logger,
         plot_results_func: Callable[[Samples], None],
         samples_from_func: Callable[[AbstractPriorModel, ...], Samples],
-        should_profile: bool,
         disable_output: bool,
         iterations_per_full_update: float,
     ):
@@ -53,7 +52,6 @@ class SearchUpdater:
         self._logger = search_logger
         self._plot_results = plot_results_func
         self._samples_from = samples_from_func
-        self._should_profile = should_profile
         self._disable_output = disable_output
         self._iterations_per_full_update = iterations_per_full_update
         self._iterations = 0
@@ -288,14 +286,7 @@ class SearchUpdater:
         latent_samples: Optional[Samples],
         visualization_time: float,
     ):
-        """Run profiling and write the search summary file."""
-        if self._should_profile:
-            self._logger.debug("Profiling Maximum Likelihood Model")
-            analysis.profile_log_likelihood_function(
-                paths=self._paths,
-                instance=instance,
-            )
-
+        """Write the search summary file."""
         self._logger.debug("Outputting model result")
 
         try:

@@ -224,8 +224,6 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
 
         self.iterations = 0
 
-        self.should_profile = conf.instance["general"]["profiling"]["should_profile"]
-
         self.silence = silence
 
         if conf.instance["general"]["hpc"]["hpc_mode"]:
@@ -938,7 +936,6 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
                 search_logger=self.logger,
                 plot_results_func=self.plot_results,
                 samples_from_func=self.samples_from,
-                should_profile=self.should_profile,
                 disable_output=self.disable_output,
                 iterations_per_full_update=self.iterations_per_full_update,
             )
