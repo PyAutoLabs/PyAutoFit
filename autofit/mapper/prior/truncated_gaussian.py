@@ -16,7 +16,7 @@ class TruncatedGaussianPrior(Prior):
         upper_limit: float = float("inf"),
         id_: Optional[int] = None,
     ):
-        """
+        r"""
         A Gaussian prior defined by a normal distribution with optional truncation limits.
 
         This prior represents a Gaussian (normal) distribution with mean `mean`

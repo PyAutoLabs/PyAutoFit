@@ -9,7 +9,7 @@ from autoconf import cached_property
 
 
 class LinearOperator(ABC):
-    """Implements the functionality of a linear operator.
+    r"""Implements the functionality of a linear operator.
 
     All linear operators can be expressed as a tensor/matrix
     However for some it there may be more efficient representations

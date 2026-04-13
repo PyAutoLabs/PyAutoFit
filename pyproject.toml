@@ -89,3 +89,8 @@ dev = ["pytest", "black"]
 
 [tool.pytest.ini_options]
 testpaths = ["test_autofit"]
+filterwarnings = [
+    "ignore:cuda_plugin_extension:UserWarning",
+    "ignore::DeprecationWarning:jax",
+    "ignore:relationship .* will copy column:sqlalchemy.exc.SAWarning",
+]
