@@ -37,7 +37,7 @@ def test_make_result():
     assert child_result.model == model
 
 
-class TestAnalysis(af.Analysis):
+class MockAnalysis(af.Analysis):
     def __init__(self):
         super().__init__()
         calls = []
@@ -81,7 +81,7 @@ class TestAnalysis(af.Analysis):
 
 @pytest.fixture
 def analysis():
-    return TestAnalysis()
+    return MockAnalysis()
 
 
 @pytest.fixture

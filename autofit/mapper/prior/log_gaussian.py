@@ -18,7 +18,7 @@ class LogGaussianPrior(Prior):
         sigma: float,
         id_: Optional[int] = None,
     ):
-        """
+        r"""
         A prior for a variable whose logarithm is gaussian distributed. Work in natural log.
 
         The conversion of an input unit value, ``u``, to a physical value, ``p``, via the prior is as follows:

@@ -15,7 +15,7 @@ class GaussianPrior(Prior):
         sigma: float,
         id_: Optional[int] = None,
     ):
-        """
+        r"""
         A Gaussian prior defined by a normal distribution.
 
         The prior transforms a unit interval input `u` in [0, 1] into a physical parameter `p` via
