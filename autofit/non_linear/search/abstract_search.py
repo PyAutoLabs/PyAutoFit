@@ -927,6 +927,23 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             obj=search_internal,
         )
 
+    @property
+    def _updater(self):
+        if not hasattr(self, "_search_updater") or self._search_updater is None:
+            from autofit.non_linear.search.updater import SearchUpdater
+
+            self._search_updater = SearchUpdater(
+                paths=self.paths,
+                timer=self.timer,
+                search_logger=self.logger,
+                plot_results_func=self.plot_results,
+                samples_from_func=self.samples_from,
+                should_profile=self.should_profile,
+                disable_output=self.disable_output,
+                iterations_per_full_update=self.iterations_per_full_update,
+            )
+        return self._search_updater
+
     def perform_update(
         self,
         model: AbstractPriorModel,
@@ -938,152 +955,17 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         """
         Perform an update of the non-linear search's model-fitting results.
 
-        This occurs every `iterations_per_full_update` of the non-linear search and once it is complete.
-
-        The update performs the following tasks (if the settings indicate they should be performed):
-
-        1) Visualize the search results.
-        2) Visualize the maximum log likelihood model using model-specific visualization implented via the `Analysis`
-           object.
-        3) Perform profiling of the analysis object `log_likelihood_function` and ouptut run-time information.
-        4) Output the `search.summary` file which contains information on model-fitting so far.
-        5) Output the `model.results` file which contains a concise text summary of the model results so far.
-
-        Parameters
-        ----------
-        model
-            The model which generates instances for different points in parameter space.
-        analysis
-            Contains the data and the log likelihood function which fits an instance of the model to the data, returning
-            the log likelihood the `NonLinearSearch` maximizes.
-        during_analysis
-            If the update is during a non-linear search, in which case tasks are only performed after a certain number
-            of updates and only a subset of visualization may be performed.
+        Delegates to :class:`SearchUpdater` which separates each output
+        concern (samples, latent variables, visualization, profiling,
+        summary) into its own method.
         """
-        self.iterations += self.iterations_per_full_update
-
-        if not self.disable_output:
-            self.logger.info(
-                f"""Fit Running: Updating results (see output folder)."""
-            )
-
-        if not isinstance(self.paths, DatabasePaths) and not isinstance(
-            self.paths, NullPaths
-        ):
-            self.timer.update()
-
-        samples = self.samples_from(model=model, search_internal=search_internal)
-        samples_summary = samples.summary()
-
-        try:
-            instance = samples_summary.instance
-        except exc.FitException:
-            return samples
-
-        self.paths.save_samples_summary(samples_summary=samples_summary)
-
-        samples_save = samples
-
-        log_message = True
-
-        if during_analysis:
-            log_message = False
-        elif self.disable_output:
-            log_message = False
-
-        samples_save = samples_save.samples_above_weight_threshold_from(
-            log_message=log_message
-        )
-        self.paths.save_samples(samples=samples_save)
-
-        latent_samples = None
-
-        if (during_analysis and conf.instance["output"]["latent_during_fit"]) or (
-            not during_analysis and conf.instance["output"]["latent_after_fit"]
-        ):
-
-            if conf.instance["output"]["latent_draw_via_pdf"]:
-
-                total_draws = conf.instance["output"]["latent_draw_via_pdf_size"]
-
-                logger.info(f"Creating latent samples by drawing {total_draws} from the PDF.")
-
-                try:
-                    latent_samples = samples.samples_drawn_randomly_via_pdf_from(total_draws=total_draws)
-                except AttributeError:
-                    latent_samples = samples_save
-                    logger.info(
-                        "Drawing via PDF not available for this search, "
-                        "using all samples above the samples weight threshold instead."
-                        "")
-
-            else:
-
-                logger.info(f"Creating latent samples using all samples above the samples weight threshold.")
-
-                latent_samples = samples_save
-
-            latent_samples = analysis.compute_latent_samples(
-                latent_samples,
-                batch_size=fitness.batch_size
-            )
-
-            if latent_samples:
-                if not conf.instance["output"]["latent_draw_via_pdf"]:
-                    self.paths.save_latent_samples(latent_samples)
-                self.paths.save_samples_summary(
-                    latent_samples.summary(),
-                    "latent/latent_summary",
-                )
-
-        start = time.time()
-
-        self.perform_visualization(
+        return self._updater.update(
             model=model,
             analysis=analysis,
-            samples_summary=samples_summary,
             during_analysis=during_analysis,
+            fitness=fitness,
             search_internal=search_internal,
         )
-
-        visualization_time = time.time() - start
-
-        if self.should_profile:
-
-            self.logger.debug("Profiling Maximum Likelihood Model")
-
-            analysis.profile_log_likelihood_function(
-                paths=self.paths,
-                instance=instance,
-            )
-
-        self.logger.debug("Outputting model result")
-
-        try:
-
-            parameters = samples.max_log_likelihood(as_instance=False)
-
-            start = time.time()
-            figure_of_merit = fitness.call_wrap(parameters)
-
-            # account for asynchronous JAX calls
-            np.array(figure_of_merit)
-
-            log_likelihood_function_time = time.time() - start
-
-            self.paths.save_summary(
-                samples=samples,
-                latent_samples=latent_samples,
-                log_likelihood_function_time=log_likelihood_function_time,
-                visualization_time=visualization_time,
-            )
-
-        except exc.FitException:
-            pass
-
-        self._log_process_state()
-
-        return samples
 
     def perform_visualization(
         self,
@@ -1098,72 +980,17 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         """
         Perform visualization of the non-linear search's model-fitting results.
 
-        This occurs every `iterations_per_full_update` of the non-linear search, when the search is complete and can
-        also be forced to occur even though a search is completed on a rerun, to update the visualization
-        with different `matplotlib` settings.
-
-        The update performs the following tasks (if the settings indicate they should be performed):
-
-        1) Visualize the maximum log likelihood model using model-specific visualization implented via the `Analysis`
-           object.
-        2) Visualize the search results.
-
-        Parameters
-        ----------
-        model
-            The model which generates instances for different points in parameter space.
-        analysis
-            Contains the data and the log likelihood function which fits an instance of the model to the data, returning
-            the log likelihood the `NonLinearSearch` maximizes.
-        samples_summary
-            The summary of the samples of the non-linear search, which are used for visualization.
-        during_analysis
-            If the update is during a non-linear search, in which case tasks are only performed after a certain number
-            of updates and only a subset of visualization may be performed.
-        instance
-            The instance of the model that is used for visualization. If not input, the maximum log likelihood
-            instance from the samples is used.
+        Delegates to :class:`SearchUpdater.visualize`.
         """
-
-        self.logger.debug("Visualizing")
-
-        paths = paths_override or self.paths
-
-        if instance is None and samples_summary is None:
-            raise AssertionError(
-                """
-                The search's perform_visualization method has been called without an input instance or 
-                samples_summary. 
-
-                This should not occur, please ensure one of these inputs is provided.
-                """
-            )
-
-        if instance is None:
-            instance = samples_summary.instance
-
-        if analysis.should_visualize(paths=paths, during_analysis=during_analysis):
-            analysis.visualize(
-                paths=paths,
-                instance=instance,
-                during_analysis=during_analysis,
-            )
-            analysis.visualize_combined(
-                paths=paths,
-                instance=instance,
-                during_analysis=during_analysis,
-            )
-
-        if analysis.should_visualize(paths=paths, during_analysis=during_analysis):
-            if not isinstance(paths, NullPaths):
-                try:
-                    samples = self.samples_from(
-                        model=model, search_internal=search_internal
-                    )
-
-                    self.plot_results(samples=samples)
-                except FileNotFoundError:
-                    pass
+        self._updater.visualize(
+            model=model,
+            analysis=analysis,
+            during_analysis=during_analysis,
+            samples_summary=samples_summary,
+            instance=instance,
+            paths_override=paths_override,
+            search_internal=search_internal,
+        )
 
     @property
     def should_plot_start_point(self) -> bool:
