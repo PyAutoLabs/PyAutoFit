@@ -35,9 +35,13 @@ def corner_anesthetic(samples, path=None, filename="corner_anesthetic", format="
         columns=model.parameter_labels_with_superscripts_latex,
     )
 
-    from pandas.errors import SettingWithCopyWarning
+    try:
+        from pandas.errors import SettingWithCopyWarning
+    except ImportError:  # pandas >= 2.2 removed SettingWithCopyWarning
+        SettingWithCopyWarning = None
 
-    warnings.filterwarnings("ignore", category=SettingWithCopyWarning)
+    if SettingWithCopyWarning is not None:
+        warnings.filterwarnings("ignore", category=SettingWithCopyWarning)
 
     fig, axes = make_2d_axes(
         model.parameter_labels_with_superscripts_latex,
@@ -45,7 +49,8 @@ def corner_anesthetic(samples, path=None, filename="corner_anesthetic", format="
         facecolor=config_dict["facecolor"],
     )
 
-    warnings.filterwarnings("default", category=SettingWithCopyWarning)
+    if SettingWithCopyWarning is not None:
+        warnings.filterwarnings("default", category=SettingWithCopyWarning)
 
     nested_samples.plot_2d(
         axes,
