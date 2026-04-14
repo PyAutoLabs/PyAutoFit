@@ -1,5 +1,5 @@
 import sys
-from typing import Optional, List, Union, Callable, Type
+from typing import Optional, List, Tuple, Union, Callable, Type
 from pathlib import Path
 
 from PIL import Image
@@ -104,6 +104,7 @@ class AggregateImages:
         subplots: List[Union[Enum, List[Image.Image], Callable]],
         subplot_width: Optional[int] = sys.maxsize,
         transpose: bool = False,
+        panel_size: Optional[Tuple[int, int]] = None,
     ) -> Image.Image:
         """
         Extract the images at the specified subplots and combine them into
@@ -126,6 +127,12 @@ class AggregateImages:
         transpose
             If True the output image is transposed before being returned, else it
             is returned as is.
+        panel_size
+            If provided, all extracted panels are resized to this `(width, height)`
+            before compositing. If `None` (the default), panels are resized to the
+            maximum width and height across all panels, so that panels extracted
+            from source images with different grid layouts end up the same size
+            in the output.
 
         Returns
         -------
@@ -146,6 +153,8 @@ class AggregateImages:
 
             matrix = [list(row) for row in zip(*matrix)]
 
+        matrix = self._normalize_panel_sizes(matrix, panel_size=panel_size)
+
         return self._matrix_to_image(matrix)
 
     def output_to_folder(
@@ -154,6 +163,7 @@ class AggregateImages:
         name: Union[str, List[str]],
         subplots: List[Union[List[Image.Image], Callable]],
         subplot_width: Optional[int] = sys.maxsize,
+        panel_size: Optional[Tuple[int, int]] = None,
     ):
         """
         Output one subplot image for each fit in the aggregator.
@@ -176,6 +186,12 @@ class AggregateImages:
         name
             The attribute of each fit to use as the name of the output file.
             OR a list of names, one for each fit.
+        panel_size
+            If provided, all extracted panels are resized to this `(width, height)`
+            before compositing. If `None` (the default), panels are resized to the
+            maximum width and height across all panels, so that panels extracted
+            from source images with different grid layouts end up the same size
+            in the output.
         """
         if len(subplots) == 0:
             raise ValueError("At least one subplot must be provided.")
@@ -183,14 +199,16 @@ class AggregateImages:
         folder.mkdir(exist_ok=True, parents=True)
 
         for i, result in enumerate(self._aggregator):
-            image = self._matrix_to_image(
+            matrix = self._normalize_panel_sizes(
                 self._matrix_for_result(
                     i,
                     result,
                     subplots,
                     subplot_width=subplot_width,
-                )
+                ),
+                panel_size=panel_size,
             )
+            image = self._matrix_to_image(matrix)
 
             if isinstance(name, str):
                 output_name = getattr(result, name)
@@ -291,6 +309,38 @@ class AggregateImages:
             matrix.append(row)
 
         return matrix
+
+    @staticmethod
+    def _normalize_panel_sizes(
+        matrix: List[List[Image.Image]],
+        panel_size: Optional[Tuple[int, int]] = None,
+    ) -> List[List[Image.Image]]:
+        """
+        Resize every panel in the matrix to a common `(width, height)` so that
+        panels extracted from source images with different grid layouts are the
+        same size when composited.
+
+        If `panel_size` is `None`, the target size is the maximum width and
+        height across all panels in the matrix. LANCZOS resampling is used to
+        preserve image quality.
+        """
+        if not matrix:
+            return matrix
+
+        if panel_size is None:
+            max_width = max(image.width for row in matrix for image in row)
+            max_height = max(image.height for row in matrix for image in row)
+            target = (max_width, max_height)
+        else:
+            target = panel_size
+
+        return [
+            [
+                image if image.size == target else image.resize(target, Image.LANCZOS)
+                for image in row
+            ]
+            for row in matrix
+        ]
 
     @staticmethod
     def _matrix_to_image(matrix: List[List[Image.Image]]) -> Image.Image:
