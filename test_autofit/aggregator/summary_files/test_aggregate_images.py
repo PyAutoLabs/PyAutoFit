@@ -152,7 +152,7 @@ def test_custom_images(
         ]
     )
 
-    assert result.size == (193, 120)
+    assert result.size == (244, 120)
 
 
 def test_custom_function(aggregate):
@@ -168,7 +168,30 @@ def test_custom_function(aggregate):
         ]
     )
 
-    assert result.size == (193, 120)
+    assert result.size == (244, 120)
+
+
+def test_panel_size_explicit_normalizes_all_panels(aggregate, aggregator):
+    small = Image.new("RGB", (10, 10), "white")
+    images = [small for _ in aggregator]
+
+    result = aggregate.extract_image(
+        [SubplotFit.Data, images],
+        panel_size=(50, 50),
+    )
+
+    assert result.size == (100, 100)
+
+
+def test_panel_size_defaults_to_max(aggregate, aggregator):
+    small = Image.new("RGB", (10, 10), "white")
+    images = [small for _ in aggregator]
+
+    result = aggregate.extract_image(
+        [SubplotFit.Data, images],
+    )
+
+    assert result.size == (122, 120)
 
 
 def test_custom_subplot_fit(aggregate):
