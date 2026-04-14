@@ -13,7 +13,7 @@ jobs:
     - name: Checkout PyAutoConf
       uses: actions/checkout@v2
       with:
-        repository: rhayes777/PyAutoConf
+        repository: PyAutoLabs/PyAutoConf
         path: PyAutoConf
     - name: Checkout PyAutoFit
       uses: actions/checkout@v2
