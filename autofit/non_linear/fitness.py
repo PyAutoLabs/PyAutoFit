@@ -168,10 +168,10 @@ class Fitness:
         -------
         The figure of merit returned to the non-linear search, which is either the log likelihood or log posterior.
         """
-        # Get instance from model
-        instance = self.model.instance_from_vector(vector=parameters, xp=self._xp)
-
         if self._xp.__name__.startswith("jax"):
+
+            # Get instance from model (must be side-effect free and exception-free under JAX)
+            instance = self.model.instance_from_vector(vector=parameters, xp=self._xp)
 
             # Evaluate log likelihood (must be side-effect free and exception-free)
             log_likelihood = self.analysis.log_likelihood_function(instance=instance)
@@ -179,6 +179,7 @@ class Fitness:
         else:
 
             try:
+                instance = self.model.instance_from_vector(vector=parameters, xp=self._xp)
                 log_likelihood = self.analysis.log_likelihood_function(instance=instance)
             except exc.FitException:
                 return self.resample_figure_of_merit
