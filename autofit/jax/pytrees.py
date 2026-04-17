@@ -74,6 +74,7 @@ def register_model(model) -> bool:
         return False
 
     from autofit.mapper.prior.abstract import Prior
+    from autofit.mapper.prior.tuple_prior import TuplePrior
     from autofit.mapper.prior_model.prior_model import Model
     from autofit.mapper.prior_model.collection import Collection
     from autofit.mapper.prior_model.abstract import AbstractPriorModel
@@ -83,7 +84,7 @@ def register_model(model) -> bool:
             cls = node.cls
             classifier = _CLASS_FIELD_CLASSIFIERS.setdefault(cls, {})
             for name, value in node.items():
-                is_dynamic = isinstance(value, (Prior, AbstractPriorModel))
+                is_dynamic = isinstance(value, (Prior, AbstractPriorModel, TuplePrior))
                 # setdefault: earliest classification wins. Different models
                 # sharing the same cls (e.g. lens vs source Galaxy) may
                 # declare different attribute sets; we accumulate them all.
@@ -123,9 +124,10 @@ def _build_instance_pytree_funcs(cls):
     Each attribute is classified as:
 
     * **Dynamic** (prior-derived): the corresponding ``Model`` attribute was
-      a ``Prior`` or ``AbstractPriorModel``. Resolved to concrete numbers
-      (or nested instances) per sampled point, so it becomes a JAX child leaf
-      and gets traced under ``jax.jit``.
+      a ``Prior``, ``AbstractPriorModel``, or ``TuplePrior``. Resolved to
+      concrete numbers (or nested instances, or a Python tuple of scalars in
+      the ``TuplePrior`` case) per sampled point, so it becomes a JAX child
+      leaf (or tuple of leaves) and gets traced under ``jax.jit``.
     * **Constant**: everything else — a fixed ``redshift=0.5``, or a concrete
       non-prior kwarg like ``Galaxy(pixelization=<Pixelization>)``. Goes into
       ``aux_data`` so it stays as the original Python object inside a trace.

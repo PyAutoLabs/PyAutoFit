@@ -125,6 +125,50 @@ def test_register_model_keeps_kwarg_constants_static():
     assert float(result) == pytest.approx(2.0 * instance.scale)
 
 
+def test_register_model_traces_tuple_prior_attributes():
+    """``TuplePrior``-backed attributes must be routed into JAX children so
+    gradients flow through paired priors like ``centre=(x, y)`` and
+    ``ell_comps=(e1, e2)``.
+
+    Mirrors real-world MGE / Isothermal / ExternalShear usage where the
+    paired priors are the majority of the free parameters. Prior to the
+    fix, ``TuplePrior`` failed the ``(Prior, AbstractPriorModel)``
+    isinstance check in ``register_model``, so the resolved tuple was
+    frozen in ``aux_data`` and ``jax.value_and_grad`` returned gradients
+    only for the non-tuple attributes.
+    """
+    class Twin:
+        def __init__(self, centre, amplitude):
+            self.centre = centre
+            self.amplitude = amplitude
+
+    model = af.Model(
+        Twin,
+        centre=af.TuplePrior(
+            centre_0=af.GaussianPrior(mean=0.5, sigma=1.0),
+            centre_1=af.GaussianPrior(mean=-0.5, sigma=1.0),
+        ),
+        amplitude=af.GaussianPrior(mean=1.0, sigma=1.0),
+    )
+    register_model(model)
+    instance = model.instance_from_prior_medians()
+    params_tree = jax.tree_util.tree_map(jnp.asarray, instance)
+
+    leaves = jax.tree_util.tree_leaves(params_tree)
+    assert len(leaves) == 3  # centre[0], centre[1], amplitude
+
+    def loss(inst):
+        cx, cy = inst.centre
+        return cx * cx + cy * cy + inst.amplitude
+
+    _, grad = jax.value_and_grad(loss)(params_tree)
+    flat_grad = jnp.concatenate(
+        [jnp.asarray(l).ravel() for l in jax.tree_util.tree_leaves(grad)]
+    )
+    assert jnp.all(jnp.isfinite(flat_grad))
+    assert flat_grad.size == 3
+
+
 def test_enable_pytrees_idempotent():
     assert enable_pytrees() is True
     assert enable_pytrees() is True
