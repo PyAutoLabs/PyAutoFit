@@ -83,6 +83,48 @@ def test_register_model_keeps_constants_static():
     assert float(result) == pytest.approx(2.0 * instance.scale)
 
 
+def test_register_model_keeps_kwarg_constants_static():
+    """Constant ``**kwargs`` attributes must stay in aux_data, not children.
+
+    ``Galaxy.__init__(self, redshift, **kwargs)`` stores every kwarg via
+    ``setattr``. A concrete object passed as a kwarg (e.g. a ``Pixelization``)
+    is an instance attribute but NOT a constructor argument, so the old
+    flatten logic routed it to ``children`` and it became a JAX tracer.
+    Downstream ``isinstance(x, Pixelization)`` checks then returned False.
+    This test exercises the exact pattern.
+    """
+    class Marker:
+        pass
+
+    class KwargHolder:
+        def __init__(self, redshift, **kwargs):
+            self.redshift = redshift
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+
+    marker = Marker()
+    model = af.Model(
+        KwargHolder,
+        redshift=0.5,
+        marker=marker,
+        scale=af.GaussianPrior(mean=1.0, sigma=1.0),
+    )
+    register_model(model)
+    instance = model.instance_from_prior_medians()
+    assert instance.marker is marker
+
+    @jax.jit
+    def use_marker_isinstance(inst):
+        # isinstance on a tracer would return False; this only works if
+        # `marker` is kept concrete via aux_data.
+        if isinstance(inst.marker, Marker):
+            return inst.scale * 2
+        return inst.scale
+
+    result = use_marker_isinstance(instance)
+    assert float(result) == pytest.approx(2.0 * instance.scale)
+
+
 def test_enable_pytrees_idempotent():
     assert enable_pytrees() is True
     assert enable_pytrees() is True
