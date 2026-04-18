@@ -345,6 +345,19 @@ class Nautilus(abstract_nest.AbstractNest):
             fitness=fitness
         )
 
+        # Nautilus creates its own multiprocessing.Pool internally when pool=N.
+        # Close them here so their finalizers don't fire at interpreter shutdown
+        # (after pickle has been torn down, causing AttributeError on Pool.__del__).
+        for pool_attr in ("pool_l", "pool_s"):
+            pool = getattr(search_internal, pool_attr, None)
+            if pool is not None:
+                try:
+                    pool.close()
+                    pool.join()
+                except Exception:
+                    pass
+                setattr(search_internal, pool_attr, None)
+
         return search_internal
 
     def call_search(self, search_internal, model, analysis, fitness):
