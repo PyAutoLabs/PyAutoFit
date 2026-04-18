@@ -38,7 +38,7 @@ Advanced features include database tools for analysing large suites of modeling 
 knowledge of a problem via non-linear search chaining. Accompanying `PyAutoFit` is the [autofit workspace](https://github.com/Jammy2211/autofit_workspace), 
 which includes example scripts and the `HowToFit` lecture series which introduces non-experts to model-fitting and 
 provides a guide on how to begin a project using `PyAutoFit`. Readers can try `PyAutoFit` right now by 
-going to [the introduction Jupyter notebook on Binder](https://mybinder.org/v2/gh/Jammy2211/autofit_workspace/HEAD)
+going to [the introduction Jupyter notebook on Colab](https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.4.13.6/start_here.ipynb)
 or checkout our [readthedocs](https://pyautofit.readthedocs.io/en/latest/) for a complete overview
 of **PyAutoFit**'s features.
 
@@ -132,7 +132,7 @@ contains example scripts for composing a model, performing a fit, using the `Agg
 statistical inference methods. Also included are the `HowToFit` tutorials, a series of Jupyter notebooks aimed at 
 non-experts, introducing them to model-fitting and Bayesian inference. They teach users how to write model-components 
 and `Analysis` classes in `PyAutoFit`, use these to fit a dataset and interpret the model-fitting results. The lectures 
-are available on our [Binder](https://mybinder.org/v2/gh/Jammy2211/autofit_workspace/HEAD) and may therefore be 
+are available on our [Colab](https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.4.13.6/start_here.ipynb) and may therefore be 
 taken without a local `PyAutoFit` installation.
 
 # Software Citations
