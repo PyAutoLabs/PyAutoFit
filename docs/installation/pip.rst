@@ -17,13 +17,15 @@ the installation has clean dependencies):
 If this raises no errors **PyAutoFit** is installed! If there is an error check out
 the `troubleshooting section <https://pyautofit.readthedocs.io/en/latest/installation/troubleshooting.html>`_.
 
-Next, clone the ``autofit workspace`` (the line ``--depth 1`` clones only the most recent branch on
-the ``autofit_workspace``, reducing the download size):
+Next, clone the ``autofit_workspace`` at the tag matching your installed ``PyAutoFit`` version. Each
+``PyAutoFit`` release tags a paired ``autofit_workspace`` snapshot, so cloning by tag guarantees that the
+example scripts and notebooks were generated against the library version you installed:
 
 .. code-block:: bash
 
    cd /path/on/your/computer/you/want/to/put/the/autofit_workspace
-   git clone https://github.com/Jammy2211/autofit_workspace --depth 1
+   AUTOFIT_VERSION=$(python -c "import autofit; print(autofit.__version__)")
+   git clone https://github.com/Jammy2211/autofit_workspace --branch $AUTOFIT_VERSION --depth 1
    cd autofit_workspace
 
 Run the ``welcome.py`` script to get started!
