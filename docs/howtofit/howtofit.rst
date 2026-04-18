@@ -5,7 +5,7 @@ HowToFit Lectures
 
 To learn how to use **PyAutoFit**, the best starting point is the **HowToFit** lecture series, which are found on
 the `autofit_workspace <https://github.com/Jammy2211/autofit_workspace>`_ and at
-our `binder <https://mybinder.org/v2/gh/Jammy2211/autofit_workspace/HEAD>`_.
+our `colab <https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.4.13.6/start_here.ipynb>`_.
 
 The lectures are provided as *Jupyter notebooks* and currently consist of 3 chapters:
 
