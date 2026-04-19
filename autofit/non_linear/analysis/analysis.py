@@ -33,14 +33,47 @@ class Analysis(ABC):
     LATENT_KEYS = []
 
     def __init__(
-        self, use_jax : bool = False, **kwargs
+        self,
+        use_jax: bool = False,
+        use_jax_for_visualization: bool = False,
+        **kwargs,
     ):
         import os
         if os.environ.get("PYAUTO_DISABLE_JAX") == "1":
             use_jax = False
+            use_jax_for_visualization = False
+
+        if use_jax_for_visualization and not use_jax:
+            logger.warning(
+                "use_jax_for_visualization=True requires use_jax=True; "
+                "disabling use_jax_for_visualization."
+            )
+            use_jax_for_visualization = False
 
         self._use_jax = use_jax
+        self._use_jax_for_visualization = use_jax_for_visualization
         self.kwargs = kwargs
+
+    def fit_for_visualization(self, instance):
+        """
+        Build the fit used by the visualizer.
+
+        Currently a thin dispatch over ``self.fit_from``: when ``use_jax=True``
+        the fit is built on the eager JAX path (``self._xp is jnp``) and the
+        plotter materialises arrays to NumPy at the matplotlib boundary. The
+        ``use_jax_for_visualization`` flag is an explicit opt-in today — it
+        marks the intent to use JAX for visualization, and is the dispatch
+        point where full ``jax.jit``-wrapping will plug in once
+        :class:`autolens.imaging.fit_imaging.FitImaging` and its nested
+        autoarray types are registered as JAX pytrees (that work is tracked
+        separately — see ``admin_jammy/prompt/autolens/fit_imaging_pytree.md``).
+
+        ``fit_from`` is defined by Analysis subclasses (e.g. ``AnalysisImaging``),
+        not the base class — this method is only callable on subclasses that
+        provide it. Downstream visualizers should prefer this over calling
+        ``fit_from`` directly so the JIT seam stays in one place.
+        """
+        return self.fit_from(instance=instance)
 
     def __getattr__(self, item: str):
         """
@@ -306,8 +339,15 @@ class Analysis(ABC):
 
     @property
     def supports_jax_visualization(self) -> bool:
-        """Whether the visualizer can work directly with JAX arrays."""
-        return False
+        """
+        Whether the visualizer can work directly with JAX arrays.
+
+        Derived from the ``use_jax_for_visualization`` flag passed at
+        construction time. Subclasses may override to force a specific
+        answer (e.g. an Analysis that has been audited to support JAX
+        visualization unconditionally).
+        """
+        return self._use_jax_for_visualization
 
     def perform_quick_update(self, paths, instance):
         raise NotImplementedError
