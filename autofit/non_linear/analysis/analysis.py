@@ -58,22 +58,43 @@ class Analysis(ABC):
         """
         Build the fit used by the visualizer.
 
-        Currently a thin dispatch over ``self.fit_from``: when ``use_jax=True``
-        the fit is built on the eager JAX path (``self._xp is jnp``) and the
-        plotter materialises arrays to NumPy at the matplotlib boundary. The
-        ``use_jax_for_visualization`` flag is an explicit opt-in today — it
-        marks the intent to use JAX for visualization, and is the dispatch
-        point where full ``jax.jit``-wrapping will plug in once
-        :class:`autolens.imaging.fit_imaging.FitImaging` and its nested
-        autoarray types are registered as JAX pytrees (that work is tracked
-        separately — see ``admin_jammy/prompt/autolens/fit_imaging_pytree.md``).
+        Dispatch over ``self.fit_from`` with an opt-in ``jax.jit`` fast path:
+
+        * ``use_jax_for_visualization=False`` (default) — plain
+          ``self.fit_from(instance)``. Untouched by JAX.
+        * ``use_jax_for_visualization=True`` — lazily construct
+          ``jax.jit(self.fit_from)`` on the first call and cache it on the
+          instance as ``_jitted_fit_from``, then call that for every
+          subsequent visualization. The first call pays the compile cost;
+          subsequent calls reuse the cached compiled function.
+
+        Caching is per-``Analysis`` instance so each analysis gets its own
+        compiled function keyed off that instance's closed-over state
+        (``self.dataset``, ``self.settings``, etc. — these ride as pytree
+        aux data via ``register_instance_pytree(FitImaging, no_flatten=...)``
+        in PyAutoLens).
 
         ``fit_from`` is defined by Analysis subclasses (e.g. ``AnalysisImaging``),
         not the base class — this method is only callable on subclasses that
         provide it. Downstream visualizers should prefer this over calling
         ``fit_from`` directly so the JIT seam stays in one place.
+
+        For the JIT path to succeed, the ``Fit*`` return type (and every
+        nested autoarray / galaxy / lens type it carries) must be pytree-
+        registered. That wiring lives in each analysis subclass (see
+        ``AnalysisImaging._register_fit_imaging_pytrees`` in PyAutoLens).
+        Variants that have not yet been pytree-audited must leave
+        ``use_jax_for_visualization`` at its default of ``False``.
         """
-        return self.fit_from(instance=instance)
+        if not self._use_jax_for_visualization:
+            return self.fit_from(instance=instance)
+
+        if getattr(self, "_jitted_fit_from", None) is None:
+            import jax
+
+            self._jitted_fit_from = jax.jit(self.fit_from)
+
+        return self._jitted_fit_from(instance)
 
     def __getattr__(self, item: str):
         """
