@@ -22,7 +22,9 @@ The following links are useful for new starters:
 
 - `The introduction Jupyter Notebook on Colab <https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.4.13.6/notebooks/overview/overview_1_the_basics.ipynb>`_, where you can try **PyAutoFit** in a web browser (without installation).
 
-- `The autofit_workspace GitHub repository <https://github.com/Jammy2211/autofit_workspace>`_, which includes example scripts and the `HowToFit Jupyter notebook lectures <https://github.com/Jammy2211/autofit_workspace/tree/main/notebooks/howtofit>`_ which give new users a step-by-step introduction to **PyAutoFit**.
+- `The autofit_workspace GitHub repository <https://github.com/Jammy2211/autofit_workspace>`_, which includes example scripts demonstrating **PyAutoFit**'s features.
+
+- `The standalone HowToFit repository <https://github.com/PyAutoLabs/HowToFit>`_, a series of Jupyter notebook lectures which give new users a step-by-step introduction to **PyAutoFit**.
 
 Support
 -------
@@ -41,7 +43,7 @@ For users less familiar with Bayesian inference and scientific analysis you may 
 the **HowToFits** lectures. These teach you the basic principles of Bayesian inference, with the
 content pitched at undergraduate level and above.
 
-A complete overview of the lectures `is provided on the HowToFit readthedocs page <https://pyautofit.readthedocs.io/en/latest/howtofit/howtofit.htmll>`_
+The lectures are available in the `standalone HowToFit repository <https://github.com/PyAutoLabs/HowToFit>`_.
 
 API Overview
 ------------
@@ -193,16 +195,6 @@ model and marginalized probability density functions.
    general/software
    general/citations
    general/credits
-
-.. toctree::
-   :caption: Tutorials:
-   :maxdepth: 1
-   :hidden:
-
-   howtofit/howtofit
-   howtofit/chapter_1_introduction
-   howtofit/chapter_2_scientific_workflow
-   howtofit/chapter_3_graphical_models
 
 .. toctree::
    :caption: Science Examples:

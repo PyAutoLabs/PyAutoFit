@@ -9,7 +9,7 @@ by **PyAutoFit**.
 
 - `readthedocs: non-linear search example <https://pyautofit.readthedocs.io/en/latest/overview/non_linear_search.html>`_
 - `autofit_workspace: plot tutorials <https://github.com/Jammy2211/autofit_workspace/tree/release/notebooks/plot>`_
-- `HowToFit: introduction chapter (detailed step-by-step examples) <https://pyautofit.readthedocs.io/en/latest/howtofit/chapter_1_introduction.html>`_
+- `HowToFit: tutorial lectures (detailed step-by-step examples) <https://github.com/PyAutoLabs/HowToFit>`_
 
 --------
 Plotters

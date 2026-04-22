@@ -605,7 +605,7 @@ from large datasets.
 
 **PyAutoFit** has a dedicated feature set for fitting hierarchical and graphical models and interested readers should
 checkout the hierarchical and graphical modeling
-chapter of **HowToFit** (https://pyautofit.readthedocs.io/en/latest/howtofit/chapter_graphical_models.html)
+chapter of **HowToFit** (https://github.com/PyAutoLabs/HowToFit/blob/main/notebooks/chapter_3_graphical_models)
 
 Interpolation
 -------------

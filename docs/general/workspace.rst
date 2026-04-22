@@ -16,12 +16,11 @@ New users should begin by checking out the following parts of the workspace.
 HowToFit
 --------
 
-The **HowToFit** lecture series are a collection of Jupyter notebooks describing how to build a **PyAutoFit** model
-fitting project and giving illustrations of different statistical methods and techniiques.
+The **HowToFit** lecture series is a collection of Jupyter notebooks describing how to build a **PyAutoFit** model
+fitting project and giving illustrations of different statistical methods and techniques.
 
-Checkout the
-`tutorials section <https://pyautofit.readthedocs.io/en/latest/howtofit/howtofit.html>`_ for a
-full description of the lectures and online examples of every notebook.
+HowToFit now lives in its own standalone repository at `PyAutoLabs/HowToFit <https://github.com/PyAutoLabs/HowToFit>`_.
+Clone or browse the repo for a full description of the lectures and the notebooks for every chapter.
 
 Scripts / Notebooks
 -------------------

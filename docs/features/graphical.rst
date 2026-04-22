@@ -67,7 +67,8 @@ This is what our three Gaussians look like:
   :alt: Alternative text
 
 They are much lower signal-to-noise than the Gaussian's in other examples. Graphical models extract a lot more information
-from lower quantity datasets, something we demonstrate explic in the **HowToFit** lectures on graphical models.
+from lower quantity datasets, something we demonstrate explic in the `HowToFit lectures on graphical models
+<https://github.com/PyAutoLabs/HowToFit/blob/main/notebooks/chapter_3_graphical_models>`_.
 
 For each dataset we now create a corresponding ``Analysis`` class. By associating each dataset with an ``Analysis``
 class we are therefore associating it with a unique ``log_likelihood_function``. If our dataset had many different
@@ -164,9 +165,10 @@ We can now choose a non-linear search and fit the factor graph.
 
 This will fit the N=7 dimension parameter space where every Gaussian has a shared centre!
 
-This is all expanded upon in the **HowToFit** chapter on graphical models, where we will give a more detailed
-description of why this approach to model-fitting extracts a lot more information than fitting each dataset
-one-by-one.
+This is all expanded upon in the `HowToFit chapter on graphical models
+<https://github.com/PyAutoLabs/HowToFit/blob/main/notebooks/chapter_3_graphical_models>`_, where we will give a
+more detailed description of why this approach to model-fitting extracts a lot more information than fitting each
+dataset one-by-one.
 
 Expectation Propagation
 -----------------------

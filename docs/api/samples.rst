@@ -12,7 +12,7 @@ For example, for an MCMC model-fit, the ``Samples`` objects contains every sampl
 - `readthedocs: example on using results <https://pyautofit.readthedocs.io/en/latest/overview/result.html>`_.
 - `autofit_workspace: simple results tutorial <https://github.com/Jammy2211/autofit_workspace/blob/release/notebooks/overview/simple/result.ipynb>`_
 - `autofit_workspace: complex result tutorial <https://github.com/Jammy2211/autofit_workspace/blob/release/notebooks/overview/complex/result.ipynb>`_
-- `HowToFit: introduction chapter (detailed step-by-step examples) <https://pyautofit.readthedocs.io/en/latest/howtofit/chapter_1_introduction.html>`_
+- `HowToFit: tutorial lectures (detailed step-by-step examples) <https://github.com/PyAutoLabs/HowToFit>`_
 
 Samples
 -------

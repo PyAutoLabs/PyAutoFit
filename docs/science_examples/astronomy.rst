@@ -323,6 +323,6 @@ lensing data, using **multi-level model composition**.
 If you'd like to perform the fit shown in this script, checkout the
 `simple examples <https://github.com/Jammy2211/autofit_workspace/tree/main/notebooks/overview/simplee>`_ on the
 ``autofit_workspace``. We detail how **PyAutoFit** works in the first 3 tutorials of
-the `HowToFit lecture series <https://pyautofit.readthedocs.io/en/latest/howtofit/howtofit.html>`_.
+the `HowToFit lecture series <https://github.com/PyAutoLabs/HowToFit>`_.
 
 https://github.com/Jammy2211/autofit_workspace/tree/release/projects/astro
