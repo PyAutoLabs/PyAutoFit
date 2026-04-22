@@ -36,8 +36,9 @@ therefore provides complete management of every aspect of modeling. This include
 from individual model components, customizing the fitting procedure and performing data augmentation before a model-fit. 
 Advanced features include database tools for analysing large suites of modeling results and exploiting domain-specific 
 knowledge of a problem via non-linear search chaining. Accompanying `PyAutoFit` is the [autofit workspace](https://github.com/Jammy2211/autofit_workspace), 
-which includes example scripts and the `HowToFit` lecture series which introduces non-experts to model-fitting and 
-provides a guide on how to begin a project using `PyAutoFit`. Readers can try `PyAutoFit` right now by 
+which includes example scripts, together with the standalone [HowToFit](https://github.com/PyAutoLabs/HowToFit)
+lecture series which introduces non-experts to model-fitting and provides a guide on how to begin a project
+using `PyAutoFit`. Readers can try `PyAutoFit` right now by 
 going to [the introduction Jupyter notebook on Colab](https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.4.13.6/start_here.ipynb)
 or checkout our [readthedocs](https://pyautofit.readthedocs.io/en/latest/) for a complete overview
 of **PyAutoFit**'s features.
@@ -129,7 +130,8 @@ of cancer tumour growth.
 
 `PyAutoFit` is distributed with the [autofit workspace](https://github.com/Jammy2211/autofit_workspace), which 
 contains example scripts for composing a model, performing a fit, using the `Aggregator` and `PyAutoFit`'s advanced 
-statistical inference methods. Also included are the `HowToFit` tutorials, a series of Jupyter notebooks aimed at 
+statistical inference methods. Complementing the workspace is the standalone
+[HowToFit](https://github.com/PyAutoLabs/HowToFit) repository, a series of Jupyter notebook tutorials aimed at
 non-experts, introducing them to model-fitting and Bayesian inference. They teach users how to write model-components 
 and `Analysis` classes in `PyAutoFit`, use these to fit a dataset and interpret the model-fitting results. The lectures 
 are available on our [Colab](https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.4.13.6/start_here.ipynb) and may therefore be 

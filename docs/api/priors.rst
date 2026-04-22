@@ -12,7 +12,7 @@ The priors of parameters of every component of a mdoel, which is fitted to data,
 - `readthedocs: example using Collection object <https://pyautofit.readthedocs.io/en/latest/overview/model_complex.html>`_.
 - `autofit_workspace: simple tutorial <https://github.com/Jammy2211/autofit_workspace/blob/release/notebooks/overview/simple/fit.ipynb>`_
 - `autofit_workspace: complex tutorial <https://github.com/Jammy2211/autofit_workspace/blob/release/notebooks/overview/complex/fit.ipynb>`_
-- `HowToFit: introduction chapter (detailed step-by-step examples) <https://pyautofit.readthedocs.io/en/latest/howtofit/chapter_1_introduction.html>`_
+- `HowToFit: tutorial lectures (detailed step-by-step examples) <https://github.com/PyAutoLabs/HowToFit>`_
 
 Priors
 ------

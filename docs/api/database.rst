@@ -10,7 +10,7 @@ inspection, analysis and interpretation.
 
 - `readthedocs: example using database functionality <https://pyautofit.readthedocs.io/en/latest/features/database.html>`_
 - `autofit_workspace: tutorial using database <https://github.com/Jammy2211/autofit_workspace/blob/release/notebooks/features/database.ipynb>`_
-- `HowToFit: database chapter (detailed step-by-step examples) <https://pyautofit.readthedocs.io/en/latest/howtofit/chapter_database.html>`_
+- `HowToFit: tutorial lectures (detailed step-by-step examples) <https://github.com/PyAutoLabs/HowToFit>`_
 
 ----------
 Aggregator
