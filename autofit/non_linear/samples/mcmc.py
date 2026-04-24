@@ -144,7 +144,7 @@ class SamplesMCMC(SamplesPDF):
 
         if self.pdf_converged:
             return [
-                float(np.percentile(self.parameters_extract[i, :], [50]))
+                float(np.percentile(self.parameters_extract[i, :], 50))
                 for i in range(self.model.prior_count)
             ]
 
