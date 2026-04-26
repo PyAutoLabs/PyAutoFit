@@ -6,6 +6,7 @@ import numpy as np
 import time
 from typing import Optional, Dict
 
+from autofit import exc
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.paths.abstract import AbstractPaths
 from autofit.non_linear.samples.summary import SamplesSummary
@@ -173,8 +174,17 @@ class Analysis(ABC):
                 batched_compute_latent = jax.jit(jax.vmap(compute_latent_for_model))
                 logger.info(f"JAX: vmap and jit applied in {time.time() - start} seconds.")
             else:
+                n_latents = len(self.LATENT_KEYS)
+                nan_row = np.full(n_latents, np.nan)
+
+                def _safe_compute(xx):
+                    try:
+                        return compute_latent_for_model(xx)
+                    except exc.FitException:
+                        return nan_row
+
                 def batched_compute_latent(x):
-                    return np.array([compute_latent_for_model(xx) for xx in x])
+                    return np.array([_safe_compute(xx) for xx in x])
 
             parameter_array = np.array(samples.parameter_lists)
             latent_samples = []
@@ -183,6 +193,7 @@ class Analysis(ABC):
             for i in range(0, len(parameter_array), batch_size):
 
                 batch = parameter_array[i:i + batch_size]
+                batch_samples = samples.sample_list[i:i + batch_size]
 
                 # batched JAX call on this chunk
                 latent_values_batch = batched_compute_latent(batch)
@@ -193,10 +204,19 @@ class Analysis(ABC):
                     mask = jnp.all(jnp.isfinite(latent_values_batch), axis=0)
                     latent_values_batch = latent_values_batch[:, mask]
                 else:
-                    mask = np.all(np.isfinite(latent_values_batch), axis=0)
-                    latent_values_batch = latent_values_batch[:, mask]
+                    # Drop samples whose latent computation failed (e.g. FitException from
+                    # model assertions surfaced as a NaN row in _safe_compute). This leaves
+                    # the per-latent column mask to continue handling degenerate latent
+                    # dimensions that produce NaN for all remaining samples.
+                    row_mask = np.all(np.isfinite(latent_values_batch), axis=1)
+                    latent_values_batch = latent_values_batch[row_mask]
+                    batch_samples = [s for s, keep in zip(batch_samples, row_mask) if keep]
 
-                for sample, values in zip(samples.sample_list[i:i + batch_size], latent_values_batch):
+                    if len(latent_values_batch):
+                        col_mask = np.all(np.isfinite(latent_values_batch), axis=0)
+                        latent_values_batch = latent_values_batch[:, col_mask]
+
+                for sample, values in zip(batch_samples, latent_values_batch):
 
                     kwargs = {k: float(v) for k, v in zip(self.LATENT_KEYS, values)}
 

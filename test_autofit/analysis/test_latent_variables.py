@@ -77,6 +77,45 @@ def test_compute_latent_samples(latent_samples):
     assert latent_samples.model.instance_from_vector([1.0]).fwhm == 1.0
 
 
+class AssertionAnalysis(af.Analysis):
+
+    LATENT_KEYS = ["fwhm"]
+
+    def log_likelihood_function(self, instance):
+        return 1.0
+
+    def compute_latent_variables(self, parameters, model):
+        if parameters[0] < 0:
+            raise af.exc.FitException("assertion violated")
+        instance = model.instance_from_vector(vector=parameters)
+        return (instance.fwhm,)
+
+
+def test_compute_latent_samples_skips_fit_exception_samples():
+    analysis = AssertionAnalysis()
+    latent_samples = analysis.compute_latent_samples(
+        SamplesPDF(
+            model=af.Model(af.ex.Gaussian),
+            sample_list=[
+                af.Sample(
+                    log_likelihood=1.0,
+                    log_prior=0.0,
+                    weight=1.0,
+                    kwargs={"centre": 1.0, "normalization": 2.0, "sigma": 3.0},
+                ),
+                af.Sample(
+                    log_likelihood=-1.0,
+                    log_prior=0.0,
+                    weight=0.0,
+                    kwargs={"centre": -1.0, "normalization": 2.0, "sigma": 3.0},
+                ),
+            ],
+        ),
+    )
+    assert len(latent_samples.sample_list) == 1
+    assert latent_samples.sample_list[0].kwargs == {"fwhm": 7.0644601350928475}
+
+
 def test_info(latent_samples):
     info = result_info_from(latent_samples)
     assert (
