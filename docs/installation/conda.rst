@@ -28,15 +28,13 @@ the installation has clean dependencies):
 
     pip install autofit
 
-Next, clone the ``autofit_workspace`` at the tag matching your installed ``PyAutoFit`` version. Each
-``PyAutoFit`` release tags a paired ``autofit_workspace`` snapshot, so cloning by tag guarantees that the
-example scripts and notebooks were generated against the library version you installed:
+Next, clone the ``autofit_workspace`` (the line ``--depth 1`` clones only the most recent branch on
+the ``autofit_workspace``, reducing the download size):
 
 .. code-block:: bash
 
    cd /path/on/your/computer/you/want/to/put/the/autofit_workspace
-   AUTOFIT_VERSION=$(python -c "import autofit; print(autofit.__version__)")
-   git clone https://github.com/Jammy2211/autofit_workspace --branch $AUTOFIT_VERSION --depth 1
+   git clone https://github.com/Jammy2211/autofit_workspace --depth 1
    cd autofit_workspace
 
 Run the `welcome.py` script to get started!
