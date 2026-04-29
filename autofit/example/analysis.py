@@ -109,7 +109,7 @@ class Analysis(af.Analysis):
                 except AttributeError:
                     pass
         except TypeError:
-            model_data_1d += instance.model_data_from(xvalues=xvalues)
+            model_data_1d += instance.model_data_from(xvalues=xvalues, xp=self._xp)
 
         return model_data_1d
 
