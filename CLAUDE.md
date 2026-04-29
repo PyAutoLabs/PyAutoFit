@@ -3,7 +3,7 @@
 **PyAutoFit** is a Python probabilistic programming language for model fitting and Bayesian inference.
 
 - Authors: James Nightingale, Richard Hayes
-- Requires Python >= 3.9
+- Requires Python >= 3.12
 - Package name: `autofit`
 
 ## Dependency Graph
