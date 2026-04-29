@@ -349,7 +349,62 @@ class TruncatedNormalMessage(AbstractMessage):
     def _normal_gradient_hessian(
         self, x: np.ndarray
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        raise NotImplementedError
+        """
+        Compute the log-pdf, gradient, and Hessian of the truncated Gaussian
+        with respect to ``x``.
+
+        Inside the truncation support the gradient and Hessian are identical
+        to the untruncated Gaussian's (the truncation normalisation ``Z`` and
+        ``log σ`` are constants in ``x``). The ``logl`` value picks up an
+        extra ``-log Z`` correction. Outside the support, ``logl`` is ``-inf``
+        and the gradient is zeroed so the optimiser sees a flat region rather
+        than NaNs that would crash linesearch.
+        """
+        return self._normal_gradient_hessian_from(self.mean, self.sigma, x)
+
+    def _normal_gradient_hessian_from(
+        self,
+        mean: Union[float, np.ndarray],
+        sigma: Union[float, np.ndarray],
+        x: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        from scipy.stats import norm
+
+        a = (self.lower_limit - mean) / sigma
+        b = (self.upper_limit - mean) / sigma
+        Z = norm.cdf(b) - norm.cdf(a)
+        log_Z = np.log(Z) if Z > 0 else -np.inf
+
+        shape = np.shape(x)
+        if shape:
+            x = np.asanyarray(x)
+            deltax = x - mean
+            hess_logl = -sigma ** -2
+            grad_logl = deltax * hess_logl
+            eta_t = 0.5 * grad_logl * deltax
+            logl = self.log_base_measure + eta_t - np.log(sigma) - log_Z
+
+            in_bounds = (x >= self.lower_limit) & (x <= self.upper_limit)
+            logl = np.where(in_bounds, logl, -np.inf)
+            grad_logl = np.where(in_bounds, grad_logl, 0.0)
+
+            if shape[1:] == self.shape:
+                hess_logl = np.repeat(
+                    np.reshape(hess_logl, (1,) + np.shape(hess_logl)), shape[0], 0
+                )
+
+        else:
+            deltax = x - mean
+            hess_logl = -sigma ** -2
+            grad_logl = deltax * hess_logl
+            eta_t = 0.5 * grad_logl * deltax
+            logl = self.log_base_measure + eta_t - np.log(sigma) - log_Z
+
+            if not (self.lower_limit <= x <= self.upper_limit):
+                logl = -np.inf
+                grad_logl = 0.0
+
+        return logl, grad_logl, hess_logl
 
     def logpdf_gradient(self, x: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -643,6 +698,20 @@ class TruncatedNaturalNormal(TruncatedNormalMessage):
         Return the natural parameters of this distribution.
         """
         return self.calc_natural_parameters(*self.parameters, self.lower_limit, self.upper_limit, xp=xp)
+
+    def _normal_gradient_hessian(
+        self, x: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        # ``self.mean`` and ``self.sigma`` here are the truncated moments
+        # (scipy.stats.truncnorm.mean / .std), not the underlying Gaussian.
+        # The gradient/Hessian formula needs the underlying (μ, σ), which we
+        # reconstruct from the natural parameters.
+        precision = -2 * self.parameters[1]
+        if np.any(precision <= 0) or np.any(np.isinf(precision)) or np.any(np.isnan(precision)):
+            return np.nan, np.nan, np.nan
+        mean_underlying = -self.parameters[0] / (2 * self.parameters[1])
+        sigma_underlying = precision ** -0.5
+        return self._normal_gradient_hessian_from(mean_underlying, sigma_underlying, x)
 
     @classmethod
     def invert_sufficient_statistics(
