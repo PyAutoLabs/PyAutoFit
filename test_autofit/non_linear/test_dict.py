@@ -43,6 +43,7 @@ def make_dynesty_dict():
             "slices": 5,
             "unique_tag": None,
             "update_interval": None,
+            "use_jax_jit": True,
             "walks": 5,
         },
         "class_path": "autofit.non_linear.search.nest.dynesty.search.static.DynestyStatic",

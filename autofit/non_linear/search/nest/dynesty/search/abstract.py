@@ -53,6 +53,7 @@ class AbstractDynesty(AbstractNest, ABC):
         number_of_cores: int = 1,
         silence: bool = False,
         force_x1_cpu: bool = False,
+        use_jax_jit: bool = True,
         session: Optional[sa.orm.Session] = None,
         **kwargs,
     ):
@@ -117,6 +118,7 @@ class AbstractDynesty(AbstractNest, ABC):
 
         self.maxcall = maxcall
         self.force_x1_cpu = force_x1_cpu
+        self.use_jax_jit = use_jax_jit
 
         self.logger.debug(f"Creating {self.__class__.__name__} Search")
 
@@ -179,6 +181,7 @@ class AbstractDynesty(AbstractNest, ABC):
             paths=self.paths,
             fom_is_log_likelihood=True,
             resample_figure_of_merit=-1.0e99,
+            use_jax_jit=getattr(analysis, "_use_jax", False) and self.use_jax_jit,
         )
 
         if not isinstance(self.paths, NullPaths):
@@ -225,13 +228,22 @@ class AbstractDynesty(AbstractNest, ABC):
 
             except RuntimeError:
                 if not checkpoint_exists:
-                    self.logger.info(
-                        """
-                        Your operating system does not support Python multiprocessing.
+                    if getattr(analysis, "_use_jax", False):
+                        self.logger.info(
+                            "Running Dynesty with JAX-jitted likelihood (single CPU, no pool)."
+                        )
+                    elif self.force_x1_cpu:
+                        self.logger.info(
+                            "Running Dynesty single-CPU per `force_x1_cpu=True` (no pool)."
+                        )
+                    else:
+                        self.logger.info(
+                            """
+                            Your operating system does not support Python multiprocessing.
 
-                        A single CPU non-multiprocessing Dynesty run is being performed.
-                        """
-                    )
+                            A single CPU non-multiprocessing Dynesty run is being performed.
+                            """
+                        )
 
                 search_internal = self.search_internal_from(
                     model=model,
