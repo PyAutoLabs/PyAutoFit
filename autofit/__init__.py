@@ -139,3 +139,7 @@ def save_abc(pickler, obj):
 
 
 __version__ = "2026.4.13.6"
+
+from autoconf import check_version
+
+check_version(__version__)
