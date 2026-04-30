@@ -42,6 +42,7 @@ class Fitness:
         convert_to_chi_squared: bool = False,
         store_history: bool = False,
         use_jax_vmap : bool = False,
+        use_jax_jit : bool = False,
         batch_size : Optional[int] = None,
         iterations_per_quick_update: Optional[int] = None,
         background_quick_update: bool = False,
@@ -118,11 +119,14 @@ class Fitness:
         self.log_likelihood_history_list = []
 
         self.use_jax_vmap = use_jax_vmap
+        self.use_jax_jit = use_jax_jit
 
         self._call = self.call
 
         if self.use_jax_vmap:
             self._call = self._vmap
+        elif self.use_jax_jit:
+            self._call = self._jit
 
         self.batch_size = batch_size
         self.iterations_per_quick_update = iterations_per_quick_update
@@ -234,6 +238,9 @@ class Fitness:
                 parameters = np.array(parameters)[None, :]
 
         figure_of_merit = self._call(parameters)
+
+        if self.use_jax_jit:
+            figure_of_merit = float(figure_of_merit)
 
         if self.convert_to_chi_squared:
             log_likelihood = -0.5 * figure_of_merit
@@ -382,15 +389,22 @@ class Fitness:
         """
         return self.call_wrap(parameters)
 
-    # def __getstate__(self):
-    #     state = self.__dict__.copy()
-    #     # Remove non-pickleable attributes
-    #     state.pop('_call', None)
-    #     state.pop('_grad', None)
-    #     return state
-    #
-    # def __setstate__(self, state):
-    #     self.__dict__.update(state)
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # Strip JAX-compiled callables: jax.jit / jax.vmap / jax.grad return
+        # functions tied to C++ XLA state that can't roundtrip through pickle.
+        # cached_property values lazily recompile on first access after unpickle.
+        for attr in ("_call", "_jit", "_vmap", "_grad"):
+            state.pop(attr, None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._call = self.call
+        if getattr(self, "use_jax_vmap", False):
+            self._call = self._vmap
+        elif getattr(self, "use_jax_jit", False):
+            self._call = self._jit
 
     @cached_property
     def _vmap(self):
