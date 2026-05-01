@@ -1,12 +1,14 @@
 import numpy as np
 import pytest
-import jax.numpy as jnp
+
+# importorskip MUST run before any jax import — skips the whole module
+# cleanly when jax isn't installed (Python <3.11 in our [jax] extra gate).
+jax = pytest.importorskip("jax")
+jnp = pytest.importorskip("jax.numpy")
 from jax.tree_util import register_pytree_node_class
 
 import autofit as af
 from autofit import UniformPrior
-
-jax = pytest.importorskip("jax")
 
 UniformPrior = register_pytree_node_class(UniformPrior)
 GaussianPrior = register_pytree_node_class(af.GaussianPrior)
@@ -14,6 +16,20 @@ TruncatedGaussianPrior = register_pytree_node_class(af.TruncatedGaussianPrior)
 Collection = register_pytree_node_class(af.Collection)
 Model = register_pytree_node_class(af.Model)
 ModelInstance = register_pytree_node_class(af.ModelInstance)
+
+
+@pytest.fixture(name="recreate")
+def make_recreate():
+    """jax-pytree-roundtrip fixture, scoped to this test module since it's
+    the only consumer and it must not pollute the numpy-only top-level
+    conftest."""
+
+    def _recreate(o):
+        flatten_func, unflatten_func = jax._src.tree_util._registry[type(o)]
+        children, aux_data = flatten_func(o)
+        return unflatten_func(aux_data, children)
+
+    return _recreate
 
 @pytest.fixture(name="gaussian")
 def make_gaussian():

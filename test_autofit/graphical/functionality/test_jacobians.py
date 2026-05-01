@@ -1,7 +1,10 @@
 from itertools import combinations
-import jax
 import numpy as np
 import pytest
+
+# Belt-and-suspenders: the top-level conftest also ignores this file when
+# jax isn't installed; importorskip keeps the file self-contained.
+jax = pytest.importorskip("jax")
 
 from autofit.mapper.variable import variables
 from autofit.graphical.factor_graphs import (

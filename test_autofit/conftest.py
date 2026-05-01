@@ -1,7 +1,4 @@
-try:
-    import jax
-except ImportError:
-    jax = None
+import importlib.util
 import multiprocessing
 import os
 import shutil
@@ -19,21 +16,20 @@ from autofit import fixtures
 from autofit.database.model import sa
 from autofit.non_linear.search import abstract_search
 
+# Skip JAX-only tests when jax isn't installed. find_spec checks availability
+# WITHOUT importing jax, so this conftest stays numpy-only per the
+# "library unit tests stay numpy-only" rule.
+collect_ignore_glob = []
+if importlib.util.find_spec("jax") is None:
+    collect_ignore_glob = [
+        "jax/*.py",
+        "graphical/functionality/test_jacobians.py",
+    ]
+
 if sys.platform == "darwin":
     multiprocessing.set_start_method("fork")
 
 directory = Path(__file__).parent
-
-
-@pytest.fixture(name="recreate")
-def recreate():
-
-    def _recreate(o):
-        flatten_func, unflatten_func = jax._src.tree_util._registry[type(o)]
-        children, aux_data = flatten_func(o)
-        return unflatten_func(aux_data, children)
-
-    return _recreate
 
 
 @pytest.fixture(autouse=True)
