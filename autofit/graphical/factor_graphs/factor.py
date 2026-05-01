@@ -284,8 +284,6 @@ class Factor(AbstractFactor):
         numerical_jacobian=True,
         jacfwd=True,
     ):
-        import jax
-
         self._vjp = vjp
         self._jacfwd = jacfwd
         if vjp or factor_vjp:
@@ -302,8 +300,10 @@ class Factor(AbstractFactor):
             elif numerical_jacobian:
                 self._factor_jacobian = self._numerical_factor_jacobian
             elif jacfwd:
+                import jax
                 self._jacobian = jax.jacfwd(self._factor, range(self.n_args))
             else:
+                import jax
                 self._jacobian = jax.jacobian(self._factor, range(self.n_args))
 
     def _factor_value(self, raw_fval) -> FactorValue:
