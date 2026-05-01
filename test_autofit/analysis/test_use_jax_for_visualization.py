@@ -1,8 +1,15 @@
 """Tests for the ``use_jax_for_visualization`` flag on ``Analysis``."""
 
+import importlib.util
+
 import pytest
 
 import autofit as af
+
+
+def _jax_installed() -> bool:
+    """Check jax availability without importing it (per numpy-only rule)."""
+    return importlib.util.find_spec("jax") is not None
 
 
 class _FittableAnalysis(af.Analysis):
@@ -34,11 +41,23 @@ def test_flag_requires_use_jax(caplog):
     assert any("requires use_jax=True" in r.message for r in caplog.records)
 
 
+@pytest.mark.skipif(not _jax_installed(), reason="jax not installed; fallback path tested below")
 def test_flag_accepted_when_use_jax_true():
     analysis = af.Analysis(use_jax=True, use_jax_for_visualization=True)
     assert analysis._use_jax is True
     assert analysis._use_jax_for_visualization is True
     assert analysis.supports_jax_visualization is True
+
+
+@pytest.mark.skipif(_jax_installed(), reason="jax installed; happy path tested above")
+def test_use_jax_true_falls_back_to_numpy_when_jax_missing(recwarn):
+    """When jax isn't installed, use_jax=True should silently downgrade
+    to use_jax=False after emitting a UserWarning. Affects 3.9/3.10
+    where the [jax] extra is gated out."""
+    analysis = af.Analysis(use_jax=True, use_jax_for_visualization=True)
+    assert analysis._use_jax is False
+    assert analysis._use_jax_for_visualization is False
+    assert any("JAX is not installed" in str(w.message) for w in recwarn)
 
 
 def test_pyauto_disable_jax_env_var_clears_both_flags(monkeypatch):
