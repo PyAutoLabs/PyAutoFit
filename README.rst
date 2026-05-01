@@ -2,7 +2,7 @@ PyAutoFit: Classy Probabilistic Programming
 ===========================================
 
 .. |colab| image:: https://colab.research.google.com/assets/colab-badge.svg
-   :target: https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.5.1.1/start_here.ipynb
+   :target: https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.5.1.4/start_here.ipynb
 
 .. |RTD| image:: https://readthedocs.org/projects/pyautofit/badge/?version=latest
     :target: https://pyautofit.readthedocs.io/en/latest/?badge=latest
@@ -33,7 +33,7 @@ PyAutoFit: Classy Probabilistic Programming
 
 `Installation Guide <https://pyautofit.readthedocs.io/en/latest/installation/overview.html>`_ |
 `readthedocs <https://pyautofit.readthedocs.io/en/latest/index.html>`_ |
-`Introduction on Colab <https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.5.1.1/notebooks/overview/overview_1_the_basics.ipynb>`_ |
+`Introduction on Colab <https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.5.1.4/notebooks/overview/overview_1_the_basics.ipynb>`_ |
 `HowToFit <https://github.com/PyAutoLabs/HowToFit>`_
 
 **PyAutoFit** is a Python based probabilistic programming language for model fitting and Bayesian inference
@@ -55,7 +55,7 @@ The following links are useful for new starters:
 
 - `The PyAutoFit readthedocs <https://pyautofit.readthedocs.io/en/latest>`_, which includes an `installation guide <https://pyautofit.readthedocs.io/en/latest/installation/overview.html>`_ and an overview of **PyAutoFit**'s core features.
 
-- `The introduction Jupyter Notebook on Colab <https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.5.1.1/notebooks/overview/overview_1_the_basics.ipynb>`_, where you can try **PyAutoFit** in a web browser (without installation).
+- `The introduction Jupyter Notebook on Colab <https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.5.1.4/notebooks/overview/overview_1_the_basics.ipynb>`_, where you can try **PyAutoFit** in a web browser (without installation).
 
 - `The autofit_workspace GitHub repository <https://github.com/Jammy2211/autofit_workspace>`_, which includes example scripts demonstrating **PyAutoFit**'s features.
 

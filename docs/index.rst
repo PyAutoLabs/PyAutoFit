@@ -20,7 +20,7 @@ The following links are useful for new starters:
 
 - `The PyAutoFit readthedocs <https://pyautofit.readthedocs.io/en/latest>`_, which includes an `installation guide <https://pyautofit.readthedocs.io/en/latest/installation/overview.html>`_ and an overview of **PyAutoFit**'s core features.
 
-- `The introduction Jupyter Notebook on Colab <https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.5.1.1/notebooks/overview/overview_1_the_basics.ipynb>`_, where you can try **PyAutoFit** in a web browser (without installation).
+- `The introduction Jupyter Notebook on Colab <https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.5.1.4/notebooks/overview/overview_1_the_basics.ipynb>`_, where you can try **PyAutoFit** in a web browser (without installation).
 
 - `The autofit_workspace GitHub repository <https://github.com/Jammy2211/autofit_workspace>`_, which includes example scripts demonstrating **PyAutoFit**'s features.
 
