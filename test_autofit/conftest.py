@@ -1,4 +1,7 @@
-import jax
+try:
+    import jax
+except ImportError:
+    jax = None
 import multiprocessing
 import os
 import shutil
