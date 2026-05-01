@@ -108,6 +108,13 @@ def factor_step(factor_approx, optimiser):
     factor = factor_approx.factor
     factor_logger = logging.getLogger(factor.name)
     factor_logger.debug("Optimising...")
+    # Cavity-message opt-in: factors that implement ``set_cavity_dist``
+    # (e.g. ``EPAnalysisFactor``) receive the current cavity distribution
+    # before optimisation so their Analysis can read per-variable cavity
+    # messages inside ``log_likelihood_function``. Default factors lack
+    # the method, so this is a no-op for them.
+    if hasattr(factor, "set_cavity_dist"):
+        factor.set_cavity_dist(factor_approx.cavity_dist)
     try:
         with LogWarnings(
             logger=factor_logger.debug, action="always"
