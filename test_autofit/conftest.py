@@ -1,4 +1,3 @@
-import importlib.util
 import multiprocessing
 import os
 import shutil
@@ -15,16 +14,6 @@ from autofit import database as db
 from autofit import fixtures
 from autofit.database.model import sa
 from autofit.non_linear.search import abstract_search
-
-# Skip JAX-only tests when jax isn't installed. find_spec checks availability
-# WITHOUT importing jax, so this conftest stays numpy-only per the
-# "library unit tests stay numpy-only" rule.
-collect_ignore_glob = []
-if importlib.util.find_spec("jax") is None:
-    collect_ignore_glob = [
-        "jax/*.py",
-        "graphical/functionality/test_jacobians.py",
-    ]
 
 if sys.platform == "darwin":
     multiprocessing.set_start_method("fork")
