@@ -1,7 +1,7 @@
 from . import utils
 from .declarative.abstract import PriorFactor
 from .declarative.collection import FactorGraphModel
-from .declarative.factor.analysis import AnalysisFactor
+from .declarative.factor.analysis import AnalysisFactor, EPAnalysisFactor
 from .declarative.factor.hierarchical import _HierarchicalFactor, HierarchicalFactor
 from .expectation_propagation.ep_mean_field import EPMeanField
 from .expectation_propagation.optimiser import EPOptimiser

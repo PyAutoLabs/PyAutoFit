@@ -15,6 +15,7 @@ from .aggregator.base import AggBase
 from .database.aggregator.aggregator import GridSearchAggregator
 from .graphical.expectation_propagation.history import EPHistory
 from .graphical.declarative.factor.analysis import AnalysisFactor
+from .graphical.declarative.factor.analysis import EPAnalysisFactor
 from .graphical.declarative.collection import FactorGraphModel
 from .graphical.declarative.factor.hierarchical import HierarchicalFactor
 from .graphical.laplace import LaplaceOptimiser
