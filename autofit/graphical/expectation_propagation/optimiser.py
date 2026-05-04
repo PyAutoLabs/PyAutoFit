@@ -104,10 +104,21 @@ class DynamicUpdater(SimplerUpdater):
         )
 
 
-def factor_step(factor_approx, optimiser):
+def factor_step(factor_approx, optimiser, model_approx=None):
     factor = factor_approx.factor
     factor_logger = logging.getLogger(factor.name)
     factor_logger.debug("Optimising...")
+    # Mean-field opt-in: factors that implement ``set_model_approx``
+    # (e.g. ``EPAnalysisFactor``) get the *full* ``EPMeanField`` first.
+    # This is needed by hierarchical factors that have to inspect
+    # sibling factors' messages on variables the current factor's
+    # cavity no longer contains — e.g. variables that were dropped from
+    # this factor's prior model via the constant-element pattern of
+    # ``Array.__setitem__``. Default factors lack the method, so the
+    # call is a no-op for them. ``model_approx`` is None when called
+    # from a context that does not propagate it (older call sites).
+    if hasattr(factor, "set_model_approx") and model_approx is not None:
+        factor.set_model_approx(model_approx)
     # Cavity-message opt-in: factors that implement ``set_cavity_dist``
     # (e.g. ``EPAnalysisFactor``) receive the current cavity distribution
     # before optimisation so their Analysis can read per-variable cavity
@@ -277,8 +288,8 @@ class EPOptimiser:
         except exc.HistoryException as e:
             factor_logger.exception(e)
 
-    def factor_step(self, factor_approx, optimiser):
-        return factor_step(factor_approx, optimiser)
+    def factor_step(self, factor_approx, optimiser, model_approx=None):
+        return factor_step(factor_approx, optimiser, model_approx=model_approx)
 
     def run(
         self,
@@ -323,7 +334,9 @@ class EPOptimiser:
             _should_output = should_output()
             for factor, optimiser in self.factor_optimisers.items():
                 factor_approx = model_approx.factor_approximation(factor)
-                new_model_dist, status = self.factor_step(factor_approx, optimiser)
+                new_model_dist, status = self.factor_step(
+                    factor_approx, optimiser, model_approx=model_approx,
+                )
                 model_approx, status = self.updater.update_model_approx(
                     new_model_dist, factor_approx, model_approx, status
                 )

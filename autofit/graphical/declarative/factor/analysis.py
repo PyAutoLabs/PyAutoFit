@@ -118,7 +118,17 @@ class AnalysisFactor(AbstractModelFactor):
             return getattr(self.prior_model, item)
 
     def name_for_variable(self, variable):
-        path = ".".join(self.prior_model.path_for_prior(variable))
+        path_iter = self.prior_model.path_for_prior(variable)
+        if path_iter is None:
+            # Variable is no longer in the factor's prior model — typically
+            # because it was replaced by a fixed scalar after the factor was
+            # registered in the graph (the constant-element pattern of
+            # ``Array.__setitem__``). The factor still appears in the graph's
+            # variable→factor map, but it does not reference this variable
+            # anymore, so info-only callers (graph.info, results text) get
+            # ``None`` and are expected to skip it.
+            return None
+        path = ".".join(path_iter)
         return f"{self.name}.{path}"
 
     def visualize(
@@ -236,3 +246,22 @@ class EPAnalysisFactor(AnalysisFactor):
         cavity Gaussian summary.
         """
         self.analysis._cavity_mean_field = cavity_dist
+
+    def set_model_approx(self, model_approx):
+        """
+        Store the full ``EPMeanField`` on the wrapped ``Analysis``.
+
+        Called by :func:`factor_step` before ``set_cavity_dist`` on
+        each EP iteration. ``set_cavity_dist`` only exposes the cavity
+        ``MeanField`` over this factor's *own* variables; some
+        hierarchical use cases additionally need to inspect the
+        per-factor messages of *sibling* factors (e.g. a "global"
+        Analysis that reads each upstream local fit's posterior on a
+        variable that the global model itself does not formally vary).
+
+        The default implementation just attaches ``model_approx`` to
+        the Analysis as ``_mean_field``. Subclasses (e.g. workspace
+        factors that freeze a subset of priors at sibling-fit means
+        between iterations) can override to add more behaviour.
+        """
+        self.analysis._mean_field = model_approx

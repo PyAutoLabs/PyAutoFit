@@ -143,6 +143,32 @@ def test_1d_array_modify_prior(array_1d):
     assert (array_1d.instance_from_prior_medians() == np.array([1.0, 0.0])).all()
 
 
+def test_gaussian_prior_model_for_arguments_with_fixed_element(array):
+    """
+    ``Array.gaussian_prior_model_for_arguments`` is invoked by
+    ``AbstractSearch.optimise`` to build a posterior ``GaussianPrior``
+    model from search arguments. Fixed scalar elements (set via
+    ``arr[i, j] = float``) must pass through unchanged — they have no
+    prior to update from posterior samples. Mirrors the try/except
+    already in ``_instance_for_arguments``.
+    """
+    array[0, 0] = 1.5
+    array[1, 1] = 2.5
+
+    arguments = {
+        prior: af.GaussianPrior(mean=10.0, sigma=0.1)
+        for prior in array.priors
+    }
+    new_array = array.gaussian_prior_model_for_arguments(arguments)
+
+    assert new_array.prior_count == 2
+    instance = new_array.instance_from_prior_medians()
+    assert instance[0, 0] == 1.5
+    assert instance[1, 1] == 2.5
+    assert instance[0, 1] == 10.0
+    assert instance[1, 0] == 10.0
+
+
 def test_tree_flatten(array):
     children, aux = array.tree_flatten()
     assert len(children) == 4

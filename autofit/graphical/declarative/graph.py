@@ -91,11 +91,13 @@ class DeclarativeGraphFormatter(ABC):
                     factor.distribution_model.name
                 )
             else:
-                names.add(
-                    factor.name_for_variable(
-                        variable
-                    )
-                )
+                name = factor.name_for_variable(variable)
+                if name is None:
+                    # Factor no longer references this variable (typically
+                    # because the variable was fixed to a scalar after graph
+                    # construction). Skip it for info purposes.
+                    continue
+                names.add(name)
 
         return ", ".join(sorted(names))
 
