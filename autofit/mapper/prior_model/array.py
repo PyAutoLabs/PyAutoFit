@@ -223,6 +223,15 @@ class Array(AbstractPriorModel):
         """
         new_array = Array(self.shape)
         for index in self.indices:
-            new_array[index] = self[index].gaussian_prior_model_for_arguments(arguments)
+            element = self[index]
+            try:
+                new_array[index] = element.gaussian_prior_model_for_arguments(arguments)
+            except AttributeError:
+                # Element is a fixed scalar (float / int / np.ndarray) — the
+                # documented constant-element pattern of ``Array.__setitem__``.
+                # Mirrors the try/except already used in
+                # ``_instance_for_arguments`` so fixed elements pass through
+                # unchanged when the model is rebuilt from posterior samples.
+                new_array[index] = element
 
         return new_array
