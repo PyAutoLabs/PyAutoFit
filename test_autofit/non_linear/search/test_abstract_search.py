@@ -112,6 +112,33 @@ class TestSearchConfig:
         assert "nlive" in dynesty.__identifier_fields__
 
 
+class TestUpdaterPathsRefresh:
+    """
+    The cached ``SearchUpdater`` must be invalidated when ``self.paths``
+    is reassigned to a new object — otherwise output (samples, viz,
+    profiling) keeps writing under the FIRST paths the search ever saw.
+    The EP loop does this routinely:
+    ``AbstractSearch.optimise(factor_approx)`` reassigns ``self.paths``
+    to a fresh ``SubDirectoryPaths`` per factor and per EP iteration.
+    """
+
+    def test__updater_refreshes_when_paths_reassigned(self):
+        search = af.DynestyStatic(name="updater_paths_test_a")
+        first_updater = search._updater
+        first_paths = search.paths
+        # Sanity: cache hit on second access with no path change.
+        assert search._updater is first_updater
+
+        search.paths = af.DirectoryPaths(name="updater_paths_test_b")
+        second_updater = search._updater
+
+        assert second_updater is not first_updater, (
+            "Expected a fresh SearchUpdater after self.paths was reassigned"
+        )
+        assert second_updater._paths is search.paths
+        assert second_updater._paths is not first_paths
+
+
 class TestLabels:
     def test_param_names(self):
         model = af.Model(af.m.MockClassx4)
