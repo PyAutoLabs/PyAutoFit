@@ -187,3 +187,52 @@ class AnalysisFactor(AbstractModelFactor):
 
     def log_likelihood_function(self, instance: ModelInstance) -> float:
         return self.analysis.log_likelihood_function(instance)
+
+
+class EPAnalysisFactor(AnalysisFactor):
+    """
+    An ``AnalysisFactor`` that exposes the EP cavity distribution to its
+    ``Analysis`` on each likelihood evaluation.
+
+    On every iteration of the EP optimiser, the cavity distribution
+    ``q⁻ᵃ`` — the product of the posterior approximations from all
+    *other* factors over the variables this factor shares with them —
+    is computed in
+    :class:`autofit.graphical.mean_field.FactorApproximation`. For most
+    factors that distribution is consumed implicitly: it becomes the
+    prior the search samples from.
+
+    Some hierarchical / population-level analyses want to read those
+    cavity messages directly. A canonical example is a "global"
+    Analysis whose log-likelihood compares model predictions to the
+    per-dataset Gaussian posterior summaries produced by upstream
+    local fits, e.g.::
+
+        log L = -0.5 * sum_i || (pred_i - cavity_mean_i) / cavity_sigma_i ||^2
+
+    To support that, ``EPAnalysisFactor`` attaches the current cavity
+    distribution to its ``Analysis`` immediately before optimisation,
+    via the attribute ``_cavity_mean_field``. The user's
+    ``log_likelihood_function`` can then read each shared variable's
+    cavity message (``.mean`` and ``.scale`` on the
+    ``AbstractMessage`` value) out of the dict.
+
+    The hook is invoked from
+    :func:`autofit.graphical.expectation_propagation.optimiser.factor_step`
+    via duck-typing (``hasattr(factor, "set_cavity_dist")``), so the
+    behaviour of plain ``AnalysisFactor`` is unaffected.
+    """
+
+    def set_cavity_dist(self, cavity_dist):
+        """
+        Store the cavity distribution on the wrapped ``Analysis``.
+
+        Called by :func:`factor_step` once per EP iteration, before this
+        factor's local search runs. The Analysis can read the messages
+        inside ``log_likelihood_function`` by inspecting
+        ``self._cavity_mean_field`` — a ``MeanField`` mapping each
+        shared :class:`Variable` (i.e. ``Prior``) to an
+        ``AbstractMessage`` whose ``.mean`` and ``.scale`` give the
+        cavity Gaussian summary.
+        """
+        self.analysis._cavity_mean_field = cavity_dist

@@ -1,8 +1,15 @@
 """Tests for the ``use_jax_for_visualization`` flag on ``Analysis``."""
 
+import importlib.util
+
 import pytest
 
 import autofit as af
+
+
+def _jax_installed() -> bool:
+    """Check jax availability without importing it (per numpy-only rule)."""
+    return importlib.util.find_spec("jax") is not None
 
 
 class _FittableAnalysis(af.Analysis):
@@ -20,28 +27,6 @@ class _FittableAnalysis(af.Analysis):
         return ("fit", instance)
 
 
-class _JitFittableAnalysis(af.Analysis):
-    """Analysis with a ``fit_from`` returning a JIT-traceable array.
-
-    ``_FittableAnalysis.fit_from`` returns a Python tuple with a string literal,
-    which is not tracer-compatible. For the JIT-enabled dispatch path we need a
-    ``fit_from`` whose output is entirely JAX-compatible.
-    """
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.fit_from_calls = 0
-
-    def log_likelihood_function(self, instance):
-        return 0.0
-
-    def fit_from(self, instance):
-        import jax.numpy as jnp
-
-        self.fit_from_calls += 1
-        return jnp.asarray(instance) * 2.0
-
-
 def test_default_flag_is_false():
     analysis = af.Analysis()
     assert analysis._use_jax is False
@@ -56,6 +41,7 @@ def test_flag_requires_use_jax(caplog):
     assert any("requires use_jax=True" in r.message for r in caplog.records)
 
 
+@pytest.mark.skipif(not _jax_installed(), reason="jax not installed; fallback path tested below")
 def test_flag_accepted_when_use_jax_true():
     analysis = af.Analysis(use_jax=True, use_jax_for_visualization=True)
     assert analysis._use_jax is True
@@ -63,28 +49,22 @@ def test_flag_accepted_when_use_jax_true():
     assert analysis.supports_jax_visualization is True
 
 
+@pytest.mark.skipif(_jax_installed(), reason="jax installed; happy path tested above")
+def test_use_jax_true_falls_back_to_numpy_when_jax_missing(recwarn):
+    """When jax isn't installed, use_jax=True should silently downgrade
+    to use_jax=False after emitting a UserWarning. Affects 3.9/3.10
+    where the [jax] extra is gated out."""
+    analysis = af.Analysis(use_jax=True, use_jax_for_visualization=True)
+    assert analysis._use_jax is False
+    assert analysis._use_jax_for_visualization is False
+    assert any("JAX is not installed" in str(w.message) for w in recwarn)
+
+
 def test_pyauto_disable_jax_env_var_clears_both_flags(monkeypatch):
     monkeypatch.setenv("PYAUTO_DISABLE_JAX", "1")
     analysis = af.Analysis(use_jax=True, use_jax_for_visualization=True)
     assert analysis._use_jax is False
     assert analysis._use_jax_for_visualization is False
-
-
-def test_fit_for_visualization_dispatches_through_jit_when_flag_set():
-    import jax.numpy as jnp
-
-    analysis = _JitFittableAnalysis(use_jax=True, use_jax_for_visualization=True)
-
-    assert getattr(analysis, "_jitted_fit_from", None) is None
-
-    result_1 = analysis.fit_for_visualization(instance=1.0)
-    assert analysis._jitted_fit_from is not None
-    assert jnp.allclose(result_1, jnp.asarray(2.0))
-
-    jitted_after_first = analysis._jitted_fit_from
-    result_2 = analysis.fit_for_visualization(instance=3.0)
-    assert analysis._jitted_fit_from is jitted_after_first
-    assert jnp.allclose(result_2, jnp.asarray(6.0))
 
 
 def test_fit_for_visualization_works_without_flag():

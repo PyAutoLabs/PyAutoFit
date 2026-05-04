@@ -417,7 +417,7 @@ class NormalMessage(AbstractMessage):
         >>> prior = af.GaussianPrior(mean=1.0, sigma=2.0)
         >>> physical_value = prior.value_for(unit=0.5)
         """
-        if isinstance(unit, np.ndarray) or isinstance(unit, np.float64):
+        if isinstance(unit, (np.ndarray, np.float64, float, int, list)):
             from scipy.special import erfinv as scipy_erfinv
             inv = scipy_erfinv(1 - 2.0 * (1.0 - unit))
         else:

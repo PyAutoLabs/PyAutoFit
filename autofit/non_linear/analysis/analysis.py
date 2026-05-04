@@ -44,6 +44,30 @@ class Analysis(ABC):
             use_jax = False
             use_jax_for_visualization = False
 
+        # If the user requested JAX but it isn't installed (e.g. Python <3.11
+        # without the [jax] extra), fall back to numpy with a loud warning
+        # rather than crashing later when the analysis tries to jit-compile.
+        if use_jax:
+            import importlib.util
+            import warnings
+            if importlib.util.find_spec("jax") is None:
+                warnings.warn(
+                    "\n"
+                    "+----------------------------------------------------------------------+\n"
+                    "|  use_jax=True was requested but JAX is not installed.                |\n"
+                    "|                                                                      |\n"
+                    "|  Falling back to numpy. The fit will run, but JAX acceleration       |\n"
+                    "|  (typically 10-100x for large lens models) is unavailable.           |\n"
+                    "|                                                                      |\n"
+                    "|  To enable JAX, install on Python 3.11+ via your library's [jax]     |\n"
+                    "|  extra, e.g.:  pip install autolens[jax]                             |\n"
+                    "+----------------------------------------------------------------------+",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                use_jax = False
+                use_jax_for_visualization = False
+
         if use_jax_for_visualization and not use_jax:
             logger.warning(
                 "use_jax_for_visualization=True requires use_jax=True; "

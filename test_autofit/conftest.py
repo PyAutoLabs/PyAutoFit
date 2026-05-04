@@ -1,4 +1,3 @@
-import jax
 import multiprocessing
 import os
 import shutil
@@ -20,17 +19,6 @@ if sys.platform == "darwin":
     multiprocessing.set_start_method("fork")
 
 directory = Path(__file__).parent
-
-
-@pytest.fixture(name="recreate")
-def recreate():
-
-    def _recreate(o):
-        flatten_func, unflatten_func = jax._src.tree_util._registry[type(o)]
-        children, aux_data = flatten_func(o)
-        return unflatten_func(aux_data, children)
-
-    return _recreate
 
 
 @pytest.fixture(autouse=True)

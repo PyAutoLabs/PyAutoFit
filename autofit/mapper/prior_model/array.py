@@ -87,7 +87,7 @@ class Array(AbstractPriorModel):
                 pass
 
             if make_array:
-                if isinstance(value, np.ndarray) or isinstance(value, np.float64):
+                if isinstance(value, (np.ndarray, np.float64, float, int)):
                     array = np.zeros(self.shape)
                     make_array = False
                 else:
@@ -95,7 +95,7 @@ class Array(AbstractPriorModel):
                     array = jnp.zeros(self.shape)
                     make_array = False
 
-            if isinstance(value, np.ndarray) or isinstance(value, np.float64):
+            if isinstance(value, (np.ndarray, np.float64, float, int)):
                 array[index] = value
             else:
                 array = array.at[index].set(value)
