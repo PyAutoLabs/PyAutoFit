@@ -171,6 +171,61 @@ class AnalysisFactor(AbstractModelFactor):
         """
         self.analysis.visualize_before_fit(paths=paths, model=model)
 
+    def visualize_combined(
+        self,
+        analyses,
+        paths: AbstractPaths,
+        instance: ModelInstance,
+        during_analysis: bool,
+        quick_update: bool = False,
+    ):
+        """
+        Forward a combined-analysis visualisation request to the wrapped analysis's
+        ``Visualizer.visualize_combined``.
+
+        ``FactorGraphModel.visualize_combined`` calls this method on
+        ``model_factors[0]`` and passes the full list of factors as ``analyses``. The
+        ``Analysis.__getattr__`` auto-forwarder skips any visualizer method whose
+        signature contains ``analyses`` (it cannot tell whether the call originated
+        from a single-analysis path or from a combined-analysis path), so without
+        this explicit method the dispatch silently no-ops and combined plots like
+        ``fit_combined.png`` are never written.
+
+        We unwrap each ``AnalysisFactor`` (or ``HierarchicalFactor``) to the
+        underlying ``Analysis`` before calling the visualizer — the static method
+        expects raw analyses with a ``.dataset`` attribute, not factor wrappers.
+        """
+        inner_analyses = [
+            getattr(factor, "analysis", factor) for factor in analyses
+        ]
+        self.analysis.Visualizer.visualize_combined(
+            analyses=inner_analyses,
+            paths=paths,
+            instance=instance,
+            during_analysis=during_analysis,
+            quick_update=quick_update,
+        )
+
+    def visualize_before_fit_combined(
+        self,
+        analyses,
+        paths: AbstractPaths,
+        model: Model,
+    ):
+        """
+        Forward a combined before-fit visualisation request to the wrapped analysis's
+        ``Visualizer.visualize_before_fit_combined``. See ``visualize_combined`` for
+        why this explicit forwarder is required.
+        """
+        inner_analyses = [
+            getattr(factor, "analysis", factor) for factor in analyses
+        ]
+        self.analysis.Visualizer.visualize_before_fit_combined(
+            analyses=inner_analyses,
+            paths=paths,
+            model=model,
+        )
+
     def save_attributes(self, paths: AbstractPaths):
         """
         Save the attributes of the analysis object to a file.
