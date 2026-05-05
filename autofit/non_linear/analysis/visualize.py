@@ -91,5 +91,12 @@ class Visualizer:
         paths: AbstractPaths,
         instance,
         during_analysis,
+        quick_update: bool = False,
     ):
+        # ``quick_update`` is forwarded from
+        # ``AnalysisFactor.visualize_combined`` so subclasses can branch
+        # on the quick-update path (e.g. cheap incremental plots during a
+        # long search vs. full plots at the end). The default visualizer
+        # ignores it but must accept the kwarg without raising
+        # ``TypeError`` when overrides do not declare it.
         pass
