@@ -71,6 +71,7 @@ jax = ["autoconf[jax]"]
 optional = [
     "autofit[jax]",
     "astropy>=5.0",
+    "blackjax>=1.2.0",
     "getdist==1.4",
     "nautilus-sampler==1.0.5",
     "zeus-mcmc==2.5.4",
