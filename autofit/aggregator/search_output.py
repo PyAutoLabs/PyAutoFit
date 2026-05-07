@@ -3,7 +3,6 @@ import json
 import logging
 import pickle
 from abc import ABC
-from os import path
 from pathlib import Path
 from typing import Generator, Tuple, Optional, List, cast, Type
 
@@ -372,7 +371,7 @@ class SearchOutput(AbstractSearchOutput, fit_interface.Fit):
         """
         phase = self.phase or ""
         dataset_name = self.dataset_name or ""
-        return path.join(phase, dataset_name)
+        return str(Path(phase) / dataset_name) if dataset_name else phase
 
     @property
     def search(self):

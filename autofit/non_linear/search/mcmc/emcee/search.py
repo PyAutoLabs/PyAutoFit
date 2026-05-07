@@ -1,5 +1,6 @@
 import logging
 import os
+from pathlib import Path
 from typing import Dict, Optional
 
 import numpy as np
@@ -371,7 +372,7 @@ class Emcee(AbstractMCMC):
         """
         import emcee
 
-        if os.path.isfile(self.backend_filename):
+        if Path(self.backend_filename).is_file():
             return emcee.backends.HDFBackend(filename=str(self.backend_filename))
         else:
             raise FileNotFoundError(

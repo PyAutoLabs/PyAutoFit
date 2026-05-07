@@ -1,4 +1,3 @@
-from os import path
 from pathlib import Path
 
 import pytest
@@ -28,7 +27,7 @@ def make_directory():
 
 @pytest.fixture(name="aggregator_directory")
 def make_aggregator_directory(directory):
-    directory = path.dirname(path.realpath(__file__))
+    directory = Path(__file__).resolve().parent
 
     return directory.parent / "tools" / "files" / "aggregator"
 

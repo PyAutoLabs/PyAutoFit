@@ -1,6 +1,7 @@
 import logging
 import os
 import pickle
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -349,7 +350,7 @@ class BlackJAXNUTS(AbstractMCMC):
     @property
     def backend(self) -> dict:
         """Load the pickled search-internal dict written by ``_fit``."""
-        if not os.path.isfile(self.backend_filename):
+        if not Path(self.backend_filename).is_file():
             raise FileNotFoundError(
                 f"search_internal.pickle does not exist at "
                 f"{self.paths.search_internal_path}"

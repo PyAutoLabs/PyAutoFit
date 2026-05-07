@@ -1,10 +1,10 @@
 import os
 import shutil
-from os import path
+from pathlib import Path
 
 from autofit.text import formatter as frm
 
-text_path = path.join("{}".format(path.dirname(path.realpath(__file__))), "files", "text")
+text_path = Path(__file__).resolve().parent / "files" / "text"
 
 
 def test__value_result_string():
@@ -56,17 +56,17 @@ def test__parameter_result_latex():
 
 
 def test__output_list_of_strings_to_file():
-    if path.exists(text_path):
+    if text_path.exists():
         shutil.rmtree(text_path)
 
     os.mkdir(text_path)
 
     results = ["hi\n", "hello"]
     frm.output_list_of_strings_to_file(
-        file=text_path + "model.results", list_of_strings=results
+        file=text_path / "model.results", list_of_strings=results
     )
 
-    file = open(text_path + "model.results", "r")
+    file = open(text_path / "model.results", "r")
 
     assert file.readlines() == ["hi\n", "hello"]
 

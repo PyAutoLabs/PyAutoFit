@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 from .sqlalchemy_ import sa
 
@@ -66,7 +67,7 @@ def open_database(
             exist_ok=True
         )
 
-        exists = os.path.exists(filename)
+        exists = Path(filename).exists()
 
         string = f'sqlite:///{filename}'
         kwargs = dict(

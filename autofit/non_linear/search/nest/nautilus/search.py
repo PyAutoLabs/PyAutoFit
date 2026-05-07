@@ -2,6 +2,7 @@ import numpy as np
 import logging
 import os
 import sys
+from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 from autofit.database.sqlalchemy_ import sa
@@ -169,7 +170,7 @@ class Nautilus(abstract_nest.AbstractNest):
         """
 
         if not isinstance(self.paths, NullPaths):
-            checkpoint_exists = os.path.exists(self.checkpoint_file)
+            checkpoint_exists = Path(self.checkpoint_file).exists()
         else:
             checkpoint_exists = False
 

@@ -15,7 +15,6 @@ Example:
 import os
 import zipfile
 from collections import defaultdict
-from os import path
 from pathlib import Path
 from shutil import rmtree
 from typing import List, Union, Iterator, Optional
@@ -84,8 +83,8 @@ def unzip_directory(directory: str):
         for filename in filenames:
             if filename.endswith(".zip"):
                 try:
-                    with zipfile.ZipFile(path.join(root, filename), "r") as f:
-                        f.extractall(path.join(root, filename[:-4]))
+                    with zipfile.ZipFile(Path(root) / filename, "r") as f:
+                        f.extractall(Path(root) / filename[:-4])
                 except zipfile.BadZipFile:
                     raise zipfile.BadZipFile(
                         f"File is not a zip file: \n " f"{root} \n" f"{filename}"
@@ -213,7 +212,7 @@ class Aggregator:
         Removes the unzipped output directory for each phase.
         """
         for phase in self.search_outputs:
-            split_path = path.split(phase.directory)[0]
+            split_path = Path(phase.directory).parent
 
             rmtree(split_path, ignore_errors=True)
 

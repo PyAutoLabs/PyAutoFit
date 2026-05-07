@@ -1,7 +1,7 @@
 import copy
 import logging
 import os
-from os import path
+from pathlib import Path
 from typing import List, Tuple, Union, Type, Optional, Dict
 
 from autoconf.dictable import to_dict
@@ -312,11 +312,7 @@ class GridSearch:
                 )
             )
 
-        name_path = path.join(
-            self.paths.name,
-            self.paths.identifier,
-            "_".join(labels),
-        )
+        name_path = str(Path(self.paths.name) / self.paths.identifier / "_".join(labels))
 
         search_instance = self.search_instance(name_path=name_path)
         search_instance.paths.model = model

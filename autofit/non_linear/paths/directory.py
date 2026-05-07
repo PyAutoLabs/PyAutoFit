@@ -4,7 +4,6 @@ import dill
 import json
 import numpy as np
 import os
-from os import path
 from pathlib import Path
 from typing import Optional, Union, cast, Type
 import logging
@@ -175,14 +174,14 @@ class DirectoryPaths(AbstractPaths):
         """
         Is there a file pickles/{name}.pickle?
         """
-        return os.path.exists(self._path_for_pickle(name))
+        return self._path_for_pickle(name).exists()
 
     @property
     def is_complete(self) -> bool:
         """
         Has the search been completed?
         """
-        return path.exists(self._has_completed_path)
+        return self._has_completed_path.exists()
 
     def save_search_internal(self, obj):
         """
@@ -214,7 +213,7 @@ class DirectoryPaths(AbstractPaths):
             import emcee
 
             backend_filename = self.search_internal_path / "search_internal.hdf"
-            if os.path.isfile(backend_filename):
+            if backend_filename.is_file():
                 return emcee.backends.HDFBackend(filename=str(backend_filename))
         except ImportError:
             pass
@@ -400,7 +399,7 @@ class DirectoryPaths(AbstractPaths):
         """
         Is this a grid search which comprises a number of child searches?
         """
-        return os.path.exists(self._grid_search_path)
+        return self._grid_search_path.exists()
 
     def create_child(
         self,
@@ -533,7 +532,7 @@ class DirectoryPaths(AbstractPaths):
         The path terminates with the identifier, unless the identifier has already
         been added to the path.
         """
-        path_ = Path(path.join(conf.instance.output_path, self.path_prefix, self.name))
+        path_ = Path(conf.instance.output_path) / self.path_prefix / self.name
         if self.is_identifier_in_paths:
             path_ = path_ / self.identifier
         return path_
