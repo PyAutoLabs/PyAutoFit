@@ -1,4 +1,4 @@
-from os import path
+from pathlib import Path
 
 import pytest
 
@@ -8,7 +8,7 @@ from autofit.non_linear.samples import Sample
 from autofit import SamplesStored
 from autofit.text import samples_text
 
-text_path = path.join("{}".format(path.dirname(path.realpath(__file__))), "files", "samples")
+text_path = Path(__file__).resolve().parent / "files" / "samples"
 
 
 @pytest.fixture(name="model")

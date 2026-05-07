@@ -1,8 +1,8 @@
-import os
+from pathlib import Path
 
 from autofit.mapper.prior_model.collection import Collection
 
-path = os.path.dirname(os.path.realpath(__file__))
+path = Path(__file__).resolve().parent
 
 
 class ModelMapper(Collection):

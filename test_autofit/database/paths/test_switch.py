@@ -69,6 +69,4 @@ def test_is_database_paths(search):
 #         Analysis()
 #     )
 #
-#     assert not os.path.exists(
-#         output_path
-#     )
+#     assert not Path(output_path).exists()

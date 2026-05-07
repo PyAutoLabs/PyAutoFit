@@ -5,7 +5,6 @@ import shutil
 import zipfile
 from abc import ABC, abstractmethod
 from configparser import NoSectionError
-from os import path
 from pathlib import Path
 from typing import Optional
 
@@ -224,7 +223,7 @@ class AbstractPaths(ABC):
         The path to the image folder.
         """
 
-        if not os.path.exists(self.output_path / f"image{self.image_path_suffix}"):
+        if not (self.output_path / f"image{self.image_path_suffix}").exists():
             os.makedirs(self.output_path / f"image{self.image_path_suffix}")
 
         return self.output_path / f"image{self.image_path_suffix}"
@@ -257,7 +256,7 @@ class AbstractPaths(ABC):
         if self.is_identifier_in_paths:
             strings.append(self.identifier)
 
-        return Path(path.join("", *strings))
+        return Path(*strings) if strings else Path("")
 
     @property
     def _files_path(self) -> Path:
@@ -296,7 +295,7 @@ class AbstractPaths(ABC):
         Copy files from the ``.zip`` file to the samples folder.
         """
 
-        if path.exists(self._zip_path):
+        if Path(self._zip_path).exists():
             shutil.rmtree(self.output_path, ignore_errors=True)
 
             try:

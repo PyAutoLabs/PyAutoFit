@@ -1,7 +1,7 @@
 import autofit as af
 from autofit.non_linear.parallel.sneaky import SneakyProcess
 
-from os import path
+from pathlib import Path
 
 class MockSneakyProcess(SneakyProcess):
     def __init__(
@@ -17,7 +17,7 @@ class MockSneakyProcess(SneakyProcess):
 def test__test_mode_parallel_profile_outputs_prof_files():
 
     paths = af.DirectoryPaths(
-        path_prefix=path.join("non_linear", "parallel"),
+        path_prefix=str(Path("non_linear") / "parallel"),
     )
 
     process = MockSneakyProcess(paths=paths)

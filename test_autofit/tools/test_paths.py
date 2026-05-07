@@ -1,11 +1,10 @@
 import os
 import shutil
-from os import path
+from pathlib import Path
 
 import pytest
 
 import autofit as af
-from pathlib import Path
 
 directory = Path(__file__).parent
 
@@ -32,7 +31,7 @@ def test_restore(paths):
     paths.zip_remove()
     paths.restore()
 
-    assert path.exists(paths.output_path)
-    assert not path.exists(paths._zip_path)
+    assert paths.output_path.exists()
+    assert not Path(paths._zip_path).exists()
 
     shutil.rmtree(paths.output_path)

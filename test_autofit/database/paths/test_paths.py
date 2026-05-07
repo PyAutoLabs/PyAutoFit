@@ -1,5 +1,4 @@
 import logging
-import os
 from pathlib import Path
 
 import pytest
@@ -29,9 +28,7 @@ output_path = str(
 )
 def test_create():
     m.open_database("test.sqlite")
-    assert os.path.exists(
-        output_path
-    )
+    assert Path(output_path).exists()
 
 
 @output_path_for_test(
@@ -53,9 +50,7 @@ def test_create_postgres():
         )
     except Exception as e:
         logging.exception(e)
-    assert not os.path.exists(
-        output_path
-    )
+    assert not Path(output_path).exists()
 
 
 def test_incomplete(paths):

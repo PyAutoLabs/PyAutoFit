@@ -1,4 +1,3 @@
-import os
 import pickle
 from pathlib import Path
 
@@ -61,7 +60,7 @@ def test_identifier_file(model):
     paths.search = af.DynestyStatic()
     paths.save_all({}, {})
 
-    assert os.path.exists(output_path / paths.identifier / ".identifier")
+    assert (output_path / paths.identifier / ".identifier").exists()
 
 
 def test_serialize(model):

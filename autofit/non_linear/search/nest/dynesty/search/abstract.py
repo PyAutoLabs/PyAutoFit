@@ -1,6 +1,7 @@
 import logging
 import os
 from abc import ABC
+from pathlib import Path
 from typing import Dict, Optional, Tuple, Union
 
 import numpy as np
@@ -185,7 +186,7 @@ class AbstractDynesty(AbstractNest, ABC):
         )
 
         if not isinstance(self.paths, NullPaths):
-            checkpoint_exists = os.path.exists(self.checkpoint_file)
+            checkpoint_exists = Path(self.checkpoint_file).exists()
         else:
             checkpoint_exists = False
 

@@ -1,11 +1,11 @@
-from os import path
+from pathlib import Path
 import pytest
 
 import autofit as af
 
 from autofit.text import text_util
 
-text_path = path.join("{}".format(path.dirname(path.realpath(__file__))), "files", "samples")
+text_path = Path(__file__).resolve().parent / "files" / "samples"
 
 
 @pytest.fixture(name="model")
@@ -40,7 +40,7 @@ def test__results_to_file(samples):
     assert  "Maximum Log Likelihood                                                          1.00000000\n" in result_info
 
 def test__search_summary_to_file(model):
-    file_search_summary = path.join(text_path, "search.summary")
+    file_search_summary = text_path / "search.summary"
 
     parameters = [[1.0, 2.0], [1.2, 2.2]]
 

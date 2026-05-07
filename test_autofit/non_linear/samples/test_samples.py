@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import pytest
 
 import autofit as af
@@ -55,7 +56,7 @@ def test__table__write_table():
     filename = "samples.csv"
     samples_x5.write_table(filename=filename)
 
-    assert os.path.exists(filename)
+    assert Path(filename).exists()
     os.remove(filename)
 
 

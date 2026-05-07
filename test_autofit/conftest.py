@@ -2,7 +2,6 @@ import multiprocessing
 import os
 import shutil
 import sys
-from os import path
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -79,7 +78,7 @@ class PlotPatch:
         self.paths = []
 
     def __call__(self, path, *args, **kwargs):
-        self.paths.append(path)
+        self.paths.append(str(path))
 
 
 @pytest.fixture(name="plot_patch")
@@ -105,14 +104,14 @@ def remove_logs():
     for d, _, files in os.walk(directory):
         for file in files:
             if file.endswith(".log"):
-                os.remove(path.join(d, file))
+                os.remove(Path(d) / file)
 
 
 @pytest.fixture(autouse=True)
 def set_config_path():
     conf.instance.push(
-        new_path=path.join(directory, "config"),
-        output_path=path.join(directory, "output"),
+        new_path=str(directory / "config"),
+        output_path=str(directory / "output"),
     )
 
 

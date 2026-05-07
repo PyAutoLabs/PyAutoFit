@@ -46,8 +46,8 @@ def zip_directory(source_directory, output=None):
         for root, dirs, files in os.walk(source_directory):
             for file in files:
                 f.write(
-                    os.path.join(root, file),
-                    os.path.join(root[len(str(source_directory)) :], file),
+                    Path(root) / file,
+                    Path(root[len(str(source_directory)):]) / file,
                 )
 
 
@@ -94,12 +94,12 @@ def numpy_array_to_json(
     numpy_array_to_json(array_2d=array_2d, file_path='/path/to/file/filename.json', overwrite=True)
     """
 
-    file_dir = os.path.split(file_path)[0]
+    file_dir = Path(file_path).parent
 
-    if not os.path.exists(file_dir):
+    if not file_dir.exists():
         os.makedirs(file_dir)
 
-    if overwrite and os.path.exists(file_path):
+    if overwrite and Path(file_path).exists():
         os.remove(file_path)
 
     with open(file_path, "w+") as f:
