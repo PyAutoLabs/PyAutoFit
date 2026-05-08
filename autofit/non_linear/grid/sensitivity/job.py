@@ -156,13 +156,10 @@ class Job(AbstractJob):
         An object comprising the results of the two fits
         """
 
-        if self.is_complete:
-            dataset = None
-        else:
-            dataset = self.simulate_cls(
-                instance=self.simulate_instance,
-                simulate_path=self.paths.image_path.with_name("simulate"),
-            )
+        dataset = self.simulate_cls(
+            instance=self.simulate_instance,
+            simulate_path=self.paths.image_path.with_name("simulate"),
+        )
 
         result = self.base_fit_cls(
             model=self.model,
