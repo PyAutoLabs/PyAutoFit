@@ -378,6 +378,20 @@ class BlackJAXNUTS(AbstractMCMC):
         with open(self.backend_filename, "wb") as f:
             pickle.dump(search_internal, f)
 
+    def _test_mode_samples_info(self) -> dict:
+        return {
+            "num_warmup": int(self.num_warmup),
+            "num_samples": 0,
+            "num_chains": int(self.num_chains),
+            "ess_min": float("nan"),
+            "ess_per_param": [],
+            "mean_acceptance": float("nan"),
+            "n_divergent": 0,
+            "n_logl_evals": 0,
+            "total_walkers": int(self.num_chains),
+            "total_steps": 0,
+        }
+
     def samples_info_from(self, search_internal=None):
         search_internal = search_internal if search_internal is not None else self.backend
 
