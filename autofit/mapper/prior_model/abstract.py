@@ -645,26 +645,41 @@ class AbstractPriorModel(AbstractModel):
         """Unique priors sorted by their id, defining the canonical parameter ordering."""
         return [prior for _, prior in self.prior_tuples_ordered_by_id]
 
-    def vector_from_unit_vector(self, unit_vector):
+    def vector_from_unit_vector(self, unit_vector, xp=np):
         """
         Parameters
         ----------
         unit_vector: [float]
             A unit hypercube vector
+        xp
+            Array-module to dispatch on (``numpy`` or ``jax.numpy``). Default ``numpy``.
+            When ``xp is numpy`` the return type stays a plain ``list`` to preserve
+            the existing contract used by Nautilus / Dynesty / Emcee / Zeus. When
+            ``xp is jax.numpy`` an ``xp.stack`` 1-D array is returned so the call
+            is JIT-traceable end-to-end.
 
         Returns
         -------
         values: [float]
             A vector with values output by priors
         """
-        return list(
-            map(
-                lambda prior_tuple, unit: prior_tuple.prior.value_for(
-                    unit,
-                ),
-                self.prior_tuples_ordered_by_id,
-                unit_vector,
+        if xp is np:
+            return list(
+                map(
+                    lambda prior_tuple, unit: prior_tuple.prior.value_for(
+                        unit,
+                    ),
+                    self.prior_tuples_ordered_by_id,
+                    unit_vector,
+                )
             )
+        return xp.stack(
+            [
+                prior_tuple.prior.value_for(unit, xp=xp)
+                for prior_tuple, unit in zip(
+                    self.prior_tuples_ordered_by_id, unit_vector
+                )
+            ]
         )
 
     def random_unit_vector_within_limits(

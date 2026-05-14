@@ -113,7 +113,7 @@ class LogGaussianPrior(Prior):
             id_=self.instance().id,
         )
 
-    def value_for(self, unit: float) -> float:
+    def value_for(self, unit, xp=np):
         """
         Return a physical value for a value between 0 and 1 with the transformation
         described by this prior.
@@ -122,21 +122,33 @@ class LogGaussianPrior(Prior):
         ----------
         unit
             A unit value between 0 and 1.
+        xp
+            Array-module to dispatch on (``numpy`` or ``jax.numpy``). Default ``numpy``.
+            The NumPy path delegates to the message stack; the JAX path uses the
+            closed-form ``exp(mean + sigma * sqrt(2) * erfinv(2*unit - 1))``.
 
         Returns
         -------
         A physical value, mapped from the unit value accoridng to the prior.
         """
-        return super().value_for(unit)
+        if xp is np:
+            return super().value_for(unit)
+        from jax.scipy.special import erfinv
+        log_value = self.mean + self.sigma * xp.sqrt(2.0) * erfinv(2.0 * unit - 1.0)
+        return xp.exp(log_value)
 
     @property
     def parameter_string(self) -> str:
         return f"mean = {self.mean}, sigma = {self.sigma}"
 
     def log_prior_from_value(self, value, xp=np):
-        if value <= 0:
-            return float("-inf")
+        if xp is np:
+            if value <= 0:
+                return float("-inf")
+            return self.message.base_message.log_prior_from_value(
+                np.log(value)
+            ) - np.log(value)
 
-        return self.message.base_message.log_prior_from_value(np.log(value)) - np.log(
-            value
-        )
+        log_value = xp.log(value)
+        base_log_prior = (log_value - self.mean) ** 2 / (2 * self.sigma ** 2)
+        return xp.where(value > 0, base_log_prior - log_value, xp.inf)

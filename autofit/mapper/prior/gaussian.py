@@ -113,3 +113,21 @@ class GaussianPrior(Prior):
         Return a human-readable string summarizing the GaussianPrior parameters.
         """
         return f"mean = {self.mean}, sigma = {self.sigma}"
+
+    def value_for(self, unit, xp=np):
+        """
+        Map a unit value in [0, 1] to a physical value drawn from this Gaussian prior.
+
+        Parameters
+        ----------
+        unit
+            A unit value between 0 and 1.
+        xp
+            Array-module to dispatch on (``numpy`` or ``jax.numpy``). Default ``numpy``.
+            The NumPy path delegates to the message stack (``erfinv`` via scipy); the
+            JAX path uses the same closed-form via ``jax.scipy.special.erfinv``.
+        """
+        if xp is np:
+            return self.message.value_for(unit)
+        from jax.scipy.special import erfinv
+        return self.mean + self.sigma * xp.sqrt(2.0) * erfinv(2.0 * unit - 1.0)

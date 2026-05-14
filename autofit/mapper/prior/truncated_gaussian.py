@@ -1,5 +1,7 @@
 from typing import Optional, Tuple
 
+import numpy as np
+
 from autofit.messages.truncated_normal import TruncatedNormalMessage
 from .abstract import Prior
 
@@ -130,3 +132,32 @@ class TruncatedGaussianPrior(Prior):
                 f"lower_limit = {self.lower_limit}, "
                 f"upper_limit = {self.upper_limit}"
                 )
+
+    def value_for(self, unit, xp=np):
+        """
+        Map a unit value in [0, 1] to a physical value drawn from this truncated Gaussian prior.
+
+        Parameters
+        ----------
+        unit
+            A unit value between 0 and 1.
+        xp
+            Array-module to dispatch on (``numpy`` or ``jax.numpy``). Default ``numpy``.
+            Both paths share the standard truncated-normal inverse-CDF construction
+            via ``norm.cdf`` / ``norm.ppf`` from the matching ``scipy.stats`` /
+            ``jax.scipy.stats`` namespace.
+        """
+        if xp is np:
+            from scipy.stats import norm
+        else:
+            from jax.scipy.stats import norm
+
+        a = (self.lower_limit - self.mean) / self.sigma
+        b = (self.upper_limit - self.mean) / self.sigma
+
+        lower_cdf = norm.cdf(a)
+        upper_cdf = norm.cdf(b)
+        truncated_cdf = lower_cdf + unit * (upper_cdf - lower_cdf)
+
+        x_standard = norm.ppf(truncated_cdf)
+        return self.mean + self.sigma * x_standard

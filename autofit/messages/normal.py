@@ -399,7 +399,7 @@ class NormalMessage(AbstractMessage):
 
     __default_fields__ = ("log_norm", "id_")
 
-    def value_for(self, unit: float) -> float:
+    def value_for(self, unit, xp=np):
         """
         Map a unit value in [0, 1] to a physical value drawn from this Gaussian prior.
 
@@ -407,6 +407,8 @@ class NormalMessage(AbstractMessage):
         ----------
         unit
             A unit value between 0 and 1 representing a uniform draw.
+        xp
+            Array-module to dispatch on (``numpy`` or ``jax.numpy``). Default ``numpy``.
 
         Returns
         -------
@@ -417,15 +419,13 @@ class NormalMessage(AbstractMessage):
         >>> prior = af.GaussianPrior(mean=1.0, sigma=2.0)
         >>> physical_value = prior.value_for(unit=0.5)
         """
-        if isinstance(unit, (np.ndarray, np.float64, float, int, list)):
-            from scipy.special import erfinv as scipy_erfinv
-            inv = scipy_erfinv(1 - 2.0 * (1.0 - unit))
+        if xp is np:
+            from scipy.special import erfinv
         else:
-            import jax.numpy as jnp
-            from jax._src.scipy.special import erfinv
-            inv = erfinv(1 - 2.0 * (1.0 - unit))
+            from jax.scipy.special import erfinv
 
-        return self.mean + (self.sigma * np.sqrt(2) * inv)
+        inv = erfinv(2.0 * unit - 1.0)
+        return self.mean + self.sigma * xp.sqrt(2.0) * inv
 
     def log_prior_from_value(self, value: float, xp=np) -> float:
         """

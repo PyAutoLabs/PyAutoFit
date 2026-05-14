@@ -440,7 +440,7 @@ class TruncatedNormalMessage(AbstractMessage):
 
     __default_fields__ = ("log_norm", "id_")
 
-    def value_for(self, unit: float) -> float:
+    def value_for(self, unit, xp=np):
         """
         Map a unit value in [0, 1] to a physical value drawn from this truncated Gaussian prior.
 
@@ -451,6 +451,8 @@ class TruncatedNormalMessage(AbstractMessage):
         ----------
         unit
             A unit value between 0 and 1 representing a uniform draw.
+        xp
+            Array-module to dispatch on (``numpy`` or ``jax.numpy``). Default ``numpy``.
 
         Returns
         -------
@@ -461,18 +463,18 @@ class TruncatedNormalMessage(AbstractMessage):
         >>> prior = af.TruncatedNormalMessage(mean=1.0, sigma=2.0, lower_limit=0.0, upper_limit=2.0)
         >>> physical_value = prior.value_for(unit=0.5)
         """
-        from scipy.stats import norm
+        if xp is np:
+            from scipy.stats import norm
+        else:
+            from jax.scipy.stats import norm
 
-        # Standardized truncation bounds
         a = (self.lower_limit - self.mean) / self.sigma
         b = (self.upper_limit - self.mean) / self.sigma
 
-        # Interpolate unit into [Phi(a), Phi(b)]
         lower_cdf = norm.cdf(a)
         upper_cdf = norm.cdf(b)
         truncated_cdf = lower_cdf + unit * (upper_cdf - lower_cdf)
 
-        # Map back to x using inverse CDF, then rescale
         x_standard = norm.ppf(truncated_cdf)
         return self.mean + self.sigma * x_standard
 

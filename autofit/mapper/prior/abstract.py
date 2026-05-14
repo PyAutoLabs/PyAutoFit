@@ -4,6 +4,8 @@ from abc import ABC, abstractmethod
 from copy import copy
 from typing import Union, Tuple, Optional, Dict
 
+import numpy as np
+
 from autoconf import conf
 
 from autofit.mapper.prior.arithmetic import ArithmeticMixin
@@ -137,7 +139,7 @@ class Prior(Variable, ABC, ArithmeticMixin):
             )
         )
 
-    def value_for(self, unit: float) -> float:
+    def value_for(self, unit, xp=np):
         """
         Return a physical value for a value between 0 and 1 with the transformation
         described by this prior.
@@ -146,6 +148,11 @@ class Prior(Variable, ABC, ArithmeticMixin):
         ----------
         unit
             A unit value between 0 and 1.
+        xp
+            Array-module to dispatch on (``numpy`` or ``jax.numpy``). Default ``numpy``.
+            Concrete subclasses override this method to provide a JAX-traceable
+            closed-form when ``xp`` is ``jax.numpy``; the base path delegates to
+            the message stack which is scipy-backed and NumPy-only.
 
         Returns
         -------
