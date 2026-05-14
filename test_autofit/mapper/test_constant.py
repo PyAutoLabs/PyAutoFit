@@ -185,3 +185,22 @@ def test_is_instance():
     constant = af.Constant(1.0)
 
     assert isinstance(constant, float)
+
+
+class _ClassWithExcludedField:
+    # Mirrors the LightProfileLinear pattern: an internal attribute set in
+    # __init__ that is declared not part of the model identity. The info
+    # property must respect that contract and suppress `token`.
+    __exclude_identifier_fields__ = ("token",)
+
+    def __init__(self, value: float = 0.5):
+        self.value = value
+        self.token = 7
+
+
+def test_info_honors_exclude_identifier_fields():
+    model = af.Collection(thing=_ClassWithExcludedField())
+
+    info = model.info
+    assert "token" not in info
+    assert "value" in info

@@ -1780,6 +1780,26 @@ class AbstractPriorModel(AbstractModel):
         """
         formatter = TextFormatter(line_length=info_whitespace())
 
+        def _excluded_by_parent(path):
+            # Honor each parent's `__exclude_identifier_fields__` here so attributes
+            # that classes have already declared "not part of the model's identity"
+            # (e.g. JAX pytree tokens) do not leak into the human-readable model.info.
+            if not path:
+                return False
+            parent = self
+            for step in path[:-1]:
+                try:
+                    if isinstance(step, int):
+                        parent = parent[step]
+                    elif isinstance(parent, dict):
+                        parent = parent[step]
+                    else:
+                        parent = parent.__dict__[step]
+                except (AttributeError, KeyError, IndexError, TypeError):
+                    return False
+            excluded = getattr(type(parent), "__exclude_identifier_fields__", ())
+            return path[-1] in excluded
+
         for t in find_groups(
             [
                 t
@@ -1788,6 +1808,7 @@ class AbstractPriorModel(AbstractModel):
                     ignore_children=True,
                 )
                 if t[0][-1] not in ("id", "item_number")
+                and not _excluded_by_parent(t[0])
             ],
             limit=1,
         ):
