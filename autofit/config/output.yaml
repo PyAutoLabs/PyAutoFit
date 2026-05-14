@@ -100,3 +100,5 @@ data: true # `data.json`: The value of every data point in the data.
 noise_map: true # `noise_map.json`: The value of every RMS noise map value.
 
 search_log: true # `search.log`: logging produced whilst running the fit method
+
+model_graph: false # `model.graph`: graphical-model factor graph summary. Only meaningful for graphical models (autofit.graphical); empty for ordinary PriorModel/Collection fits, so disabled by default.
