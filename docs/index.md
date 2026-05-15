@@ -18,13 +18,13 @@ The following links are useful for new starters:
 
 - [The PyAutoFit readthedocs](https://pyautofit.readthedocs.io/en/latest), which includes an [installation guide](https://pyautofit.readthedocs.io/en/latest/installation/overview.html) and an overview of **PyAutoFit**'s core features.
 - [The introduction Jupyter Notebook on Colab](https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.5.14.2/notebooks/overview/overview_1_the_basics.ipynb), where you can try **PyAutoFit** in a web browser (without installation).
-- [The autofit_workspace GitHub repository](https://github.com/Jammy2211/autofit_workspace), which includes example scripts demonstrating **PyAutoFit**'s features.
+- [The autofit_workspace GitHub repository](https://github.com/PyAutoLabs/autofit_workspace), which includes example scripts demonstrating **PyAutoFit**'s features.
 - [The standalone HowToFit repository](https://github.com/PyAutoLabs/HowToFit), a series of Jupyter notebook lectures which give new users a step-by-step introduction to **PyAutoFit**.
 
 ## Support
 
 Support for installation issues, help with Fit modeling and using **PyAutoFit** is available by
-[raising an issue on the GitHub issues page](https://github.com/rhayes777/PyAutoFit/issues).
+[raising an issue on the GitHub issues page](https://github.com/PyAutoLabs/PyAutoFit/issues).
 
 We also offer support on the **PyAutoFit** [Slack channel](https://pyautoFit.slack.com/), where we also provide the
 latest updates on **PyAutoFit**. Slack is invitation-only, so if you'd like to join send
@@ -43,7 +43,7 @@ The lectures are available in the [standalone HowToFit repository](https://githu
 To illustrate the **PyAutoFit** API, we use an illustrative toy model of fitting a one-dimensional Gaussian to
 noisy 1D data. Here's the `data` (black) and the model (red) we'll fit:
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/main/files/toy_model_fit.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/files/toy_model_fit.png
 :width: 400
 ```
 

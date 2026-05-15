@@ -154,7 +154,7 @@ plt.close()
 
 This plot appears as follows:
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/main/docs/images/toy_model_fit.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/images/toy_model_fit.png
 :alt: Alternative text
 :width: 600
 ```
@@ -299,7 +299,7 @@ plotter.corner()
 
 This plot appears as follows:
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/main/docs/images/corner.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/images/corner.png
 :alt: Alternative text
 :width: 600
 ```

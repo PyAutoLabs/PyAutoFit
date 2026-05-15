@@ -21,7 +21,7 @@ affiliations:
   - name: ConcR Ltd, London, UK
     index: 2    
 date: 17 July 2020
-codeRepository: https://github.com/rhayes777/PyAutoFit
+codeRepository: https://github.com/PyAutoLabs/PyAutoFit
 license: MIT
 bibliography: paper.bib
 ---
@@ -35,11 +35,11 @@ interfaces with all aspects of the modeling (e.g., the model, data, fitting proc
 therefore provides complete management of every aspect of modeling. This includes composing high-dimensionality models 
 from individual model components, customizing the fitting procedure and performing data augmentation before a model-fit. 
 Advanced features include database tools for analysing large suites of modeling results and exploiting domain-specific 
-knowledge of a problem via non-linear search chaining. Accompanying `PyAutoFit` is the [autofit workspace](https://github.com/Jammy2211/autofit_workspace), 
+knowledge of a problem via non-linear search chaining. Accompanying `PyAutoFit` is the [autofit workspace](https://github.com/PyAutoLabs/autofit_workspace), 
 which includes example scripts, together with the standalone [HowToFit](https://github.com/PyAutoLabs/HowToFit)
 lecture series which introduces non-experts to model-fitting and provides a guide on how to begin a project
 using `PyAutoFit`. Readers can try `PyAutoFit` right now by 
-going to [the introduction Jupyter notebook on Colab](https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.5.14.2/start_here.ipynb)
+going to [the introduction Jupyter notebook on Colab](https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.5.14.2/notebooks/overview/overview_1_the_basics.ipynb)
 or checkout our [readthedocs](https://pyautofit.readthedocs.io/en/latest/) for a complete overview
 of **PyAutoFit**'s features.
 
@@ -118,7 +118,7 @@ and thus enable accurate fitting of models of arbitrary complexity.
 
 # History
 
-`PyAutoFit` is a generalization of [PyAutoLens](https://github.com/Jammy2211/PyAutoLens), an Astronomy package 
+`PyAutoFit` is a generalization of [PyAutoLens](https://github.com/PyAutoLabs/PyAutoLens), an Astronomy package 
 developed to analyse images of gravitationally lensed galaxies. Modeling gravitational lenses historically requires 
 large amounts of human time and supervision, an approach which does not scale to the incoming samples of 100000 objects. 
 Domain exploitation enabled full automation of the lens modeling procedure [@Nightingale2015; @Nightingale2018], with 
@@ -128,13 +128,13 @@ of cancer tumour growth.
  
 # Workspace and HowToFit Tutorials
 
-`PyAutoFit` is distributed with the [autofit workspace](https://github.com/Jammy2211/autofit_workspace), which 
+`PyAutoFit` is distributed with the [autofit workspace](https://github.com/PyAutoLabs/autofit_workspace), which 
 contains example scripts for composing a model, performing a fit, using the `Aggregator` and `PyAutoFit`'s advanced 
 statistical inference methods. Complementing the workspace is the standalone
 [HowToFit](https://github.com/PyAutoLabs/HowToFit) repository, a series of Jupyter notebook tutorials aimed at
 non-experts, introducing them to model-fitting and Bayesian inference. They teach users how to write model-components 
 and `Analysis` classes in `PyAutoFit`, use these to fit a dataset and interpret the model-fitting results. The lectures 
-are available on our [Colab](https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.5.14.2/start_here.ipynb) and may therefore be 
+are available on our [Colab](https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.5.14.2/notebooks/overview/overview_1_the_basics.ipynb) and may therefore be 
 taken without a local `PyAutoFit` installation.
 
 # Software Citations

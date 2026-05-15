@@ -66,7 +66,7 @@ class Model(AbstractPriorModel):
 
         For a complete description of the model composition API, see the **PyAutoFit** model API cookbooks:
 
-        https://pyautofit.readthedocs.io/en/latest/cookbooks/cookbook_1_basics.html
+        https://pyautofit.readthedocs.io/en/latest/cookbooks/model.html
 
         The Python class input into a ``Model`` to create a model component is written using the following format:
 

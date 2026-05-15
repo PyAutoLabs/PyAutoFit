@@ -89,17 +89,17 @@ for data, noise_map in zip(data_list, noise_map_list):
 
 Here is what the plots look like:
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/feature/docs_update/docs/images/multi_data_0.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/images/multi_data_0.png
 :alt: Alternative text
 :width: 300
 ```
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/feature/docs_update/docs/images/multi_data_1.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/images/multi_data_1.png
 :alt: Alternative text
 :width: 300
 ```
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/feature/docs_update/docs/images/multi_data_2.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/images/multi_data_2.png
 :alt: Alternative text
 :width: 300
 ```
@@ -246,17 +246,17 @@ for data, result in zip(data_list, result_list):
 
 The image appears as follows:
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/feature/docs_update/docs/images/multi_model_data_0.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/images/multi_model_data_0.png
 :alt: Alternative text
 :width: 300
 ```
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/feature/docs_update/docs/images/multi_model_data_1.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/images/multi_model_data_1.png
 :alt: Alternative text
 :width: 300
 ```
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/feature/docs_update/docs/images/multi_model_data_2.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/images/multi_model_data_2.png
 :alt: Alternative text
 :width: 300
 ```
@@ -305,17 +305,17 @@ for data, noise_map in zip(data_list, noise_map_list):
 
 The images appear as follows:
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/feature/docs_update/docs/images/multi_model_data_0.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/images/multi_model_data_0.png
 :alt: Alternative text
 :width: 300
 ```
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/feature/docs_update/docs/images/multi_model_data_1.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/images/multi_model_data_1.png
 :alt: Alternative text
 :width: 300
 ```
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/feature/docs_update/docs/images/multi_model_data_2.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/images/multi_model_data_2.png
 :alt: Alternative text
 :width: 300
 ```

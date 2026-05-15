@@ -27,7 +27,7 @@ precise, most accurate model that best fits the dataset available.
 In this example we demonstrate search chaining using the example data where there are two `Gaussians` that are visibly
 split:
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/main/docs/features/images/gaussian_x2_split.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/features/images/gaussian_x2_split.png
 :alt: Alternative text
 :width: 600
 ```
@@ -49,7 +49,7 @@ procedure.
 To fit the left `Gaussian`, our first `analysis` receive only half data removing the right `Gaussian`. Note that
 this give a speed-up in log likelihood evaluation.
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/main/docs/features/images/gaussian_x2_left.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/features/images/gaussian_x2_left.png
 :alt: Alternative text
 :width: 600
 ```
@@ -92,7 +92,7 @@ result_1 = search_1.fit(model=model_1, analysis=analysis_1)
 
 By plotting the result we can see we have fitted the left `Gaussian` reasonably well.
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/main/docs/features/images/gaussian_x2_left_fit.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/features/images/gaussian_x2_left_fit.png
 :alt: Alternative text
 :width: 600
 ```
@@ -149,7 +149,7 @@ result_2 = search_2.fit(model=model_2, analysis=analysis_2)
 
 We can now see our model has successfully fitted both Gaussian's:
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/main/docs/features/images/gaussian_x2_right_fit.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/features/images/gaussian_x2_right_fit.png
 :alt: Alternative text
 :width: 600
 ```
@@ -206,7 +206,7 @@ result_3 = search_3.fit(model=model_3, analysis=analysis_3)
 
 We can now see our model has successfully fitted both Gaussians simultaneously:
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/main/docs/features/images/gaussian_x2_fit.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/features/images/gaussian_x2_fit.png
 :alt: Alternative text
 :width: 600
 ```

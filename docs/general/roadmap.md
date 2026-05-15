@@ -13,7 +13,7 @@ Supported for autodiff is nearly implemented, including JAX fits.
 
 We are always striving to add new non-linear searches to PyAutoFit\*. In the short term, we aim to provide a wrapper to the many method available in the `scipy.optimize` library with support for outputting results to hard-disk.
 
-If you would like to see a non-linear search implemented in **PyAutoFit** please [raise an issue on GitHub](https://github.com/rhayes777/PyAutoFit/issues)!
+If you would like to see a non-linear search implemented in **PyAutoFit** please [raise an issue on GitHub](https://github.com/PyAutoLabs/PyAutoFit/issues)!
 
 **Approximate Bayesian Computation**
 

@@ -9,7 +9,7 @@ contribute the development **PyAutoFit** or experiment with yourself!
 First, clone (or fork) the **PyAutoFit** GitHub repository:
 
 ```bash
-git clone https://github.com/Jammy2211/PyAutoFit
+git clone https://github.com/PyAutoLabs/PyAutoFit
 ```
 
 Next, install the **PyAutoFit** dependencies via pip:

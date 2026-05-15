@@ -25,5 +25,5 @@ are not running the script with the `autofit_workspace` as the working directory
 ## Support
 
 If you are still having issues with installation or using **PyAutoFit** in general, please raise an issue on the
-[autofit_workspace issues page](https://github.com/Jammy2211/autofit_workspace/issues) with a description of the
+[autofit_workspace issues page](https://github.com/PyAutoLabs/autofit_workspace/issues) with a description of the
 problem and your system setup (operating system, Python version, etc.).

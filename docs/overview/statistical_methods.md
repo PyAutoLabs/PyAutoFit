@@ -14,7 +14,7 @@ This is achieved through a concise API and scientific workflow that ensures scal
 
 A full description of using graphical models is given below:
 
-<https://github.com/Jammy2211/autofit_workspace/blob/release/notebooks/features/graphical_models.ipynb>
+<https://github.com/PyAutoLabs/autofit_workspace/blob/main/notebooks/features/graphical_models.ipynb>
 
 ## Hierarchical Models
 
@@ -36,7 +36,7 @@ and comparing how well they fit the data.
 
 A full description of using model comparison is given below:
 
-<https://github.com/Jammy2211/autofit_workspace/blob/release/notebooks/features/model_comparison.ipynb>
+<https://github.com/PyAutoLabs/autofit_workspace/blob/main/notebooks/features/model_comparison.ipynb>
 
 ## Interpolation
 
@@ -51,7 +51,7 @@ to determine the most likely model parameters at any point in time.
 
 **PyAutoFit**'s interpolation feature allows for this, and a full description of its use is given below:
 
-<https://github.com/Jammy2211/autofit_workspace/blob/release/notebooks/features/interpolate.ipynb>
+<https://github.com/PyAutoLabs/autofit_workspace/blob/main/notebooks/features/interpolate.ipynb>
 
 ## Search Grid Search
 
@@ -70,7 +70,7 @@ space to further aid the fitting process.
 
 A full description of using search grid searches is given below:
 
-<https://github.com/Jammy2211/autofit_workspace/blob/release/notebooks/features/search_grid_search.ipynb>
+<https://github.com/PyAutoLabs/autofit_workspace/blob/main/notebooks/features/search_grid_search.ipynb>
 
 ## Search Chaining
 
@@ -85,7 +85,7 @@ of **bite-sized** searches which are faster and more reliable than fitting the m
 
 A full description of using search chaining is given below:
 
-<https://github.com/Jammy2211/autofit_workspace/blob/release/notebooks/features/search_grid_search.ipynb>
+<https://github.com/PyAutoLabs/autofit_workspace/blob/main/notebooks/features/search_grid_search.ipynb>
 
 ## Sensitivity Mapping
 
@@ -102,4 +102,4 @@ how much the change in the model led to a measurable change in the data. This is
 
 A full description of using sensitivity mapping is given below:
 
-<https://github.com/Jammy2211/autofit_workspace/blob/release/notebooks/features/sensitivity_mapping.ipynb>
+<https://github.com/PyAutoLabs/autofit_workspace/blob/main/notebooks/features/sensitivity_mapping.ipynb>

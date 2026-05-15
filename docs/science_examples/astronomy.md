@@ -4,11 +4,11 @@
 
 This example illustrates model-component and fitting for an Astronomy science case, based are the phenomena
 of strong gravitational lensing. This is the science case that sparked the development of **PyAutoFit** as a spin
-off of our astronomy software [PyAutoLens](https://github.com/Jammy2211/PyAutoLens).
+off of our astronomy software [PyAutoLens](https://github.com/PyAutoLabs/PyAutoLens).
 
 The schematic below depicts a strong gravitational lens:
 
-```{image} https://raw.githubusercontent.com/Jammy2211/PyAutoLens/main/docs/overview/images/overview_1_lensing/schematic.jpg
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoLens/main/docs/overview/images/overview_1_lensing/schematic.jpg
 :alt: Alternative text
 :width: 600
 ```
@@ -25,7 +25,7 @@ lens. The amount light is deflected by is defined by the distances between each 
 We therefore need a model which contains separate model-components for every galaxy, and where each galaxy contains
 separate model-components describing its light and mass. A multi-level representation of this model is as follows:
 
-```{image} https://github.com/rhayes777/PyAutoFit/blob/main/docs/overview/image/lens_model.png?raw=true
+```{image} https://github.com/PyAutoLabs/PyAutoFit/blob/main/docs/overview/image/lens_model.png?raw=true
 :alt: Alternative text
 :width: 600
 ```
@@ -259,7 +259,7 @@ modeling features to compose and fits models of arbitrary complexity and dimensi
 
 To illustrate this further, consider the following dataset which is called a **strong lens galaxy cluster**:
 
-```{image} https://github.com/rhayes777/PyAutoFit/blob/main/docs/overview/image/cluster_example.jpg?raw=true
+```{image} https://github.com/PyAutoLabs/PyAutoFit/blob/main/docs/overview/image/cluster_example.jpg?raw=true
 :alt: Alternative text
 :width: 600
 ```
@@ -304,7 +304,7 @@ model = af.Collection(
 
 Here is an illustration of this model's graph:
 
-```{image} https://github.com/rhayes777/PyAutoFit/blob/main/docs/overview/image/lens_model_cluster.png?raw=true
+```{image} https://github.com/PyAutoLabs/PyAutoFit/blob/main/docs/overview/image/lens_model_cluster.png?raw=true
 :alt: Alternative text
 :width: 600
 ```
@@ -318,8 +318,8 @@ An example project on the **autofit_workspace** shows how to use **PyAutoFit** t
 lensing data, using **multi-level model composition**.
 
 If you'd like to perform the fit shown in this script, checkout the
-[simple examples](https://github.com/Jammy2211/autofit_workspace/tree/main/notebooks/overview/simplee) on the
+[simple examples](https://github.com/PyAutoLabs/autofit_workspace/tree/main/notebooks/overview) on the
 `autofit_workspace`. We detail how **PyAutoFit** works in the first 3 tutorials of
 the [HowToFit lecture series](https://github.com/PyAutoLabs/HowToFit).
 
-<https://github.com/Jammy2211/autofit_workspace/tree/release/projects/astro>
+<https://github.com/PyAutoLabs/autofit_workspace/tree/main/projects/astro>

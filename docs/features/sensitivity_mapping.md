@@ -19,7 +19,7 @@ evidence increase we should expect for datasets of varying quality and / or mode
 To illustrate sensitivity mapping we will again use the example of fitting 1D Gaussian's in noisy data. This 1D data
 includes a small feature to the right of the central `Gaussian`, a second `Gaussian` centred on pixel 70.
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/main/docs/features/images/gaussian_x1_with_feature.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/features/images/gaussian_x1_with_feature.png
 :alt: Alternative text
 :width: 600
 ```
@@ -175,12 +175,12 @@ def __call__(instance, simulate_path):
 
 Here are what the two most extreme simulated datasets look like, corresponding to the highest and lowest normalization values
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/main/docs/features/images/sensitivity_data_low.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/features/images/sensitivity_data_low.png
 :alt: Alternative text
 :width: 600
 ```
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/main/docs/features/images/sensitivity_data_high.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/features/images/sensitivity_data_high.png
 :alt: Alternative text
 :width: 600
 ```
@@ -218,12 +218,12 @@ sensitivity_result = sensitivity.run()
 Here are what the fits to the two most extreme simulated datasets look like, for the models including the Gaussian
 feature.
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/main/docs/features/images/sensitivity_data_low_fit.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/features/images/sensitivity_data_low_fit.png
 :alt: Alternative text
 :width: 600
 ```
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/main/docs/features/images/sensitivity_data_high_fit.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/features/images/sensitivity_data_high_fit.png
 :alt: Alternative text
 :width: 600
 ```

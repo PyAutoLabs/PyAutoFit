@@ -32,7 +32,7 @@ the `autofit_workspace`, reducing the download size):
 
 ```bash
 cd /path/on/your/computer/you/want/to/put/the/autofit_workspace
-git clone https://github.com/Jammy2211/autofit_workspace --depth 1
+git clone https://github.com/PyAutoLabs/autofit_workspace --depth 1
 cd autofit_workspace
 ```
 

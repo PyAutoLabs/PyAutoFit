@@ -7,8 +7,8 @@ by **PyAutoFit**.
 
 **Examples / Tutorials:**
 
-- `readthedocs: non-linear search example <https://pyautofit.readthedocs.io/en/latest/overview/non_linear_search.html>`_
-- `autofit_workspace: plot tutorials <https://github.com/Jammy2211/autofit_workspace/tree/release/notebooks/plot>`_
+- `readthedocs: non-linear search example <https://pyautofit.readthedocs.io/en/latest/cookbooks/search.html>`_
+- `autofit_workspace: plot tutorials <https://github.com/PyAutoLabs/autofit_workspace/tree/main/notebooks/guides/plot>`_
 - `HowToFit: tutorial lectures (detailed step-by-step examples) <https://github.com/PyAutoLabs/HowToFit>`_
 
 --------

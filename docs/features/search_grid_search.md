@@ -24,7 +24,7 @@ In this example we will demonstrate the search grid search feature, again using 
 in noisy data. This 1D data includes a small feature to the right of the central `Gaussian`, a second `Gaussian`
 centred on pixel 70.
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/main/docs/features/images/gaussian_x1_with_feature.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/features/images/gaussian_x1_with_feature.png
 :alt: Alternative text
 :width: 600
 ```
@@ -53,7 +53,7 @@ which the non linear search may miss.
 
 The image below shows a fit where we failed to detect the feature:
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/main/docs/features/images/gaussian_x1_with_feature_fit_no_feature.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/features/images/gaussian_x1_with_feature_fit_no_feature.png
 :alt: Alternative text
 :width: 600
 ```
@@ -110,7 +110,7 @@ This shows a peak evidence value on the 4th cell of grid-search, where the `Unif
 60 -> 80 and therefore included the Gaussian feature. By plotting this model-fit we can see it has successfully
 detected the feature.
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/main/docs/features/images/gaussian_x1_with_feature_fit_feature.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/features/images/gaussian_x1_with_feature_fit_feature.png
 :alt: Alternative text
 :width: 600
 ```
