@@ -66,6 +66,11 @@ class Drawer(AbstractMLE):
             An SQLalchemy session instance so the results of the model-fit are written to an SQLite database.
         """
 
+        # Drawer is single-core only; drop any saved number_of_cores so a
+        # round-tripped search.json (which records the resolved value) can be
+        # deserialized without colliding with the hardcoded kwarg below.
+        kwargs.pop("number_of_cores", None)
+
         super().__init__(
             name=name,
             path_prefix=path_prefix,
