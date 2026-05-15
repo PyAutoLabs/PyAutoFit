@@ -4,7 +4,7 @@
 visualization and other aspects of **PyAutoFit**.
 
 Descriptions of every configuration file and their input parameters are provided in the `README.md` in
-the [config directory of the workspace](https://github.com/Jammy2211/autofit_workspace/tree/release/config)
+the [config directory of the workspace](https://github.com/PyAutoLabs/autofit_workspace/tree/main/config)
 
 ## Setup
 

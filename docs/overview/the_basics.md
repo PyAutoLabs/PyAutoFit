@@ -36,7 +36,7 @@ import numpy as np
 
 The example `data` with errors (black) is shown below:
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/main/docs/images/data.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/images/data.png
 :alt: Alternative text
 :width: 600
 ```
@@ -277,7 +277,7 @@ plt.clf()
 
 Here is what the plot looks like:
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/main/docs/images/model_gaussian.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/images/model_gaussian.png
 :alt: Alternative text
 :width: 600
 ```
@@ -518,7 +518,7 @@ plt.close()
 
 The plot appears as follows:
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/main/docs/images/toy_model_fit.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/images/toy_model_fit.png
 :alt: Alternative text
 :width: 600
 ```
@@ -545,7 +545,7 @@ plotter.corner_anesthetic()
 
 The plot appears as follows:
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/main/docs/images/corner.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/images/corner.png
 :alt: Alternative text
 :width: 600
 ```
@@ -640,7 +640,7 @@ interpretation of the results remains feasible and insightful.
 
 ## Resources
 
-The [autofit_workspace:](https://github.com/Jammy2211/autofit_workspace/) repository on GitHub provides numerous
+The [autofit_workspace:](https://github.com/PyAutoLabs/autofit_workspace/) repository on GitHub provides numerous
 examples demonstrating more complex model-fitting tasks.
 
 This includes cookbooks, which provide a concise reference guide to the **PyAutoFit** API for advanced model-fitting:

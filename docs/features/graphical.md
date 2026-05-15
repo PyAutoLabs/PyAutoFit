@@ -52,17 +52,17 @@ for dataset_index in range(total_gaussians):
 
 This is what our three Gaussians look like:
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/main/docs/features/images/gaussian_x1_1__low_snr.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/features/images/gaussian_x1_1__low_snr.png
 :alt: Alternative text
 :width: 600
 ```
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/main/docs/features/images/gaussian_x1_2__low_snr.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/features/images/gaussian_x1_2__low_snr.png
 :alt: Alternative text
 :width: 600
 ```
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/main/docs/features/images/gaussian_x1_3__low_snr.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/features/images/gaussian_x1_3__low_snr.png
 :alt: Alternative text
 :width: 600
 ```

@@ -56,7 +56,7 @@ Contributions are welcome and greatly appreciated!
 
 ### Report Bugs
 
-Report bugs at https://github.com/rhayes777/PyAutoFit/issues
+Report bugs at https://github.com/PyAutoLabs/PyAutoFit/issues
 
 If you are playing with the PyAutoFit library and find a bug, please
 reporting it including:
@@ -68,7 +68,7 @@ reporting it including:
 ### Propose New `NonLinearSearch` or Features
 
 The best way to send feedback is to open an issue at
-https://github.com/rhayes777/PyAutoFit/issues
+https://github.com/PyAutoLabs/PyAutoFit/issues
 with tag *enhancement*.
 
 If you are proposing a new `NonLinearSearch` or a new feature:

@@ -24,7 +24,7 @@ plt.close()
 
 The data appear as follows:
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/main/docs/images/data_2.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/images/data_2.png
 :alt: Alternative text
 :width: 600
 ```
@@ -371,7 +371,7 @@ plt.close()
 
 The plot appears as follows:
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/main/docs/images/toy_model_fit.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/images/toy_model_fit.png
 :alt: Alternative text
 :width: 600
 ```

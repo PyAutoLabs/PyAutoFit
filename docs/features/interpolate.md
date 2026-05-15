@@ -48,7 +48,7 @@ for time in range(3):
 Visual comparison of the datasets shows that the `centre` of each `Gaussian` varies smoothly over time, with it moving
 from pixel 40 at t=0 to pixel 60 at t=2.
 
-```{image} https://raw.githubusercontent.com/rhayes777/PyAutoFit/main/docs/features/images/hi.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/features/images/hi.png
 :alt: Alternative text
 :width: 600
 ```

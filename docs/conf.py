@@ -3,7 +3,7 @@ import datetime
 #
 # This file only contains a selection of the most common options. For a full
 # list see the documentation:
-# https://www.sphinx-doc.org/en/main/usage/configuration.html
+# https://www.sphinx-doc.org/en/master/usage/configuration.html
 
 # -- Path setup --------------------------------------------------------------
 
@@ -61,7 +61,7 @@ extlinks = {
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
-    "sphinx": ("https://www.sphinx-doc.org/en/main", None),
+    "sphinx": ("https://www.sphinx-doc.org/en/master", None),
 }
 
 # -- Options for TODOs -------------------------------------------------------

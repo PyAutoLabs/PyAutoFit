@@ -9,9 +9,9 @@ Markov Chain Monte Carlo (MCMC) and Maximum Likelihood Estimators (MLE).
 
 **Examples / Tutorials:**
 
-- `readthedocs: example using non-linear searches <https://pyautofit.readthedocs.io/en/latest/overview/non_linear_search.html>`_.
-- `autofit_workspace: simple tutorial <https://github.com/Jammy2211/autofit_workspace/blob/release/notebooks/overview/simple/fit.ipynb>`_
-- `autofit_workspace: complex tutorial <https://github.com/Jammy2211/autofit_workspace/blob/release/notebooks/overview/complex/fit.ipynb>`_
+- `readthedocs: example using non-linear searches <https://pyautofit.readthedocs.io/en/latest/cookbooks/search.html>`_.
+- `autofit_workspace: simple tutorial <https://github.com/PyAutoLabs/autofit_workspace/blob/main/notebooks/overview/overview_1_the_basics.ipynb>`_
+- `autofit_workspace: complex tutorial <https://github.com/PyAutoLabs/autofit_workspace/blob/main/notebooks/overview/overview_2_scientific_workflow.ipynb>`_
 - `HowToFit: tutorial lectures (detailed step-by-step examples) <https://github.com/PyAutoLabs/HowToFit>`_
 
 Nested Samplers
@@ -79,7 +79,7 @@ model are fitted in over a discrete grid.
 **Examples / Tutorials:**
 
 - `readthedocs: example using a non-linear search grid search <https://pyautofit.readthedocs.io/en/latest/features/search_grid_search.html>`_.
-- `autofit_workspace: example using a non-linear search grid search <https://github.com/Jammy2211/autofit_workspace/blob/release/notebooks/features/search_grid_search.ipynb>`_
+- `autofit_workspace: example using a non-linear search grid search <https://github.com/PyAutoLabs/autofit_workspace/blob/main/notebooks/features/search_grid_search.ipynb>`_
 
 GridSearch
 ----------

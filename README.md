@@ -3,9 +3,9 @@
 [![Project Status: Active](https://www.repostatus.org/badges/latest/active.svg)](https://www.repostatus.org/#active)
 [![Python Versions](https://img.shields.io/pypi/pyversions/autofit)](https://pypi.org/project/autofit/)
 [![PyPI Version](https://img.shields.io/pypi/v/autofit.svg)](https://pypi.org/project/autofit/)
-[![Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.5.14.2/start_here.ipynb)
-[![Tests](https://github.com/rhayes777/PyAutoFit/actions/workflows/main.yml/badge.svg)](https://github.com/rhayes777/PyAutoFit/actions)
-[![Build](https://github.com/rhayes777/PyAutoBuild/actions/workflows/release.yml/badge.svg)](https://github.com/rhayes777/PyAutoBuild/actions)
+[![Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.5.14.2/notebooks/overview/overview_1_the_basics.ipynb)
+[![Tests](https://github.com/PyAutoLabs/PyAutoFit/actions/workflows/main.yml/badge.svg)](https://github.com/PyAutoLabs/PyAutoFit/actions)
+[![Build](https://github.com/PyAutoLabs/PyAutoBuild/actions/workflows/release.yml/badge.svg)](https://github.com/PyAutoLabs/PyAutoBuild/actions)
 [![Documentation Status](https://readthedocs.org/projects/pyautofit/badge/?version=latest)](https://pyautofit.readthedocs.io/en/latest/?badge=latest)
 [![JOSS](https://joss.theoj.org/papers/10.21105/joss.02550/status.svg)](https://doi.org/10.21105/joss.02550)
 
@@ -32,13 +32,13 @@ The following links are useful for new starters:
 
 - [The PyAutoFit readthedocs](https://pyautofit.readthedocs.io/en/latest), which includes an [installation guide](https://pyautofit.readthedocs.io/en/latest/installation/overview.html) and an overview of **PyAutoFit**'s core features.
 - [The introduction Jupyter Notebook on Colab](https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.5.14.2/notebooks/overview/overview_1_the_basics.ipynb), where you can try **PyAutoFit** in a web browser (without installation).
-- [The autofit_workspace GitHub repository](https://github.com/Jammy2211/autofit_workspace), which includes example scripts demonstrating **PyAutoFit**'s features.
+- [The autofit_workspace GitHub repository](https://github.com/PyAutoLabs/autofit_workspace), which includes example scripts demonstrating **PyAutoFit**'s features.
 - [The standalone HowToFit repository](https://github.com/PyAutoLabs/HowToFit), a series of Jupyter notebook lectures which give new users a step-by-step introduction to **PyAutoFit**.
 
 ## Support
 
 Support for installation issues, help with Fit modeling and using **PyAutoFit** is available by
-[raising an issue on the GitHub issues page](https://github.com/rhayes777/PyAutoFit/issues).
+[raising an issue on the GitHub issues page](https://github.com/PyAutoLabs/PyAutoFit/issues).
 
 We also offer support on the **PyAutoFit** [Slack channel](https://pyautoFit.slack.com/), where we also provide the
 latest updates on **PyAutoFit**. Slack is invitation-only, so if you'd like to join send
@@ -57,7 +57,7 @@ The lectures are available in the [standalone HowToFit repository](https://githu
 To illustrate the **PyAutoFit** API, we use an illustrative toy model of fitting a one-dimensional Gaussian to
 noisy 1D data. Here's the `data` (black) and the model (red) we'll fit:
 
-<img src="https://raw.githubusercontent.com/rhayes777/PyAutoFit/main/files/toy_model_fit.png" width="400" />
+<img src="https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/files/toy_model_fit.png" width="400" />
 
 We define our model, a 1D Gaussian by writing a Python class using the format below:
 

@@ -141,7 +141,7 @@ search = af.Emcee(
 
 The screenshot below shows the output folder where all output is enabled:
 
-```{image} https://raw.githubusercontent.com/Jammy2211/PyAutoFit/main/docs/overview/image/output_example.png
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/overview/image/output_example.png
 :alt: Alternative text
 :width: 400
 ```

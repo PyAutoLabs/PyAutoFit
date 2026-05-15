@@ -2,7 +2,7 @@
 
 # Workspace Tour
 
-You should have downloaded and configured the [autofit_workspace](https://github.com/Jammy2211/autofit_workspace)
+You should have downloaded and configured the [autofit_workspace](https://github.com/PyAutoLabs/autofit_workspace)
 when you installed **PyAutoFit**. If you didn't, checkout the
 [installation instructions](https://pyautofit.readthedocs.io/en/latest/general/installation.html#installation-with-pip)
 for how to downloaded and configure the workspace.
@@ -26,7 +26,7 @@ There are numerous example describing how perform model-fitting with **PyAutoFit
 advanced model-fitting features. All examples are provided as Python scripts and Jupyter notebooks.
 
 Descriptions of every configuration file and their input parameters are provided in the `README.md` in
-the [config directory of the workspace](https://github.com/Jammy2211/autofit_workspace/tree/release/config)
+the [config directory of the workspace](https://github.com/PyAutoLabs/autofit_workspace/tree/main/config)
 
 ## Config
 
