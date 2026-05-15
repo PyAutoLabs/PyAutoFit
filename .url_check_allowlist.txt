@@ -1,0 +1,27 @@
+# Known broken URLs grandfathered for url_check_live.sh.
+# Format: one URL per line. Lines starting with '#' and blank lines are ignored.
+# Sample location follows each URL as a trailing comment.
+#
+# This file is referenced by .github/workflows/url_check.yml (weekly cron).
+# url_check_live.sh fails CI when a URL is broken AND not in this file.
+# To accept new breakage: append the URL here. To force a fix: leave it out.
+
+# Code of Conduct boilerplate
+http://geekfeminism.wikia.com/wiki/Conference_anti-harassment/Policy  # CODE_OF_CONDUCT.md:306
+
+# GitHub refs (workspaces / removed tutorials)
+https://github.com/PyAutoLabs/autofit_workspace/blob/main/notebooks/features/database.ipynb  # docs/api/database.rst:12
+https://github.com/PyAutoLabs/autofit_workspace/tree/main/notebooks/guides/plot  # docs/api/plot.rst:11
+https://github.com/PyAutoLabs/autofit_workspace/tree/main/projects/astro  # docs/science_examples/astronomy.md:325
+
+# Internal PyAuto docs — pages renamed, need editorial fix
+https://pyautofit.readthedocs.io/en/latest/cookbooks/database.html  # autofit/aggregator/aggregator.py:121
+https://pyautofit.readthedocs.io/en/latest/features/database.html  # docs/api/database.rst:11
+https://pyautofit.readthedocs.io/en/latest/general/adding_a_model_component.html  # autofit/mapper/prior/width_modifier.py:69
+https://pyautofit.readthedocs.io/en/latest/general/installation.html#forking-cloning  # CONTRIBUTING.md:96
+https://pyautofit.readthedocs.io/en/latest/general/installation.html#installation-with-pip  # docs/general/workspace.md:7
+
+# Internal image refs missing from main
+https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/features/images/hi.png  # docs/features/interpolate.md:51
+https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/images/corner.png  # docs/cookbooks/samples.md:302
+https://raw.githubusercontent.com/PyAutoLabs/PyAutoLens/main/docs/overview/images/overview_1_lensing/schematic.jpg  # docs/science_examples/astronomy.md:11
