@@ -1,5 +1,6 @@
 import math
 
+import numpy as np
 import pytest
 
 import autofit as af
@@ -190,33 +191,30 @@ class TestLogUniformPrior:
         assert log_uniform_half.value_for(0.5) == pytest.approx(0.70710678118, 1.0e-4)
 
     def test__log_prior_from_value(self):
-        gaussian_simple = af.LogUniformPrior(lower_limit=1e-8, upper_limit=1.0)
+        # LogUniformPrior log-density: -log(value), dropping the normalisation
+        # constant -log(log(upper / lower)). Consistent with UniformPrior's
+        # convention of returning 0.0 (dropping -log(b - a)).
+        log_uniform = af.LogUniformPrior(lower_limit=1e-8, upper_limit=1.0)
 
-        log_prior = gaussian_simple.log_prior_from_value(value=1.0)
+        assert log_uniform.log_prior_from_value(value=1.0) == 0.0
+        assert log_uniform.log_prior_from_value(value=2.0) == pytest.approx(
+            -np.log(2.0), 1.0e-12
+        )
+        assert log_uniform.log_prior_from_value(value=4.0) == pytest.approx(
+            -np.log(4.0), 1.0e-12
+        )
 
-        assert log_prior == 1.0
+        # The normalisation constant being dropped means the returned values
+        # do NOT depend on the (lower_limit, upper_limit) pair — only on `value`.
+        log_uniform = af.LogUniformPrior(lower_limit=50.0, upper_limit=100.0)
 
-        log_prior = gaussian_simple.log_prior_from_value(value=2.0)
-
-        assert log_prior == 0.5
-
-        log_prior = gaussian_simple.log_prior_from_value(value=4.0)
-
-        assert log_prior == 0.25
-
-        gaussian_simple = af.LogUniformPrior(lower_limit=50.0, upper_limit=100.0)
-
-        log_prior = gaussian_simple.log_prior_from_value(value=1.0)
-
-        assert log_prior == 1.0
-
-        log_prior = gaussian_simple.log_prior_from_value(value=2.0)
-
-        assert log_prior == 0.5
-
-        log_prior = gaussian_simple.log_prior_from_value(value=4.0)
-
-        assert log_prior == 0.25
+        assert log_uniform.log_prior_from_value(value=1.0) == 0.0
+        assert log_uniform.log_prior_from_value(value=2.0) == pytest.approx(
+            -np.log(2.0), 1.0e-12
+        )
+        assert log_uniform.log_prior_from_value(value=4.0) == pytest.approx(
+            -np.log(4.0), 1.0e-12
+        )
 
     def test__lower_limit_zero_or_below_raises_error(self):
         with pytest.raises(exc.PriorException):
@@ -244,13 +242,16 @@ class TestGaussianPrior:
     @pytest.mark.parametrize(
         "mean, sigma, value, expected",
         [
+            # Density-form log-prior: -(value - mean)**2 / (2 * sigma**2), with
+            # the -log(sigma * sqrt(2 * pi)) normalisation constant dropped.
+            # Maximum at value == mean (returns 0), negative elsewhere.
             (0.0, 1.0, 0.0, 0.0),
-            (0.0, 1.0, 1.0, 0.5),
-            (0.0, 1.0, 2.0, 2.0),
-            (1.0, 2.0, 0.0, 0.125),
+            (0.0, 1.0, 1.0, -0.5),
+            (0.0, 1.0, 2.0, -2.0),
+            (1.0, 2.0, 0.0, -0.125),
             (1.0, 2.0, 1.0, 0.0),
-            (1.0, 2.0, 2.0, 0.125),
-            (30.0, 60.0, 2.0, pytest.approx(0.108888, 1.0e-4)),
+            (1.0, 2.0, 2.0, -0.125),
+            (30.0, 60.0, 2.0, pytest.approx(-0.108888, 1.0e-4)),
         ],
     )
     def test__log_prior_from_value(self, mean, sigma, value, expected):
@@ -265,4 +266,10 @@ def test_log_gaussian_prior_log_prior_from_value():
     )
 
     assert log_gaussian_prior.log_prior_from_value(value=0.0) == float("-inf")
-    assert log_gaussian_prior.log_prior_from_value(value=0.5) == 0.9333736875190459
+    # Density form: -(log(value) - mean)**2 / (2 * sigma**2) - log(value),
+    # where the second term is the Jacobian of the log-space transform.
+    log_half = math.log(0.5)
+    expected = -(log_half ** 2) / 2.0 - log_half
+    assert log_gaussian_prior.log_prior_from_value(value=0.5) == pytest.approx(
+        expected, 1.0e-12
+    )

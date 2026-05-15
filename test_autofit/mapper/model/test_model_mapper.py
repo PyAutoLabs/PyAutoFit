@@ -432,7 +432,11 @@ class TestInstances:
 
         log_prior_list = mapper.log_prior_list_from_vector(vector=[0.0, 5.0])
 
-        assert log_prior_list == [0.125, 0.2]
+        # Density-form log-priors (PyAutoLabs/PyAutoFit#1266):
+        #   Gaussian(mean=1, sigma=2) at value=0:   -(0-1)**2 / (2*4) = -0.125
+        #   LogUniform(...)            at value=5:  -log(5)
+        assert log_prior_list[0] == -0.125
+        assert log_prior_list[1] == pytest.approx(-np.log(5.0), 1.0e-12)
 
     def test_random_unit_vector_within_limits(self):
         mapper = af.ModelMapper()

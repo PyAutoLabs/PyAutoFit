@@ -142,6 +142,17 @@ class LogGaussianPrior(Prior):
         return f"mean = {self.mean}, sigma = {self.sigma}"
 
     def log_prior_from_value(self, value, xp=np):
+        """
+        Compute the log prior density of a given physical value under this log-Gaussian prior.
+
+        The change-of-variables Jacobian for the log transform contributes
+        ``-log(value)``; the underlying Gaussian-in-log-space contributes the
+        density-form quadratic via ``NormalMessage.log_prior_from_value``.
+        Out-of-support (``value <= 0``) returns ``-inf``.
+
+        See ``NormalMessage.log_prior_from_value`` for the constant-dropping
+        convention.
+        """
         if xp is np:
             if value <= 0:
                 return float("-inf")
@@ -150,5 +161,5 @@ class LogGaussianPrior(Prior):
             ) - np.log(value)
 
         log_value = xp.log(value)
-        base_log_prior = (log_value - self.mean) ** 2 / (2 * self.sigma ** 2)
-        return xp.where(value > 0, base_log_prior - log_value, xp.inf)
+        base_log_prior = -((log_value - self.mean) ** 2) / (2 * self.sigma ** 2)
+        return xp.where(value > 0, base_log_prior - log_value, -xp.inf)
