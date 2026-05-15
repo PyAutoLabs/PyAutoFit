@@ -179,6 +179,7 @@ class VisualizerExample(af.Visualizer):
         paths: af.DirectoryPaths,
         instance: af.ModelInstance,
         during_analysis: bool,
+        quick_update: bool = False,
     ):
         """
         Multiple instances of the `Analysis` class can be summed together, meaning that the model is fitted to all
