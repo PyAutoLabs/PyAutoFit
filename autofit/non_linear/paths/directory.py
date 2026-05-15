@@ -470,11 +470,9 @@ class DirectoryPaths(AbstractPaths):
         with open_(self.output_path / "model.info", "w+") as f:
             f.write(model.info)
 
-        try:
+        if should_output("model_graph") and hasattr(model, "graph_info"):
             with open_(self.output_path / "model.graph", "w+") as f:
-                f.write( model.graph_info)
-        except AttributeError:
-            pass
+                f.write(model.graph_info)
 
     def _save_model_start_point(self, info):
         """
