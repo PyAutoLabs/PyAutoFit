@@ -132,7 +132,7 @@ class UniformPrior(Prior):
         """A human-readable string summarizing the prior's lower and upper limits."""
         return f"lower_limit = {self.lower_limit}, upper_limit = {self.upper_limit}"
 
-    def value_for(self, unit: float) -> float:
+    def value_for(self, unit, xp=np):
         """
         Returns a physical value from an input unit value according to the limits of the uniform prior.
 
@@ -140,6 +140,11 @@ class UniformPrior(Prior):
         ----------
         unit
             A unit value between 0 and 1.
+        xp
+            Array-module to dispatch on (``numpy`` or ``jax.numpy``). Default ``numpy``.
+            The NumPy path preserves the historical ``float(round(..., 14))`` snap
+            (used as a hash key in ``model.priors``); the JAX path uses the
+            closed-form ``lower + (upper - lower) * unit`` so the trace stays symbolic.
 
         Returns
         -------
@@ -153,9 +158,11 @@ class UniformPrior(Prior):
 
         physical_value = prior.value_for(unit=0.2)
         """
-        return float(
-            round(super().value_for(unit), 14)
-        )
+        if xp is np:
+            return float(
+                round(super().value_for(unit), 14)
+            )
+        return self.lower_limit + (self.upper_limit - self.lower_limit) * unit
 
     def log_prior_from_value(self, value, xp=np):
         """
@@ -166,7 +173,10 @@ class UniformPrior(Prior):
 
         For a UniformPrior this is always zero, provided the value is between the lower and upper limit.
         """
-        return 0.0
+        if xp is np:
+            return 0.0
+        in_bounds = (value >= self.lower_limit) & (value <= self.upper_limit)
+        return xp.where(in_bounds, xp.zeros_like(value), -xp.inf)
 
     @property
     def limits(self) -> Tuple[float, float]:

@@ -121,10 +121,12 @@ class LogUniformPrior(Prior):
         ----------
         value : float
             The physical value of this prior's corresponding parameter in a `NonLinearSearch` sample.
+        xp
+            Array-module to dispatch on (``numpy`` or ``jax.numpy``). Default ``numpy``.
         """
         return 1.0 / value
 
-    def value_for(self, unit: float) -> float:
+    def value_for(self, unit, xp=np):
         """
         Returns a physical value from an input unit value according to the limits of the log10 uniform prior.
 
@@ -132,6 +134,10 @@ class LogUniformPrior(Prior):
         ----------
         unit
             A unit value between 0 and 1.
+        xp
+            Array-module to dispatch on (``numpy`` or ``jax.numpy``). Default ``numpy``.
+            The NumPy path delegates to the message stack (scipy-backed); the JAX
+            path uses the closed-form ``lower * (upper / lower) ** unit``.
 
         Returns
         -------
@@ -145,7 +151,9 @@ class LogUniformPrior(Prior):
 
         physical_value = prior.value_for(unit=0.2)
         """
-        return super().value_for(unit)
+        if xp is np:
+            return super().value_for(unit)
+        return self.lower_limit * (self.upper_limit / self.lower_limit) ** unit
 
     def dict(self) -> dict:
         """
