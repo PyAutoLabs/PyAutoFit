@@ -1,4 +1,6 @@
 import logging
+import os
+import pickle
 from pathlib import Path
 from typing import Optional
 
@@ -15,16 +17,67 @@ from autofit.non_linear.test_mode import is_test_mode
 
 
 try:
-    from nss.ns import run_nested_sampling, log_weights as _nss_log_weights
+    import blackjax as _blackjax
+    from nss.ns import (
+        log_weights as _nss_log_weights,
+        finalise as _nss_finalise,
+    )
 
     _HAS_NSS = True
 except ImportError:
-    run_nested_sampling = None
+    _blackjax = None
     _nss_log_weights = None
+    _nss_finalise = None
     _HAS_NSS = False
 
 
 logger = logging.getLogger(__name__)
+
+
+_CHECKPOINT_FILENAME = "nss_checkpoint.pkl"
+
+
+def _save_checkpoint(path, state, dead, run_key, iteration):
+    """Atomically pickle the resumable state of an in-flight NSS run.
+
+    The blackjax ``state`` and each entry in ``dead`` are pytrees of JAX arrays.
+    JAX arrays do pickle directly, but to keep the on-disk format independent
+    of the JAX install (so a checkpoint written on one cluster can be loaded
+    on another) we round-trip through NumPy before writing. ``_load_checkpoint``
+    reverses the conversion.
+
+    A tmp-and-rename pattern guards against partial writes — a SLURM timeout
+    halfway through a pickle dump leaves the previous-good checkpoint intact.
+    """
+    import jax
+
+    to_numpy = lambda x: jax.tree_util.tree_map(np.asarray, x)
+    blob = {
+        "state": to_numpy(state),
+        "dead": [to_numpy(d) for d in dead],
+        "run_key": np.asarray(run_key),
+        "iteration": int(iteration),
+    }
+    tmp_path = Path(str(path) + ".tmp")
+    with open(tmp_path, "wb") as f:
+        pickle.dump(blob, f)
+    os.replace(tmp_path, path)
+
+
+def _load_checkpoint(path):
+    """Reverse of ``_save_checkpoint`` — restore a saved blob to JAX pytrees."""
+    import jax
+    import jax.numpy as jnp
+
+    with open(path, "rb") as f:
+        blob = pickle.load(f)
+    to_jax = lambda x: jax.tree_util.tree_map(jnp.asarray, x)
+    return (
+        to_jax(blob["state"]),
+        [to_jax(d) for d in blob["dead"]],
+        jnp.asarray(blob["run_key"]),
+        int(blob["iteration"]),
+    )
 
 
 class _NSSInternal:
@@ -87,6 +140,7 @@ class NSS(abstract_nest.AbstractNest):
         num_mcmc_steps: int = 5,
         num_delete: int = 50,
         termination: float = -3.0,
+        checkpoint_interval: int = 100,
         iterations_per_quick_update: Optional[int] = None,
         iterations_per_full_update: Optional[int] = None,
         number_of_cores: int = 1,
@@ -106,15 +160,19 @@ class NSS(abstract_nest.AbstractNest):
         to make ``model.vector_from_unit_vector`` and
         ``model.log_prior_list_from_vector`` traceable.
 
-        Phase 1 of the ``nss_first_class_sampler`` roadmap. Checkpointing /
-        resumption (Phase 2) and on-the-fly visualization (Phase 3) are stubbed
-        — kwargs are accepted but log a warning when set, and a state file at
-        ``paths.search_internal_path / state.json`` triggers a warning that
-        resume is not yet supported (the fit then proceeds from scratch).
+        Phases 1-3 of the ``nss_first_class_sampler`` roadmap are live:
+        - Phase 1: the wrapper itself (this class).
+        - Phase 2: checkpoint/resume via ``checkpoint_interval`` — a
+          ``nss_checkpoint.pkl`` is written to ``paths.search_internal_path``
+          every N outer iterations and reloaded automatically on resume.
+        - Phase 3: on-the-fly visualization via ``iterations_per_quick_update``
+          — every N outer iterations the current best live particle is fed to
+          ``analysis.visualize`` so partial results appear in the image_path
+          directory during long fits.
 
+        Phase 4 (``pip install autofit[nss]`` extra) is still pending — for now
         ``af.NSS`` is an optional requirement and must be installed manually
-        via ``pip install git+https://github.com/yallup/nss.git`` (Phase 4 of
-        the roadmap will ship a ``pyautofit[nss]`` extra).
+        via ``pip install git+https://github.com/yallup/nss.git``.
 
         Parameters
         ----------
@@ -141,12 +199,21 @@ class NSS(abstract_nest.AbstractNest):
             Convergence criterion. The fit stops when
             ``logZ_live - logZ < termination``. Default ``-3.0`` corresponds
             to delta-logZ < 1e-3.
+        checkpoint_interval
+            Outer iterations between checkpoint writes. Default ``100`` writes
+            a ``nss_checkpoint.pkl`` (atomic via tmp-and-rename) every ~5000-
+            10000 likelihood evaluations at typical ``num_delete=50``. Set to
+            a large value to effectively disable checkpointing on short runs.
         iterations_per_quick_update
-            Accepted for API parity with other nested samplers. **Not yet
-            wired** — quick-update visualization is Phase 3.
+            Outer iterations between on-the-fly visualizations. When non-None
+            the current best live particle is fed to ``analysis.visualize``
+            every N iterations so partial results appear in the image_path
+            directory during long fits. ``analysis.visualize`` is wrapped in
+            try/except so a viz failure logs a warning but does not kill the
+            sampler.
         iterations_per_full_update
-            Accepted for API parity. NSS performs its own internal output
-            cadence and does not honour intermediate full updates in Phase 1.
+            Accepted for API parity. NSS does not have a full-update concept
+            separate from the outer-iteration cadence.
         number_of_cores
             Accepted for API parity only. NSS runs on whatever device JAX is
             configured for (CPU, GPU, TPU) — multiprocessing parallelism is
@@ -196,6 +263,7 @@ class NSS(abstract_nest.AbstractNest):
         self.num_mcmc_steps = num_mcmc_steps
         self.num_delete = num_delete
         self.termination = termination
+        self.checkpoint_interval = checkpoint_interval
         self.seed = seed
 
         if number_of_cores is not None and number_of_cores > 1:
@@ -204,15 +272,6 @@ class NSS(abstract_nest.AbstractNest):
                 "runs on whatever device JAX is configured for; the value is "
                 "ignored. Set number_of_cores=1 to silence this warning.",
                 number_of_cores,
-            )
-
-        if iterations_per_quick_update is not None:
-            logger.info(
-                "af.NSS received iterations_per_quick_update=%s. Quick-update "
-                "visualization is Phase 3 of the nss_first_class_sampler "
-                "roadmap and is not yet wired up; the kwarg is currently a "
-                "no-op.",
-                iterations_per_quick_update,
             )
 
         if is_test_mode():
@@ -229,23 +288,28 @@ class NSS(abstract_nest.AbstractNest):
 
     def _fit(self, model: AbstractPriorModel, analysis):
         """
-        Fit a model using NSS.
+        Fit a model using NSS, with checkpoint/resume + on-the-fly visualization.
 
         Builds JAX-traceable ``log_likelihood`` and ``prior_logprob`` closures
-        threaded through Phase 0's ``xp=jnp`` plumbing, draws ``n_live``
-        initial particles by mapping unit-cube samples through the prior
-        transform, then calls ``nss.ns.run_nested_sampling``. The returned
-        ``final_state`` and ``results`` are repackaged into a ``_NSSInternal``
-        holder (NumPy arrays only) so the standard PyAutoFit pickled-search
-        path keeps working.
+        threaded through Phase 0's ``xp=jnp`` plumbing, draws ``n_live`` initial
+        particles by mapping unit-cube samples through the prior transform,
+        and runs the NSS outer loop inline (mirroring the upstream
+        ``nss.ns.run_nested_sampling`` pattern). Between outer iterations the
+        loop can (a) pickle resumable state to ``nss_checkpoint.pkl`` and
+        (b) call ``analysis.visualize`` on the current best live particle.
+
+        On entry, if a checkpoint exists at the expected path the loop resumes
+        from the saved ``(state, dead, run_key, iteration)``. On successful
+        exit the checkpoint is deleted — mirrors Nautilus's
+        ``output_search_internal`` post-success cleanup so the next fresh fit
+        doesn't accidentally resume from a stale checkpoint.
 
         Returns
         -------
         (search_internal, fitness)
-            ``search_internal`` is a ``_NSSInternal`` holder. ``fitness`` is a
-            ``Fitness`` instance that is **not** used by ``af.NSS`` for
-            sampling (the JAX likelihood + prior closures are built inline
-            and passed straight to ``nss.ns.run_nested_sampling``) but is
+            ``search_internal`` is a ``_NSSInternal`` holder (NumPy arrays
+            only). ``fitness`` is a ``Fitness`` instance that ``af.NSS`` does
+            not use for sampling (inline JAX closures handle that) but is
             required by ``AbstractNest.perform_update`` for post-fit work
             like latent-sample generation, which calls ``fitness.batch_size``.
         """
@@ -254,17 +318,7 @@ class NSS(abstract_nest.AbstractNest):
         import jax.numpy as jnp
         import time
 
-        if not isinstance(self.paths, NullPaths):
-            state_file = Path(self.paths.search_internal_path) / "state.json"
-            if state_file.exists():
-                self.logger.warning(
-                    "Detected %s — resume is Phase 2 of the "
-                    "nss_first_class_sampler roadmap and is not yet wired up. "
-                    "Proceeding with a fresh fit.",
-                    state_file,
-                )
-
-        self.logger.info("Starting new NSS non-linear search.")
+        self.logger.info("Starting NSS non-linear search.")
 
         ndim = model.prior_count
 
@@ -288,48 +342,112 @@ class NSS(abstract_nest.AbstractNest):
             ]
         )
 
-        self.logger.info(
-            "NSS configuration: n_live=%d, num_mcmc_steps=%d, num_delete=%d, "
-            "termination=%s, ndim=%d. JIT compile on first iteration may "
-            "take 25-30 s.",
-            self.n_live,
-            self.num_mcmc_steps,
-            self.num_delete,
-            self.termination,
-            ndim,
+        algo = _blackjax.nss(
+            logprior_fn=prior_logprob,
+            loglikelihood_fn=log_likelihood,
+            num_delete=self.num_delete,
+            num_inner_steps=self.num_mcmc_steps,
         )
 
+        @jax.jit
+        def one_step(carry, _):
+            state, k = carry
+            k, subk = jax.random.split(k, 2)
+            state, dead_point = algo.step(subk, state)
+            return (state, k), dead_point
+
+        checkpoint_path = self._nss_checkpoint_path
+        if checkpoint_path is not None and checkpoint_path.exists():
+            state, dead, run_key, iteration = _load_checkpoint(checkpoint_path)
+            self.logger.info(
+                "Resuming NSS from checkpoint at iteration %d (state file %s).",
+                iteration,
+                checkpoint_path,
+            )
+        else:
+            state = algo.init(initial_samples)
+            dead = []
+            iteration = 0
+            self.logger.info(
+                "NSS configuration: n_live=%d, num_mcmc_steps=%d, num_delete=%d, "
+                "termination=%s, ndim=%d, checkpoint_interval=%d. JIT compile on "
+                "first iteration may take 25-30 s.",
+                self.n_live,
+                self.num_mcmc_steps,
+                self.num_delete,
+                self.termination,
+                ndim,
+                self.checkpoint_interval,
+            )
+
         t_start = time.time()
-        final_state, results = run_nested_sampling(
-            run_key,
-            loglikelihood_fn=log_likelihood,
-            prior_logprob=prior_logprob,
-            num_mcmc_steps=self.num_mcmc_steps,
-            initial_samples=initial_samples,
-            num_delete=self.num_delete,
-            termination=self.termination,
-        )
+        while not state.integrator.logZ_live - state.integrator.logZ < self.termination:
+            (state, run_key), dead_info = one_step((state, run_key), None)
+            dead.append(dead_info)
+            iteration += 1
+
+            if (
+                checkpoint_path is not None
+                and iteration % self.checkpoint_interval == 0
+            ):
+                _save_checkpoint(checkpoint_path, state, dead, run_key, iteration)
+
+            if (
+                self.iterations_per_quick_update is not None
+                and iteration % self.iterations_per_quick_update == 0
+            ):
+                self._fire_quick_update(state=state, model=model, analysis=analysis)
+
         wall_time = time.time() - t_start
+
+        final_state = _nss_finalise(state, dead)
 
         rng_key, weight_key = jax.random.split(rng_key, 2)
         log_w_mc = _nss_log_weights(weight_key, final_state, shape=100)
         log_w_per_particle = log_w_mc.mean(axis=-1)
+        logZs = jax.scipy.special.logsumexp(
+            jnp.nan_to_num(log_w_mc, nan=jnp.nan_to_num(log_w_mc).min()),
+            axis=0,
+        )
+
+        def _safe_ess(log_w_mean):
+            log_w_mean = log_w_mean - log_w_mean.max()
+            weights = jnp.exp(log_w_mean)
+            return float(weights.sum() ** 2 / (weights ** 2).sum())
+
+        ess = int(_safe_ess(log_w_mc.mean(axis=-1)))
+        evals = int(
+            final_state.update_info.num_steps.sum()
+            + final_state.update_info.num_shrink.sum()
+        )
 
         search_internal = _NSSInternal(
             positions=np.asarray(final_state.particles.position),
             loglikelihoods=np.asarray(final_state.particles.loglikelihood),
             log_weights=np.asarray(log_w_per_particle),
-            logZs=np.asarray(results.logZs),
+            logZs=np.asarray(logZs),
             wall_time=float(wall_time),
-            sampling_time=float(results.time),
-            evals=int(results.evals),
-            ess=int(results.ess),
+            sampling_time=float(wall_time),
+            evals=evals,
+            ess=ess,
             n_live=int(self.n_live),
             num_mcmc_steps=int(self.num_mcmc_steps),
             num_delete=int(self.num_delete),
             termination=float(self.termination),
             seed=int(self.seed),
         )
+
+        if checkpoint_path is not None and checkpoint_path.exists():
+            try:
+                checkpoint_path.unlink()
+            except OSError as exc:
+                self.logger.warning(
+                    "Failed to delete completed-run checkpoint %s: %s. The "
+                    "next fresh af.NSS fit at this path will attempt to resume "
+                    "from it — delete manually if that is not desired.",
+                    checkpoint_path,
+                    exc,
+                )
 
         fitness = Fitness(
             model=model,
@@ -343,16 +461,49 @@ class NSS(abstract_nest.AbstractNest):
         return search_internal, fitness
 
     @property
-    def checkpoint_file(self):
-        """Path to the checkpoint file used by Phase 2's resume hook.
-
-        Phase 1 only checks for existence to warn the user that resume is not
-        yet supported. Phase 2 will use this path to write incremental state.
-        """
+    def _nss_checkpoint_path(self) -> Optional[Path]:
+        """Resolve the checkpoint location, or None when paths is NullPaths."""
+        if isinstance(self.paths, NullPaths):
+            return None
         try:
-            return self.paths.search_internal_path / "state.json"
+            return Path(self.paths.search_internal_path) / _CHECKPOINT_FILENAME
         except TypeError:
             return None
+
+    def _fire_quick_update(self, state, model, analysis):
+        """Push the current best live particle through ``analysis.visualize``.
+
+        The Nautilus / Dynesty quick-update path goes through
+        ``Fitness.manage_quick_update``; ``af.NSS`` bypasses ``Fitness._call``
+        for sampling so we invoke ``analysis.visualize`` directly between
+        outer-loop iterations. Wrapped in try/except — a visualization failure
+        logs a warning but does not kill a long sampler run.
+        """
+        try:
+            best_idx = int(np.asarray(state.particles.loglikelihood).argmax())
+            best_params = np.asarray(state.particles.position[best_idx]).tolist()
+            instance = model.instance_from_vector(vector=best_params)
+            analysis.visualize(
+                paths=self.paths,
+                instance=instance,
+                during_analysis=True,
+            )
+        except Exception as exc:
+            self.logger.warning(
+                "af.NSS quick-update visualization failed: %s. Continuing the "
+                "fit — quick-update is best-effort, the final visualization "
+                "fires at the end of the run regardless.",
+                exc,
+            )
+
+    @property
+    def checkpoint_file(self):
+        """Path to the on-disk checkpoint written between outer-loop iterations.
+
+        Returns the same value as ``_nss_checkpoint_path`` — exposed as a
+        public property for symmetry with ``af.Nautilus.checkpoint_file``.
+        """
+        return self._nss_checkpoint_path
 
     def samples_info_from(self, search_internal: Optional[_NSSInternal] = None):
         if search_internal is None:
