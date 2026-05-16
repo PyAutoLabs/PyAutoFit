@@ -76,6 +76,24 @@ optional = [
     "nautilus-sampler==1.0.5",
     "zeus-mcmc==2.5.4",
 ]
+# Phase 4 of nss_first_class_sampler — single safe install for `af.NSS`.
+# Pins the `handley-lab/blackjax` fork (BSD-3-Clause) which carries the
+# `blackjax.ns.adaptive.init` entrypoint that mainline blackjax lacks,
+# plus `yallup/nss` (BSD-3-Clause) on top. Both pinned to specific SHAs
+# so installs are reproducible. `fastprogress<1.1` keeps `fastprogress`
+# from pulling `python-fasthtml` (1.1.5 transitively requires it).
+# Re-pin SHAs periodically — see `autofit/install_nss.py` for the manual
+# fallback when pip's resolver cannot sequence the URL deps cleanly.
+nss = [
+    "fastprogress<1.1",
+    # blackjax pinned to ef45acd2 (May 2026 "Merge pull request #60 — double_compile").
+    # Locally-validated against the entire Phase 1-3 nss_first_class_sampler work.
+    # HEAD as of pin time (5dbf89a9) introduced `numpy>=1.25` which conflicts with
+    # autofit's `anesthetic==2.8.14` (numpy<2.0). Bump only after both pins move
+    # together — see PyAutoPrompt/issued/nss_install_simplification.md notes #3-4.
+    "blackjax @ git+https://github.com/handley-lab/blackjax.git@ef45acd2f2fa0cca15adbdcd3ff7cb3a98987cb5",
+    "nss @ git+https://github.com/yallup/nss.git@69159b0f4a3a53123b9eec7df91e4ed3885e4dc4",
+]
 docs=[
     "sphinx",
     "furo",
