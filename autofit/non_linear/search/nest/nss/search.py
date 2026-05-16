@@ -240,11 +240,11 @@ class NSS(abstract_nest.AbstractNest):
 
         if not _HAS_NSS:
             raise ImportError(
-                "af.NSS requires the optional `nss` package. Install via\n"
-                "    pip install git+https://github.com/yallup/nss.git\n"
-                "(Phase 4 of the nss_first_class_sampler roadmap will ship a\n"
-                "`pip install autofit[nss]` extra — track the progress in\n"
-                "PyAutoPrompt/autofit/nss_install_simplification.md.)"
+                "af.NSS requires the optional `nss` package and the matching "
+                "`handley-lab/blackjax` fork. Install via:\n"
+                "    pip install autofit[nss]\n"
+                "The extra pins specific upstream commits — see PyAutoFit's "
+                "pyproject.toml `[project.optional-dependencies] nss` entry."
             )
 
         super().__init__(

@@ -1,0 +1,62 @@
+name: NSS install smoke
+
+# Phase 4 of nss_first_class_sampler — verifies that `pip install autofit[nss]`
+# remains a single safe command. Runs on every PR (so we catch local regressions
+# in pyproject.toml before merging) and on a weekly cron (so we catch upstream
+# regressions in handley-lab/blackjax or yallup/nss that drift past the pinned
+# SHAs).
+
+on:
+  pull_request:
+  schedule:
+    # Sundays at 03:00 UTC — quiet hours, catches upstream drift weekly.
+    - cron: '0 3 * * 0'
+
+jobs:
+  fresh_venv_install:
+    name: Fresh-venv install of autofit[nss]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout PyAutoConf
+        uses: actions/checkout@v4
+        with:
+          repository: PyAutoLabs/PyAutoConf
+          path: PyAutoConf
+      - name: Checkout PyAutoFit
+        uses: actions/checkout@v4
+        with:
+          path: PyAutoFit
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+      - name: Install PyAutoConf
+        run: python -m pip install -e PyAutoConf
+      - name: Install PyAutoFit with [nss] extra
+        run: python -m pip install -e PyAutoFit[nss]
+      - name: Import smoke
+        run: |
+          python -c "
+          import autofit as af
+          import nss.ns
+          import blackjax
+
+          # Confirm the right blackjax fork landed (mainline does not have
+          # blackjax.ns.adaptive — this attribute access is the canonical
+          # check for the handley-lab fork).
+          import blackjax.ns.adaptive
+          assert hasattr(blackjax.ns.adaptive, 'init'), (
+              'blackjax.ns.adaptive.init missing — wrong blackjax installed?'
+          )
+
+          # Confirm af.NSS instantiates without ImportError.
+          search = af.NSS(n_live=10, num_mcmc_steps=2, num_delete=5, termination=-1.0)
+          assert search.checkpoint_interval == 100
+
+          print('NSS install smoke: OK')
+          print(f'  blackjax version: {blackjax.__version__}')
+          print(f'  nss installed at: {nss.__file__}')
+          "
