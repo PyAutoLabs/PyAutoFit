@@ -67,8 +67,13 @@ jobs:
         export PYTHONPATH=$PYTHONPATH:$ROOT_DIR/PyAutoConf
         export PYTHONPATH=$PYTHONPATH:$ROOT_DIR/PyAutoFit
         pushd PyAutoFit
+        # The NSS test suite (test_autofit/non_linear/search/nest/nss/) runs in
+        # the parallel `unittest_nss` job below — it needs the handley-lab
+        # blackjax fork from the [nss] extra, which conflicts with the
+        # blackjax>=1.2.0 mainline pinned in [optional].
         if [ "${{ matrix.python-version }}" = "3.13" ]; then
           pytest --cov autofit --cov-report xml:coverage.xml \
+            --ignore=test_autofit/non_linear/search/nest/nss \
             --ignore=test_autofit/database/test_file_types.py \
             --ignore=test_autofit/non_linear/paths/test_save_and_load.py \
             --ignore=test_autofit/aggregator/summary_files/test_aggregate_fits.py \
@@ -81,7 +86,8 @@ jobs:
             --deselect "test_autofit/graphical/test_composition.py::test_other_priors[LogUniformPrior]" \
             --deselect "test_autofit/mapper/prior/test_prior.py::TestLogUniformPrior::test__non_zero_lower_limit"
         else
-          pytest --cov autofit --cov-report xml:coverage.xml
+          pytest --cov autofit --cov-report xml:coverage.xml \
+            --ignore=test_autofit/non_linear/search/nest/nss
         fi
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v3
@@ -96,4 +102,54 @@ jobs:
         payload: |
                 {
                   "text": "${{ github.repository }}/${{ github.ref_name }} (Python ${{ matrix.python-version }}) build result: ${{ job.status }}\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                }
+
+  unittest_nss:
+    # NSS tests live in their own job because the [nss] extra pins the
+    # handley-lab/blackjax fork (BSD-3-Clause, ~0.1.0b1.dev85+gef45acd2f),
+    # which is mutually incompatible with the mainline `blackjax>=1.2.0`
+    # that the `[optional]` extra (and `test_blackjax_nuts.py`) requires.
+    # Two envs in parallel keep both test families green without forcing a
+    # choice between them.
+    name: NSS tests (fork blackjax)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.12', '3.13']
+    steps:
+    - name: Checkout PyAutoConf
+      uses: actions/checkout@v4
+      with:
+        repository: PyAutoLabs/PyAutoConf
+        path: PyAutoConf
+    - name: Checkout PyAutoFit
+      uses: actions/checkout@v4
+      with:
+        path: PyAutoFit
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        pip install --upgrade pip
+        pip install pytest pytest-cov
+        pip install ./PyAutoConf "./PyAutoFit[nss]"
+    - name: Run NSS tests
+      run: |
+        export PYTHONPATH=$PWD/PyAutoConf:$PWD/PyAutoFit
+        pushd PyAutoFit
+        pytest test_autofit/non_linear/search/nest/nss
+    - name: Slack send
+      if: ${{ failure() }}
+      uses: slackapi/slack-github-action@v1.21.0
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      with:
+        channel-id: C03S98FEDK2
+        payload: |
+                {
+                  "text": "${{ github.repository }}/${{ github.ref_name }} NSS tests (Python ${{ matrix.python-version }}) result: ${{ job.status }}\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
                 }
