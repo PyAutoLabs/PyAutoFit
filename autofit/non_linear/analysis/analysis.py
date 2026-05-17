@@ -36,23 +36,9 @@ class Analysis(ABC):
     def __init__(
         self,
         use_jax: bool = False,
-        use_jax_for_visualization: Optional[bool] = None,
+        use_jax_for_visualization: bool = False,
         **kwargs,
     ):
-        """
-        Parameters
-        ----------
-        use_jax
-            Run the likelihood through ``jax.jit`` for the fast path. When JAX
-            is unavailable this silently falls back to numpy with a warning.
-        use_jax_for_visualization
-            Whether ``fit_for_visualization`` should dispatch through the
-            ``jax.jit``-cached path. ``None`` (default) follows ``use_jax`` —
-            users who set ``use_jax=True`` automatically get JIT visualization.
-            Pass ``False`` to force the eager NumPy plotter even when
-            ``use_jax=True``; pass ``True`` to opt in explicitly. Passing
-            ``True`` while ``use_jax=False`` logs a warning and disables it.
-        """
         import os
         if os.environ.get("PYAUTO_DISABLE_JAX") == "1":
             use_jax = False
@@ -82,9 +68,6 @@ class Analysis(ABC):
                 use_jax = False
                 use_jax_for_visualization = False
 
-        if use_jax_for_visualization is None:
-            use_jax_for_visualization = use_jax
-
         if use_jax_for_visualization and not use_jax:
             logger.warning(
                 "use_jax_for_visualization=True requires use_jax=True; "
@@ -100,21 +83,15 @@ class Analysis(ABC):
         """
         Build the fit used by the visualizer.
 
-        Dispatch over ``self.fit_from`` with a ``jax.jit`` fast path that
-        follows ``use_jax`` by default:
+        Dispatch over ``self.fit_from`` with an opt-in ``jax.jit`` fast path:
 
-        * ``self._use_jax_for_visualization`` is ``False`` — plain
-          ``self.fit_from(instance)``. Untouched by JAX. This is the
-          resolved state when ``use_jax=False`` (the parameter default),
-          or when the user explicitly passed
-          ``use_jax_for_visualization=False`` to opt out.
-        * ``self._use_jax_for_visualization`` is ``True`` — lazily construct
+        * ``use_jax_for_visualization=False`` (default) — plain
+          ``self.fit_from(instance)``. Untouched by JAX.
+        * ``use_jax_for_visualization=True`` — lazily construct
           ``jax.jit(self.fit_from)`` on the first call and cache it on the
           instance as ``_jitted_fit_from``, then call that for every
           subsequent visualization. The first call pays the compile cost;
-          subsequent calls reuse the cached compiled function. This is the
-          resolved state when ``use_jax=True`` (the sentinel default
-          ``use_jax_for_visualization=None`` follows ``use_jax``).
+          subsequent calls reuse the cached compiled function.
 
         Caching is per-``Analysis`` instance so each analysis gets its own
         compiled function keyed off that instance's closed-over state
@@ -122,18 +99,12 @@ class Analysis(ABC):
         aux data via ``register_instance_pytree(FitImaging, no_flatten=...)``
         in PyAutoLens).
 
-        ``fit_from`` is defined by Analysis subclasses (e.g. ``AnalysisImaging``),
-        not the base class — this method is only callable on subclasses that
-        provide it. Downstream visualizers should prefer this over calling
-        ``fit_from`` directly so the JIT seam stays in one place.
-
         For the JIT path to succeed, the ``Fit*`` return type (and every
         nested autoarray / galaxy / lens type it carries) must be pytree-
         registered. That wiring lives in each analysis subclass (see
         ``AnalysisImaging._register_fit_imaging_pytrees`` in PyAutoLens).
-        Variants that have not yet been pytree-audited must pass
-        ``use_jax_for_visualization=False`` explicitly when constructing
-        the analysis (or simply leave ``use_jax=False``).
+        Variants that have not yet been pytree-audited must leave
+        ``use_jax_for_visualization`` at its default of ``False``.
         """
         if not self._use_jax_for_visualization:
             return self.fit_from(instance=instance)

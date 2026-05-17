@@ -67,17 +67,6 @@ def test_pyauto_disable_jax_env_var_clears_both_flags(monkeypatch):
     assert analysis._use_jax_for_visualization is False
 
 
-def test_pyauto_disable_jax_overrides_sentinel_default(monkeypatch):
-    """PYAUTO_DISABLE_JAX=1 must still force both off even when the user
-    constructs Analysis(use_jax=True) and lets the sentinel resolve. This is
-    a numpy-only check — JAX-conditional sentinel-resolution assertions live
-    in autofit_workspace_test/scripts/jax_assertions/fitness_dispatch.py."""
-    monkeypatch.setenv("PYAUTO_DISABLE_JAX", "1")
-    analysis = af.Analysis(use_jax=True)
-    assert analysis._use_jax is False
-    assert analysis._use_jax_for_visualization is False
-
-
 def test_fit_for_visualization_works_without_flag():
     analysis = _FittableAnalysis()
     result = analysis.fit_for_visualization(instance="sentinel")
