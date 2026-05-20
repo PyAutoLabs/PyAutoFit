@@ -35,7 +35,7 @@ class AbstractInitializer(ABC):
             if np.isnan(figure_of_merit) or figure_of_merit < -1e98:
                 return None
 
-            return figure_of_merit
+            return float(figure_of_merit)
         except exc.FitException:
             return None
 
