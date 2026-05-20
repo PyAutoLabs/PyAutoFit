@@ -143,21 +143,12 @@ class TruncatedGaussianPrior(Prior):
             A unit value between 0 and 1.
         xp
             Array-module to dispatch on (``numpy`` or ``jax.numpy``). Default ``numpy``.
-            Both paths share the standard truncated-normal inverse-CDF construction
-            via ``norm.cdf`` / ``norm.ppf`` from the matching ``scipy.stats`` /
-            ``jax.scipy.stats`` namespace.
+            Delegates to ``_erf_helpers.truncated_normal_value_for``, which uses
+            ``scipy.special.erf`` / ``erfinv`` (or the ``jax.scipy.special``
+            equivalents) directly — skipping the ``scipy.stats`` wrapper that
+            previously dominated this hot path.
         """
-        if xp is np:
-            from scipy.stats import norm
-        else:
-            from jax.scipy.stats import norm
-
-        a = (self.lower_limit - self.mean) / self.sigma
-        b = (self.upper_limit - self.mean) / self.sigma
-
-        lower_cdf = norm.cdf(a)
-        upper_cdf = norm.cdf(b)
-        truncated_cdf = lower_cdf + unit * (upper_cdf - lower_cdf)
-
-        x_standard = norm.ppf(truncated_cdf)
-        return self.mean + self.sigma * x_standard
+        from autofit.mapper.prior._erf_helpers import truncated_normal_value_for
+        return truncated_normal_value_for(
+            unit, self.mean, self.sigma, self.lower_limit, self.upper_limit, xp,
+        )
