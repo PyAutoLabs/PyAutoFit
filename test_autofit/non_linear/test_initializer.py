@@ -334,3 +334,36 @@ def test_missing_parameter(model):
         assert 0.5 <= parameter <= 1.0
 
     assert 0.5 in parameter_list
+
+
+class MockFitnessNonFloat:
+    def __call__(self, parameters):
+        import numpy as _np
+        return _np.array(-1.5 - 0.01 * _np.random.rand())
+
+
+def test__figure_of_metric__coerces_non_float_scalar_to_python_float():
+    import json
+    import numpy as _np
+
+    model = af.Model(af.m.MockClassx4)
+    model.one = af.UniformPrior(lower_limit=0.099, upper_limit=0.101)
+    model.two = af.UniformPrior(lower_limit=0.199, upper_limit=0.201)
+    model.three = af.UniformPrior(lower_limit=0.299, upper_limit=0.301)
+    model.four = af.UniformPrior(lower_limit=0.399, upper_limit=0.401)
+
+    initializer = af.InitializerPrior()
+
+    _, _, figures_of_merit_list = initializer.samples_from_model(
+        total_points=3,
+        model=model,
+        fitness=MockFitnessNonFloat(),
+        paths=af.DirectoryPaths(),
+        test_mode_samples=False,
+    )
+
+    for fom in figures_of_merit_list:
+        assert type(fom) is float
+        assert not isinstance(fom, _np.ndarray)
+
+    json.dumps(figures_of_merit_list)
