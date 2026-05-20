@@ -463,20 +463,10 @@ class TruncatedNormalMessage(AbstractMessage):
         >>> prior = af.TruncatedNormalMessage(mean=1.0, sigma=2.0, lower_limit=0.0, upper_limit=2.0)
         >>> physical_value = prior.value_for(unit=0.5)
         """
-        if xp is np:
-            from scipy.stats import norm
-        else:
-            from jax.scipy.stats import norm
-
-        a = (self.lower_limit - self.mean) / self.sigma
-        b = (self.upper_limit - self.mean) / self.sigma
-
-        lower_cdf = norm.cdf(a)
-        upper_cdf = norm.cdf(b)
-        truncated_cdf = lower_cdf + unit * (upper_cdf - lower_cdf)
-
-        x_standard = norm.ppf(truncated_cdf)
-        return self.mean + self.sigma * x_standard
+        from autofit.mapper.prior._erf_helpers import truncated_normal_value_for
+        return truncated_normal_value_for(
+            unit, self.mean, self.sigma, self.lower_limit, self.upper_limit, xp,
+        )
 
     def log_prior_from_value(self, value: float, xp=np) -> float:
         """
