@@ -33,6 +33,28 @@ class Analysis(ABC):
 
     LATENT_KEYS = []
 
+    # Strategy used by `compute_latent_samples` when `use_jax=True`.
+    #
+    # - "vmap" (default): wrap `compute_latent_variables` in
+    #   `jax.jit(jax.vmap(...))` so all posterior samples are evaluated in a
+    #   single batched call. Fastest when the function is fully vmap-safe
+    #   (no Python control flow that depends on traced shapes, no calls into
+    #   external libraries that don't support `jax.vmap`).
+    #
+    # - "jit": wrap in plain `jax.jit(...)` and loop in Python over samples.
+    #   The JIT compile cache is reused across samples, so this is much
+    #   faster than per-sample NumPy but slower than vmap. Use this when the
+    #   inner function calls JAX code that documents vmap incompatibility
+    #   (e.g. `jax_zero_contour.ZeroSolver` which uses `lax.cond` /
+    #   `lax.while_loop` early-termination not safe under vmap).
+    #
+    # Subclasses override this attribute when their `compute_latent_variables`
+    # implementation depends on vmap-incompatible primitives. For example,
+    # `autogalaxy.AnalysisDataset` sets `LATENT_BATCH_MODE = "jit"` because
+    # the lensing latents (Einstein radius via zero-contour) route through
+    # `ZeroSolver`.
+    LATENT_BATCH_MODE = "vmap"
+
     def __init__(
         self,
         use_jax: bool = False,
@@ -188,10 +210,33 @@ class Analysis(ABC):
 
             if self._use_jax:
                 import jax
+                import jax.numpy as jnp
                 start = time.time()
-                logger.info("JAX: Applying vmap and jit to likelihood function for latent variables -- may take a few seconds.")
-                batched_compute_latent = jax.jit(jax.vmap(compute_latent_for_model))
-                logger.info(f"JAX: vmap and jit applied in {time.time() - start} seconds.")
+                if self.LATENT_BATCH_MODE == "vmap":
+                    logger.info("JAX: Applying vmap and jit to likelihood function for latent variables -- may take a few seconds.")
+                    batched_compute_latent = jax.jit(jax.vmap(compute_latent_for_model))
+                elif self.LATENT_BATCH_MODE == "jit":
+                    logger.info("JAX: Applying per-sample jit to latent variables (LATENT_BATCH_MODE='jit') -- may take a few seconds on first sample.")
+                    jitted_compute_latent = jax.jit(compute_latent_for_model)
+
+                    def batched_compute_latent(parameters_batch):
+                        # Per-sample jit returns one (l1, l2, ..., lN) tuple per
+                        # sample. Transpose to a tuple of N batched arrays so the
+                        # downstream `jnp.stack(latent_values_batch, axis=-1)`
+                        # works identically to the vmap path.
+                        sample_results = [
+                            jitted_compute_latent(p) for p in parameters_batch
+                        ]
+                        n_latents = len(sample_results[0])
+                        return tuple(
+                            jnp.stack([s[i] for s in sample_results])
+                            for i in range(n_latents)
+                        )
+                else:
+                    raise ValueError(
+                        f"Unknown LATENT_BATCH_MODE={self.LATENT_BATCH_MODE!r}; expected 'vmap' or 'jit'."
+                    )
+                logger.info(f"JAX: {self.LATENT_BATCH_MODE} dispatch applied in {time.time() - start} seconds.")
             else:
                 n_latents = len(self.LATENT_KEYS)
                 nan_row = np.full(n_latents, np.nan)
