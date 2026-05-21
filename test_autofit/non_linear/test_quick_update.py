@@ -161,3 +161,103 @@ class TestConvertJaxFlag:
         worker.shutdown()
 
         assert isinstance(analysis.calls[0].param, np.ndarray)
+
+
+class TestIPythonDisplayLayer:
+    """
+    Covers the Jupyter / Colab cell live-update wiring added on top of the
+    existing background-thread / latest-only / log-and-swallow behaviour.
+
+    The display layer is gated on `_is_ipython_kernel()` so script-mode
+    behaviour (PNG-on-disk, no IPython side effects) is preserved.
+    """
+
+    def test_is_ipython_kernel_false_in_pytest(self):
+        """
+        Plain pytest does not run inside a Jupyter / Colab kernel, so the
+        detection helper must return False. This is the script-mode
+        fallback path users rely on when running `python my_fit.py`.
+        """
+        worker = BackgroundQuickUpdate()
+        try:
+            assert worker._is_ipython_kernel() is False
+        finally:
+            worker.shutdown()
+
+    def test_push_to_ipython_no_op_when_png_missing(self, tmp_path):
+        """
+        If `perform_quick_update` produced no PNGs (e.g. `PYAUTO_FAST_PLOTS=1`
+        suppressed them, or an early-iteration scenario where the visualizer
+        wrote nothing yet), `_push_to_ipython` must silently no-op rather
+        than raising — the search must not be taken down by a missing file.
+        """
+        class Paths:
+            image_path = tmp_path  # exists but contains no PNGs
+
+        worker = BackgroundQuickUpdate()
+        try:
+            # No exception expected, no display side effects.
+            worker._push_to_ipython(Paths())
+            assert worker._display_initialised is False
+        finally:
+            worker.shutdown()
+
+    def test_push_to_ipython_display_then_update_sequence(
+        self, tmp_path, monkeypatch
+    ):
+        """
+        With a fake IPython.display module installed in `sys.modules`, the
+        first `_push_to_ipython` call must invoke `display(..., display_id=...)`
+        and the second must invoke `update_display(..., display_id=...)` with
+        the same id. This is the contract that lets the notebook cell
+        refresh in place rather than appending stacked frames.
+        """
+        import sys
+        import types
+
+        png_path = tmp_path / "subplot_fit.png"
+        png_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)  # fake PNG header
+
+        calls = []
+
+        def fake_display(obj, display_id=None):
+            calls.append(("display", display_id))
+
+        def fake_update_display(obj, display_id=None):
+            calls.append(("update_display", display_id))
+
+        class FakeImage:
+            def __init__(self, filename=None):
+                self.filename = filename
+
+        fake_display_module = types.ModuleType("IPython.display")
+        fake_display_module.display = fake_display
+        fake_display_module.update_display = fake_update_display
+        fake_display_module.Image = FakeImage
+        fake_ipython_module = types.ModuleType("IPython")
+        fake_ipython_module.display = fake_display_module
+
+        monkeypatch.setitem(sys.modules, "IPython", fake_ipython_module)
+        monkeypatch.setitem(sys.modules, "IPython.display", fake_display_module)
+        monkeypatch.delenv("PYAUTO_DISABLE_IPYTHON_DISPLAY", raising=False)
+
+        class Paths:
+            image_path = tmp_path
+
+        worker = BackgroundQuickUpdate(display_id="test-display-id")
+        try:
+            worker._push_to_ipython(Paths())
+            worker._push_to_ipython(Paths())
+            worker._push_to_ipython(Paths())
+        finally:
+            worker.shutdown()
+
+        # First call uses `display`, subsequent calls use `update_display`,
+        # and the display_id is stable across all of them so the cell
+        # output is replaced rather than appended.
+        assert calls == [
+            ("display", "test-display-id"),
+            ("update_display", "test-display-id"),
+            ("update_display", "test-display-id"),
+        ]
+        assert worker._display_initialised is True
