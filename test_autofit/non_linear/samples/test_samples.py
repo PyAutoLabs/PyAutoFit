@@ -241,3 +241,26 @@ def test__addition_of_samples__raises_error_if_model_mismatch(samples_x5):
 
     with pytest.raises(af.exc.SamplesException):
         samples_x5 + samples_different_model
+
+
+def test__sample_kwargs__mixed_dotted_and_dotless_string_keys():
+    sample = af.Sample(
+        log_likelihood=1.0,
+        log_prior=0.0,
+        weight=1.0,
+        kwargs={
+            "mock_class_1.one": 10.0,
+            "dummy_0": 99.0,
+        },
+    )
+
+    assert all(isinstance(key, tuple) for key in sample.kwargs)
+    assert sample.is_path_kwargs is True
+    assert sample.kwargs[("dummy_0",)] == 99.0
+    assert sample.kwargs[("mock_class_1", "one")] == 10.0
+
+    paths = [
+        [("mock_class_1", "one")],
+        [("dummy_0",)],
+    ]
+    assert sample.parameter_lists_for_paths(paths) == [10.0, 99.0]
