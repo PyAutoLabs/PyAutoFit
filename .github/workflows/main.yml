@@ -137,6 +137,13 @@ jobs:
         pip install --upgrade pip
         pip install pytest pytest-cov
         pip install ./PyAutoConf "./PyAutoFit[nss]"
+        # blackjax (handley-lab fork) and yallup/nss can't live in the [nss]
+        # extra — PyPI bans direct git+ URLs in uploaded wheel metadata.
+        # Install them post-extras instead. SHAs are the single source of
+        # truth in PyAutoFit/pyproject.toml's [nss] comment — keep in sync.
+        pip install \
+          "blackjax @ git+https://github.com/handley-lab/blackjax.git@ef45acd2f2fa0cca15adbdcd3ff7cb3a98987cb5" \
+          "nss @ git+https://github.com/yallup/nss.git@69159b0f4a3a53123b9eec7df91e4ed3885e4dc4"
     - name: Run NSS tests
       run: |
         export PYTHONPATH=$PWD/PyAutoConf:$PWD/PyAutoFit
