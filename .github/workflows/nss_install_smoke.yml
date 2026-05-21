@@ -1,10 +1,20 @@
 name: NSS install smoke
 
-# Phase 4 of nss_first_class_sampler — verifies that `pip install autofit[nss]`
-# remains a single safe command. Runs on every PR (so we catch local regressions
-# in pyproject.toml before merging) and on a weekly cron (so we catch upstream
-# regressions in handley-lab/blackjax or yallup/nss that drift past the pinned
-# SHAs).
+# Phase 4 of nss_first_class_sampler — verifies that the documented two-step
+# install (`pip install autofit[nss]` followed by the manual `pip install
+# git+...` for the handley-lab/blackjax fork and yallup/nss) lands a working
+# NSS environment.
+#
+# Why two steps: PyPI bans `git+https://` URLs in uploaded wheel metadata
+# (rejection: "400 Can't have direct dependency"), so the fork-based deps
+# cannot live in pyproject.toml's [nss] extra. The SHAs themselves are
+# documented in PyAutoFit/pyproject.toml just above the [nss] entry — keep
+# the two in sync.
+#
+# Runs on every PR (so we catch local regressions in pyproject.toml or in
+# the documented manual install before merging) and on a weekly cron (so we
+# catch upstream regressions in handley-lab/blackjax or yallup/nss that
+# drift past the pinned SHAs).
 
 on:
   pull_request:
@@ -37,6 +47,14 @@ jobs:
         run: python -m pip install -e PyAutoConf
       - name: Install PyAutoFit with [nss] extra
         run: python -m pip install -e PyAutoFit[nss]
+      - name: Install handley-lab/blackjax and yallup/nss (manual, post-extras)
+        # Mirrors the documented two-step install path. Keep these SHAs in
+        # sync with the block at the top of PyAutoFit/pyproject.toml's [nss]
+        # comment — that's the single source of truth.
+        run: |
+          python -m pip install \
+            "blackjax @ git+https://github.com/handley-lab/blackjax.git@ef45acd2f2fa0cca15adbdcd3ff7cb3a98987cb5" \
+            "nss @ git+https://github.com/yallup/nss.git@69159b0f4a3a53123b9eec7df91e4ed3885e4dc4"
       - name: Import smoke
         run: |
           python -c "
