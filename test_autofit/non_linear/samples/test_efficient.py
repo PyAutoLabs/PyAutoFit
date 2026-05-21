@@ -46,13 +46,13 @@ def test_values(efficient):
 
     sample_1, sample_2 = samples.sample_list
 
-    assert sample_1.kwargs["centre"] == 1.0
-    assert sample_1.kwargs["normalization"] == 2.0
-    assert sample_1.kwargs["sigma"] == 3.0
+    assert sample_1.kwargs[("centre",)] == 1.0
+    assert sample_1.kwargs[("normalization",)] == 2.0
+    assert sample_1.kwargs[("sigma",)] == 3.0
 
-    assert sample_2.kwargs["centre"] == 4.0
-    assert sample_2.kwargs["normalization"] == 5.0
-    assert sample_2.kwargs["sigma"] == 6.0
+    assert sample_2.kwargs[("centre",)] == 4.0
+    assert sample_2.kwargs[("normalization",)] == 5.0
+    assert sample_2.kwargs[("sigma",)] == 6.0
 
 
 def test_database(efficient, session):

@@ -49,7 +49,7 @@ def test_serialise_sample(sample):
     sample = m.Object.from_object(
         sample
     )()
-    assert "centre" in sample.kwargs
+    assert ("centre",) in sample.kwargs
 
 
 def test_load_samples(

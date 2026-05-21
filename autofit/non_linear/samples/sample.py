@@ -35,7 +35,7 @@ class Sample:
         self.log_prior = log_prior
         self.weight = weight
         self.kwargs = {
-            tuple(key.split(".")) if isinstance(key, str) and "." in key else key: value
+            tuple(key.split(".")) if isinstance(key, str) else key: value
             for key, value in (kwargs or dict()).items()
         }
 

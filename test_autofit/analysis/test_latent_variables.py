@@ -47,7 +47,7 @@ def test_set_database_paths(session, latent_samples):
         latent_samples=latent_samples,
     )
     loaded = database_paths.load_latent_samples()
-    assert loaded.max_log_likelihood_sample.kwargs == {"fwhm": 7.0644601350928475}
+    assert loaded.max_log_likelihood_sample.kwargs == {("fwhm",): 7.0644601350928475}
 
 
 @pytest.fixture(name="latent_samples")
@@ -73,7 +73,7 @@ def make_latent_samples():
 
 
 def test_compute_latent_samples(latent_samples):
-    assert latent_samples.sample_list[0].kwargs == {"fwhm": 7.0644601350928475}
+    assert latent_samples.sample_list[0].kwargs == {("fwhm",): 7.0644601350928475}
     assert latent_samples.model.instance_from_vector([1.0]).fwhm == 1.0
 
 
@@ -113,7 +113,7 @@ def test_compute_latent_samples_skips_fit_exception_samples():
         ),
     )
     assert len(latent_samples.sample_list) == 1
-    assert latent_samples.sample_list[0].kwargs == {"fwhm": 7.0644601350928475}
+    assert latent_samples.sample_list[0].kwargs == {("fwhm",): 7.0644601350928475}
 
 
 def test_info(latent_samples):
