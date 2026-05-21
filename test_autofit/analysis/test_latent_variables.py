@@ -91,6 +91,44 @@ class AssertionAnalysis(af.Analysis):
         return (instance.fwhm,)
 
 
+def test_latent_batch_mode_default_is_vmap():
+    """
+    Subclasses that don't override `LATENT_BATCH_MODE` must inherit "vmap" so
+    `compute_latent_samples` keeps its existing parallel-batched behaviour
+    on the JAX path. PyAutoGalaxy's `AnalysisDataset` overrides this to "jit"
+    for vmap-incompatible inner calls — that override is what unlocks
+    lensing latents, but it must stay opt-in here.
+    """
+    assert af.Analysis.LATENT_BATCH_MODE == "vmap"
+    assert Analysis.LATENT_BATCH_MODE == "vmap"
+
+
+def test_latent_batch_mode_invalid_value_raises_clear_error():
+    """
+    Misspelt `LATENT_BATCH_MODE` values should fail with a clear ValueError
+    rather than silently falling through. This guards against subclasses
+    setting e.g. `LATENT_BATCH_MODE = "JIT"` (case sensitivity) and getting
+    surprising behaviour.
+    """
+    class BadAnalysis(Analysis):
+        LATENT_BATCH_MODE = "JIT"  # wrong case — should be lowercase
+
+    samples = SamplesPDF(
+        model=af.Model(af.ex.Gaussian),
+        sample_list=[
+            af.Sample(
+                log_likelihood=1.0,
+                log_prior=0.0,
+                weight=1.0,
+                kwargs={"centre": 1.0, "normalization": 2.0, "sigma": 3.0},
+            )
+        ],
+    )
+    bad = BadAnalysis(use_jax=True)
+    with pytest.raises(ValueError, match="LATENT_BATCH_MODE"):
+        bad.compute_latent_samples(samples)
+
+
 def test_compute_latent_samples_skips_fit_exception_samples():
     analysis = AssertionAnalysis()
     latent_samples = analysis.compute_latent_samples(
