@@ -2,6 +2,7 @@ updates:
   iterations_per_quick_update: 1e99 # Non-linear search iterations between every quick update, which just displays the maximum likelihood model fit.
   iterations_per_full_update: 1e99  # Non-linear search iterations between every full update, which outputs all visuals and result fits (e.g. model.result, search.summary), this exits the search and can be slow.
   quick_update_background: false    # If True, quick-update visualization runs on a background thread so sampling is not blocked.
+  live_visual_update: false         # If True, quick-update visuals are pushed to a live surface (a Jupyter cell when in a kernel, a matplotlib viewer subprocess otherwise) in addition to being written to disk.
 hpc:
   hpc_mode: false                   # If True, use HPC mode, which disables GUI visualization, logging to screen and other settings which are not suited to running on a super computer.
   iterations_per_quick_update: 1e99 #  Non-linear search iterations between every quick update, which just displays the maximum likelihood model fit.

@@ -25,6 +25,7 @@ def make_dynesty_dict():
             "inplace": False,
             "iterations_per_full_update": 1e99,
             "iterations_per_quick_update": 1e99,
+            "live_visual_update": False,
             "logl_max": float("inf"),
             "max_move": 100,
             "maxcall": None,

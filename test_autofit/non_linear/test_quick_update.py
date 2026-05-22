@@ -4,7 +4,12 @@ import time
 import numpy as np
 import pytest
 
-from autofit.non_linear.quick_update import BackgroundQuickUpdate, _convert_jax_to_numpy
+from autofit.non_linear.quick_update import (
+    BackgroundQuickUpdate,
+    LiveDisplay,
+    _convert_jax_to_numpy,
+    _is_ipython_kernel,
+)
 
 
 class MockPaths:
@@ -178,11 +183,7 @@ class TestIPythonDisplayLayer:
         detection helper must return False. This is the script-mode
         fallback path users rely on when running `python my_fit.py`.
         """
-        worker = BackgroundQuickUpdate()
-        try:
-            assert worker._is_ipython_kernel() is False
-        finally:
-            worker.shutdown()
+        assert _is_ipython_kernel() is False
 
     def test_push_to_ipython_no_op_when_png_missing(self, tmp_path):
         """
@@ -194,13 +195,10 @@ class TestIPythonDisplayLayer:
         class Paths:
             image_path = tmp_path  # exists but contains no PNGs
 
-        worker = BackgroundQuickUpdate()
-        try:
-            # No exception expected, no display side effects.
-            worker._push_to_ipython(Paths())
-            assert worker._display_initialised is False
-        finally:
-            worker.shutdown()
+        live = LiveDisplay(live_visual_update=True)
+        # No exception expected, no display side effects.
+        live._push_to_ipython(Paths())
+        assert live._display_initialised is False
 
     def test_push_to_ipython_display_then_update_sequence(
         self, tmp_path, monkeypatch
@@ -244,13 +242,12 @@ class TestIPythonDisplayLayer:
         class Paths:
             image_path = tmp_path
 
-        worker = BackgroundQuickUpdate(display_id="test-display-id")
-        try:
-            worker._push_to_ipython(Paths())
-            worker._push_to_ipython(Paths())
-            worker._push_to_ipython(Paths())
-        finally:
-            worker.shutdown()
+        live = LiveDisplay(
+            live_visual_update=True, display_id="test-display-id"
+        )
+        live._push_to_ipython(Paths())
+        live._push_to_ipython(Paths())
+        live._push_to_ipython(Paths())
 
         # First call uses `display`, subsequent calls use `update_display`,
         # and the display_id is stable across all of them so the cell
@@ -260,4 +257,97 @@ class TestIPythonDisplayLayer:
             ("update_display", "test-display-id"),
             ("update_display", "test-display-id"),
         ]
-        assert worker._display_initialised is True
+        assert live._display_initialised is True
+
+
+class TestLiveVisualUpdateFlag:
+    """
+    Covers the opt-in `live_visual_update` flag. Default-off means no
+    Jupyter cell push and no script-mode viewer subprocess, even when
+    the surrounding environment would otherwise enable them.
+    """
+
+    def test_default_is_no_op_even_in_simulated_kernel(self, tmp_path, monkeypatch):
+        """
+        With ``live_visual_update=False`` (the default), ``LiveDisplay.update``
+        must never call into IPython.display, even if a Jupyter kernel is
+        present. This protects users who explicitly want PNGs-on-disk only.
+        """
+        import sys
+        import types
+
+        png_path = tmp_path / "subplot_fit.png"
+        png_path.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+        calls = []
+
+        def fake_display(obj, display_id=None):
+            calls.append("display")
+
+        def fake_update_display(obj, display_id=None):
+            calls.append("update_display")
+
+        fake_display_module = types.ModuleType("IPython.display")
+        fake_display_module.display = fake_display
+        fake_display_module.update_display = fake_update_display
+        fake_display_module.Image = type("Image", (), {"__init__": lambda self, **kw: None})
+
+        monkeypatch.setitem(sys.modules, "IPython.display", fake_display_module)
+
+        class Paths:
+            image_path = tmp_path
+
+        live = LiveDisplay(live_visual_update=False)
+        live.update(Paths())
+
+        assert calls == []
+        assert live._display_initialised is False
+        assert live._viewer_proc is None
+        assert live._viewer_attempted is False
+
+    def test_script_mode_spawns_viewer_subprocess(self, tmp_path, monkeypatch):
+        """
+        With ``live_visual_update=True`` outside a kernel, the first call
+        to ``update`` must lazily spawn the live_viewer subprocess against
+        the resolved PNG path.
+        """
+        png_path = tmp_path / "subplot_fit.png"
+        png_path.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+        spawn_calls = []
+
+        class FakePopen:
+            def __init__(self, args, **kwargs):
+                spawn_calls.append(args)
+                self.args = args
+
+            def poll(self):
+                return None
+
+            def terminate(self):
+                pass
+
+            def wait(self, timeout=None):
+                return 0
+
+        import autofit.non_linear.quick_update as qu
+
+        monkeypatch.setattr(qu.subprocess, "Popen", FakePopen)
+
+        class Paths:
+            image_path = tmp_path
+
+        live = LiveDisplay(live_visual_update=True)
+        # Force script-mode dispatch regardless of detection result.
+        live._is_kernel = False
+
+        live.update(Paths())
+        live.update(Paths())  # second call must not re-spawn
+
+        assert len(spawn_calls) == 1
+        argv = spawn_calls[0]
+        assert "autofit.non_linear.live_viewer" in argv
+        assert str(png_path) in argv
+
+        live.shutdown()
+        assert live._viewer_proc is None
