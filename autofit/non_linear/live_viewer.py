@@ -18,9 +18,9 @@ Invocation::
 
     python -m autofit.non_linear.live_viewer <image_path> [--title TITLE]
 
-The viewer polls ``<image_path>`` (typically
-``<output>/image/subplot_fit.png``) every 0.5s. On ``st_mtime`` change it
-reloads the PNG and redraws. Exits cleanly on SIGINT / SIGTERM / window
+The viewer polls ``<image_path>`` (typically ``<output>/image/fit.png``,
+the canonical filename written by ``subplot_fit`` across all dataset
+types) every 0.5s. On ``st_mtime`` change it reloads the PNG and redraws. Exits cleanly on SIGINT / SIGTERM / window
 close. Logs a single warning and exits 0 if the configured matplotlib
 backend cannot display a window (e.g. headless WSL2 with MPLBACKEND=Agg).
 """

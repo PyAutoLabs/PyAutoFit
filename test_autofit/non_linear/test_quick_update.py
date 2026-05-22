@@ -213,7 +213,7 @@ class TestIPythonDisplayLayer:
         import sys
         import types
 
-        png_path = tmp_path / "subplot_fit.png"
+        png_path = tmp_path / "fit.png"
         png_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)  # fake PNG header
 
         calls = []
@@ -276,7 +276,7 @@ class TestLiveVisualUpdateFlag:
         import sys
         import types
 
-        png_path = tmp_path / "subplot_fit.png"
+        png_path = tmp_path / "fit.png"
         png_path.write_bytes(b"\x89PNG\r\n\x1a\n")
 
         calls = []
@@ -311,7 +311,7 @@ class TestLiveVisualUpdateFlag:
         to ``update`` must lazily spawn the live_viewer subprocess against
         the resolved PNG path.
         """
-        png_path = tmp_path / "subplot_fit.png"
+        png_path = tmp_path / "fit.png"
         png_path.write_bytes(b"\x89PNG\r\n\x1a\n")
 
         spawn_calls = []

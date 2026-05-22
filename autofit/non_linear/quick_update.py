@@ -32,11 +32,12 @@ def _convert_jax_to_numpy(instance):
 
 
 # Filenames the worker will look for under `paths.image_path`, in priority
-# order, when pushing a quick-update frame to a Jupyter / Colab cell. The
-# first existing file wins. Imaging analyses write `subplot_fit.png`;
-# interferometer / dataset-model variants may write `fit.png` or
-# `subplot_tracer.png`.
-_DISPLAY_CANDIDATES = ("subplot_fit.png", "fit.png", "subplot_tracer.png")
+# order, when refreshing a live quick-update display. The first existing
+# file wins. PyAutoGalaxy / PyAutoLens `subplot_fit` plotters save under
+# `fit.png` (the literal "fit" basename is passed to `_save_subplot`);
+# `subplot_tracer.png` is the fallback name used by some dataset-model
+# variants that don't have a fit subplot per se.
+_DISPLAY_CANDIDATES = ("fit.png", "subplot_tracer.png")
 
 
 def _is_ipython_kernel() -> bool:
