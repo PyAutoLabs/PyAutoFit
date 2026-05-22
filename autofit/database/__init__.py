@@ -7,6 +7,7 @@ from autoconf import conf
 from .aggregator import *
 from .migration.steps import migrator
 from .model import *
+from autofit.non_linear.paths.abstract import _test_mode_segment
 
 
 def open_database(
@@ -60,6 +61,9 @@ def open_database(
         output_path = conf.instance.output_path
 
         if not filename.startswith("/"):
+            segment = _test_mode_segment()
+            if segment:
+                output_path = f"{output_path}/{segment}"
             filename = f"{output_path}/{filename}"
 
         os.makedirs(

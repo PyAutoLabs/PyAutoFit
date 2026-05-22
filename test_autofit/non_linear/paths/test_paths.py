@@ -75,3 +75,33 @@ def test_serialize(model):
 def test_unique_tag():
     paths = af.DirectoryPaths(unique_tag="unique_tag")
     assert "unique_tag" in paths.output_path.parts
+
+
+class TestTestModeOutputPath:
+    """
+    PYAUTO_TEST_MODE must namespace the AutoFit output path so smoke
+    runs cannot poison the cache for a later real run at the same
+    paths. Regression for the "Fit Already Completed" silent skip.
+    """
+
+    def test_output_path_contains_test_mode_segment_when_env_set(
+        self, monkeypatch
+    ):
+        monkeypatch.setenv("PYAUTO_TEST_MODE", "2")
+        paths = af.DirectoryPaths(name="name", path_prefix="prefix")
+        assert "test_mode" in paths.output_path.parts
+
+    def test_output_path_excludes_segment_when_env_unset(self, monkeypatch):
+        monkeypatch.delenv("PYAUTO_TEST_MODE", raising=False)
+        paths = af.DirectoryPaths(name="name", path_prefix="prefix")
+        assert "test_mode" not in paths.output_path.parts
+
+    def test_make_path_contains_segment_when_env_set(self, monkeypatch):
+        monkeypatch.setenv("PYAUTO_TEST_MODE", "2")
+        paths = af.DirectoryPaths(name="name", path_prefix="prefix")
+        assert "test_mode" in paths._make_path().parts
+
+    def test_make_path_excludes_segment_when_env_unset(self, monkeypatch):
+        monkeypatch.delenv("PYAUTO_TEST_MODE", raising=False)
+        paths = af.DirectoryPaths(name="name", path_prefix="prefix")
+        assert "test_mode" not in paths._make_path().parts
