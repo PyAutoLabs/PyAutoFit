@@ -130,6 +130,7 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         initializer: Initializer = None,
         iterations_per_quick_update: Optional[int] = None,
         iterations_per_full_update: int = None,
+        live_visual_update: Optional[bool] = None,
         number_of_cores: int = 1,
         silence: bool = False,
         session: Optional[sa.orm.Session] = None,
@@ -217,6 +218,14 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         self.quick_update_background = bool(
             conf.instance["general"]["updates"].get(
                 "quick_update_background", False,
+            )
+        )
+
+        self.live_visual_update = bool(
+            live_visual_update
+            if live_visual_update is not None
+            else conf.instance["general"]["updates"].get(
+                "live_visual_update", False,
             )
         )
 

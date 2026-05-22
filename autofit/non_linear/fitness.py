@@ -46,6 +46,7 @@ class Fitness:
         batch_size : Optional[int] = None,
         iterations_per_quick_update: Optional[int] = None,
         background_quick_update: bool = False,
+        live_visual_update: bool = False,
     ):
         """
         Interfaces with any non-linear search to fit the model to the data and return a log likelihood via
@@ -130,11 +131,13 @@ class Fitness:
 
         self.batch_size = batch_size
         self.iterations_per_quick_update = iterations_per_quick_update
+        self.live_visual_update = live_visual_update
         self.quick_update_max_lh_parameters = None
         self.quick_update_max_lh = -self._xp.inf
         self.quick_update_count = 0
 
         self._background_quick_update = None
+        self._live_display = None
 
         if background_quick_update and self.iterations_per_quick_update is not None:
             from autofit.non_linear.quick_update import BackgroundQuickUpdate
@@ -146,7 +149,16 @@ class Fitness:
 
             self._background_quick_update = BackgroundQuickUpdate(
                 convert_jax=convert_jax,
+                live_visual_update=self.live_visual_update,
             )
+        elif self.live_visual_update and self.iterations_per_quick_update is not None:
+            # Synchronous quick-update path: BackgroundQuickUpdate is off
+            # but the user still asked for live visuals. Manage display
+            # surfaces via a standalone LiveDisplay; the rendering itself
+            # still runs on the main thread inside `manage_quick_update`.
+            from autofit.non_linear.quick_update import LiveDisplay
+
+            self._live_display = LiveDisplay(live_visual_update=True)
 
         if self.paths is not None:
             self.check_log_likelihood(fitness=self)
@@ -346,6 +358,14 @@ class Fitness:
                     self.analysis.perform_quick_update(self.paths, instance)
                 except NotImplementedError:
                     pass
+                else:
+                    if self._live_display is not None:
+                        try:
+                            self._live_display.update(self.paths)
+                        except Exception:
+                            logger.exception(
+                                "Live display update raised an exception (ignored)."
+                            )
 
             result_info = text_util.result_max_lh_info_from(
                 max_log_likelihood_sample=self.quick_update_max_lh_parameters.tolist(),
@@ -362,10 +382,15 @@ class Fitness:
             logger.info(f"Quick update complete in {time.time() - start_time} seconds.")
 
     def shutdown_quick_update(self):
-        """Shut down the background quick-update worker, if one is running."""
+        """Shut down the background quick-update worker and any live
+        display surfaces (matplotlib viewer subprocess) that were spawned
+        for this fitness instance."""
         if self._background_quick_update is not None:
             self._background_quick_update.shutdown()
             self._background_quick_update = None
+        if self._live_display is not None:
+            self._live_display.shutdown()
+            self._live_display = None
 
     @timeout(timeout_seconds)
     def __call__(self, parameters, *kwargs):

@@ -194,6 +194,7 @@ class Nautilus(abstract_nest.AbstractNest):
                 resample_figure_of_merit=-1.0e99,
                 iterations_per_quick_update=self.iterations_per_quick_update,
                 background_quick_update=self.quick_update_background,
+                live_visual_update=self.live_visual_update,
                 use_jax_vmap=self.use_jax_vmap,
                 batch_size=self.n_batch,
             )
@@ -214,6 +215,7 @@ class Nautilus(abstract_nest.AbstractNest):
                 resample_figure_of_merit=-1.0e99,
                 iterations_per_quick_update=self.iterations_per_quick_update,
                 background_quick_update=self.quick_update_background,
+                live_visual_update=self.live_visual_update,
             )
 
             search_internal = self.fit_multiprocessing(
