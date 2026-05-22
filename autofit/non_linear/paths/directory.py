@@ -16,7 +16,7 @@ from autofit.text import formatter
 from autofit.tools.util import open_
 from autofit.non_linear.samples.samples import Samples
 
-from .abstract import AbstractPaths
+from .abstract import AbstractPaths, _test_mode_segment
 
 from ..samples import load_from_table
 from autofit.non_linear.samples.pdf import SamplesPDF
@@ -530,7 +530,11 @@ class DirectoryPaths(AbstractPaths):
         The path terminates with the identifier, unless the identifier has already
         been added to the path.
         """
-        path_ = Path(conf.instance.output_path) / self.path_prefix / self.name
+        path_ = Path(conf.instance.output_path)
+        segment = _test_mode_segment()
+        if segment:
+            path_ = path_ / segment
+        path_ = path_ / self.path_prefix / self.name
         if self.is_identifier_in_paths:
             path_ = path_ / self.identifier
         return path_

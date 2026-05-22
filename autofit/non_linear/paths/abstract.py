@@ -22,6 +22,19 @@ logger = logging.getLogger(__name__)
 pattern = re.compile(r"(?<!^)(?=[A-Z])")
 
 
+def _test_mode_segment() -> Optional[str]:
+    """
+    Returns ``"test_mode"`` when ``PYAUTO_TEST_MODE`` is set in the
+    environment, else ``None``.
+
+    Inserted into the output-path composition so that smoke runs land
+    under ``output/test_mode/...`` instead of sharing a directory with
+    real runs. Without this, a cached test-mode result short-circuits
+    a later real run at the same paths ("Fit Already Completed").
+    """
+    return "test_mode" if os.environ.get("PYAUTO_TEST_MODE") else None
+
+
 class AbstractPaths(ABC):
     def __init__(
         self,
@@ -52,6 +65,15 @@ class AbstractPaths(ABC):
         The output path of the `NonLinearSearch` results will be:
 
         /path/to/output/folder_0/folder_1/name
+
+        If the ``PYAUTO_TEST_MODE`` environment variable is set, a
+        ``test_mode`` segment is inserted directly after the output
+        root:
+
+        /path/to/output/test_mode/folder_0/folder_1/name
+
+        This keeps smoke-test artefacts in a sibling tree so they
+        cannot be picked up by a later real run with the same paths.
 
         Parameters
         ----------
@@ -246,6 +268,7 @@ class AbstractPaths(ABC):
                 None,
                 [
                     str(conf.instance.output_path),
+                    _test_mode_segment(),
                     str(self.path_prefix),
                     self.unique_tag,
                     str(self.name),
