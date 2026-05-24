@@ -8,6 +8,7 @@ import numpy as np
 import psutil
 
 from autoconf import conf
+from autoconf.test_mode import skip_latents
 
 from autofit import exc
 from autofit.non_linear.paths.database import DatabasePaths
@@ -232,6 +233,8 @@ class SearchUpdater:
         during_analysis: bool,
     ) -> Optional[Samples]:
         """Compute and persist latent variable samples if configured."""
+        if skip_latents():
+            return None
         if not (
             (during_analysis and conf.instance["output"]["latent_during_fit"])
             or (not during_analysis and conf.instance["output"]["latent_after_fit"])
