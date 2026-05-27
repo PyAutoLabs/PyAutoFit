@@ -163,6 +163,35 @@ class Fitness:
         if self.paths is not None:
             self.check_log_likelihood(fitness=self)
 
+        if (
+            self.iterations_per_quick_update is not None
+            and self._xp.__name__.startswith("jax")
+        ):
+            self._warmup_visualization()
+
+    def _warmup_visualization(self):
+        """Pre-compile the JAX operations used by ``fit_for_visualization``.
+
+        The first call to ``fit_for_visualization`` triggers ~200 small
+        per-function JAX JIT compilations (one per profile method per
+        decorator). Running them here moves that cost to search setup
+        so every quick update during sampling is fast.
+        """
+        logger.info(
+            "Warming up visualization (one-time JAX compilation)..."
+        )
+        try:
+            instance = self.model.instance_from_prior_medians()
+            fit = self.analysis.fit_for_visualization(instance=instance)
+            _ = fit.model_data
+        except Exception:
+            logger.warning(
+                "Visualization warm-up failed (non-fatal); "
+                "first quick update may be slow."
+            )
+        else:
+            logger.info("Visualization warm-up complete.")
+
     @property
     def _xp(self):
         return self.analysis._xp

@@ -58,17 +58,12 @@ class Analysis(ABC):
     def __init__(
         self,
         use_jax: bool = False,
-        use_jax_for_visualization: bool = False,
         **kwargs,
     ):
         import os
         if os.environ.get("PYAUTO_DISABLE_JAX") == "1":
             use_jax = False
-            use_jax_for_visualization = False
 
-        # If the user requested JAX but it isn't installed (e.g. Python <3.11
-        # without the [jax] extra), fall back to numpy with a loud warning
-        # rather than crashing later when the analysis tries to jit-compile.
         if use_jax:
             import importlib.util
             import warnings
@@ -88,55 +83,20 @@ class Analysis(ABC):
                     stacklevel=2,
                 )
                 use_jax = False
-                use_jax_for_visualization = False
-
-        if use_jax_for_visualization and not use_jax:
-            logger.warning(
-                "use_jax_for_visualization=True requires use_jax=True; "
-                "disabling use_jax_for_visualization."
-            )
-            use_jax_for_visualization = False
 
         self._use_jax = use_jax
-        self._use_jax_for_visualization = use_jax_for_visualization
         self.kwargs = kwargs
 
     def fit_for_visualization(self, instance):
         """
         Build the fit used by the visualizer.
 
-        Dispatch over ``self.fit_from`` with an opt-in ``jax.jit`` fast path:
-
-        * ``use_jax_for_visualization=False`` (default) — plain
-          ``self.fit_from(instance)``. Untouched by JAX.
-        * ``use_jax_for_visualization=True`` — lazily construct
-          ``jax.jit(self.fit_from)`` on the first call and cache it on the
-          instance as ``_jitted_fit_from``, then call that for every
-          subsequent visualization. The first call pays the compile cost;
-          subsequent calls reuse the cached compiled function.
-
-        Caching is per-``Analysis`` instance so each analysis gets its own
-        compiled function keyed off that instance's closed-over state
-        (``self.dataset``, ``self.settings``, etc. — these ride as pytree
-        aux data via ``register_instance_pytree(FitImaging, no_flatten=...)``
-        in PyAutoLens).
-
-        For the JIT path to succeed, the ``Fit*`` return type (and every
-        nested autoarray / galaxy / lens type it carries) must be pytree-
-        registered. That wiring lives in each analysis subclass (see
-        ``AnalysisImaging._register_fit_imaging_pytrees`` in PyAutoLens).
-        Variants that have not yet been pytree-audited must leave
-        ``use_jax_for_visualization`` at its default of ``False``.
+        Delegates to ``self.fit_from(instance)``. When ``use_jax=True``,
+        the profile evaluations inside ``fit_from`` dispatch to JAX via
+        the decorator chain. The per-function JIT caches warm up on the
+        first call and are reused on all subsequent quick updates.
         """
-        if not self._use_jax_for_visualization:
-            return self.fit_from(instance=instance)
-
-        if getattr(self, "_jitted_fit_from", None) is None:
-            import jax
-
-            self._jitted_fit_from = jax.jit(self.fit_from)
-
-        return self._jitted_fit_from(instance)
+        return self.fit_from(instance=instance)
 
     def __getattr__(self, item: str):
         """
@@ -444,15 +404,8 @@ class Analysis(ABC):
 
     @property
     def supports_jax_visualization(self) -> bool:
-        """
-        Whether the visualizer can work directly with JAX arrays.
-
-        Derived from the ``use_jax_for_visualization`` flag passed at
-        construction time. Subclasses may override to force a specific
-        answer (e.g. an Analysis that has been audited to support JAX
-        visualization unconditionally).
-        """
-        return self._use_jax_for_visualization
+        """Whether the visualizer can work directly with JAX arrays."""
+        return self._use_jax
 
     def perform_quick_update(self, paths, instance):
         raise NotImplementedError
