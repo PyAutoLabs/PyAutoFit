@@ -1,4 +1,5 @@
 import copy
+import functools
 import inspect
 import json
 import logging
@@ -1859,7 +1860,7 @@ class AbstractPriorModel(AbstractModel):
         ]
         return ":".join(values)
 
-    @property
+    @functools.cached_property
     def parameterization(self) -> str:
         """
         Describes the path to each of the PriorModels, its class
