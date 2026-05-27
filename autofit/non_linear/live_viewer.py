@@ -40,12 +40,33 @@ POLL_SECONDS = 0.5
 HEADLESS_BACKENDS = {"agg", "pdf", "ps", "svg", "cairo", "template"}
 
 
-def _backend_can_show() -> bool:
-    """Return True if the active matplotlib backend can display a window."""
+_INTERACTIVE_BACKENDS = ("TkAgg", "QtAgg", "Qt5Agg", "GTK3Agg", "GTK4Agg", "WXAgg", "macosx")
+
+
+def _ensure_interactive_backend() -> bool:
+    """Try to switch to an interactive matplotlib backend.
+
+    The viewer subprocess inherits the parent process's backend, which is
+    typically ``Agg`` (the search process uses it for headless PNG
+    rendering). Since this subprocess exists specifically to show a
+    window, we try each interactive backend until one sticks. Returns
+    ``True`` if the active backend can display a window after the
+    attempt.
+    """
     import matplotlib
 
     backend = matplotlib.get_backend().lower()
-    return not any(backend.startswith(name) for name in HEADLESS_BACKENDS)
+    if not any(backend.startswith(name) for name in HEADLESS_BACKENDS):
+        return True
+
+    for candidate in _INTERACTIVE_BACKENDS:
+        try:
+            matplotlib.use(candidate)
+            return True
+        except ImportError:
+            continue
+
+    return False
 
 
 def _install_signal_handlers(stop_event):
@@ -57,12 +78,14 @@ def _install_signal_handlers(stop_event):
 
 
 def run(image_path: Path, title: str) -> int:
-    import matplotlib
+    if not _ensure_interactive_backend():
+        import matplotlib
 
-    if not _backend_can_show():
         logger.warning(
-            "live_viewer: matplotlib backend %r cannot display a window; "
-            "live visualization disabled (PNG writes to %s continue normally).",
+            "live_viewer: no interactive matplotlib backend found (tried %s, "
+            "active backend is %r). Install python3-tk or another GUI toolkit "
+            "to enable live visualization. PNG writes to %s continue normally.",
+            ", ".join(_INTERACTIVE_BACKENDS),
             matplotlib.get_backend(),
             image_path,
         )
