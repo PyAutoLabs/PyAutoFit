@@ -1,4 +1,10 @@
-"""Tests for the ``use_jax_for_visualization`` flag on ``Analysis``."""
+"""Tests for the visualization path on ``Analysis``.
+
+The ``use_jax_for_visualization`` flag has been removed — visualization
+now always follows ``use_jax``. These tests verify the simplified
+``fit_for_visualization`` dispatch and the ``supports_jax_visualization``
+property.
+"""
 
 import importlib.util
 
@@ -8,12 +14,10 @@ import autofit as af
 
 
 def _jax_installed() -> bool:
-    """Check jax availability without importing it (per numpy-only rule)."""
     return importlib.util.find_spec("jax") is not None
 
 
 class _FittableAnalysis(af.Analysis):
-    """Minimal Analysis subclass with a trivial ``fit_from`` for dispatch tests."""
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -27,52 +31,37 @@ class _FittableAnalysis(af.Analysis):
         return ("fit", instance)
 
 
-def test_default_flag_is_false():
+def test_default_flags():
     analysis = af.Analysis()
     assert analysis._use_jax is False
-    assert analysis._use_jax_for_visualization is False
     assert analysis.supports_jax_visualization is False
 
 
-def test_flag_requires_use_jax(caplog):
-    with caplog.at_level("WARNING"):
-        analysis = af.Analysis(use_jax=False, use_jax_for_visualization=True)
-    assert analysis._use_jax_for_visualization is False
-    assert any("requires use_jax=True" in r.message for r in caplog.records)
-
-
-@pytest.mark.skipif(not _jax_installed(), reason="jax not installed; fallback path tested below")
-def test_flag_accepted_when_use_jax_true():
-    analysis = af.Analysis(use_jax=True, use_jax_for_visualization=True)
+@pytest.mark.skipif(not _jax_installed(), reason="jax not installed")
+def test_use_jax_enables_jax_visualization():
+    analysis = af.Analysis(use_jax=True)
     assert analysis._use_jax is True
-    assert analysis._use_jax_for_visualization is True
     assert analysis.supports_jax_visualization is True
 
 
-@pytest.mark.skipif(_jax_installed(), reason="jax installed; happy path tested above")
-def test_use_jax_true_falls_back_to_numpy_when_jax_missing(recwarn):
-    """When jax isn't installed, use_jax=True should silently downgrade
-    to use_jax=False after emitting a UserWarning. Affects 3.9/3.10
-    where the [jax] extra is gated out."""
-    analysis = af.Analysis(use_jax=True, use_jax_for_visualization=True)
+@pytest.mark.skipif(_jax_installed(), reason="jax installed")
+def test_use_jax_true_falls_back_when_jax_missing(recwarn):
+    analysis = af.Analysis(use_jax=True)
     assert analysis._use_jax is False
-    assert analysis._use_jax_for_visualization is False
     assert any("JAX is not installed" in str(w.message) for w in recwarn)
 
 
-def test_pyauto_disable_jax_env_var_clears_both_flags(monkeypatch):
+def test_pyauto_disable_jax_env_var(monkeypatch):
     monkeypatch.setenv("PYAUTO_DISABLE_JAX", "1")
-    analysis = af.Analysis(use_jax=True, use_jax_for_visualization=True)
+    analysis = af.Analysis(use_jax=True)
     assert analysis._use_jax is False
-    assert analysis._use_jax_for_visualization is False
 
 
-def test_fit_for_visualization_works_without_flag():
+def test_fit_for_visualization_delegates_to_fit_from():
     analysis = _FittableAnalysis()
     result = analysis.fit_for_visualization(instance="sentinel")
     assert result == ("fit", "sentinel")
     assert analysis.fit_from_calls == 1
-    assert getattr(analysis, "_jitted_fit_from", None) is None
 
 
 def test_subclass_can_override_supports_jax_visualization():
@@ -82,5 +71,4 @@ def test_subclass_can_override_supports_jax_visualization():
             return True
 
     analysis = ForcedAnalysis()
-    assert analysis._use_jax_for_visualization is False
     assert analysis.supports_jax_visualization is True
