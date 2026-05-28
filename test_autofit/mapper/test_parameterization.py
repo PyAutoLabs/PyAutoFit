@@ -141,6 +141,41 @@ tuple                                                                           
         assert len(info.split("\n")) == len(mapper.info.split("\n"))
 
 
+def test_parameterization_cache_does_not_leak_into_instance():
+    """Regression: ``parameterization`` is cached in
+    ``self.__dict__["_parameterization_cache"]`` so that
+    ``Collection._instance_for_arguments`` and ``ModelInstance.dict``
+    (which skip underscore-prefixed keys) do not propagate the cached
+    string onto the constructed instance. A plain
+    ``functools.cached_property`` would write to ``__dict__["parameterization"]``
+    without an underscore, leaking the string into ``ModelInstance.dict``
+    and downstream JAX pytree flattening — see commit 4564ae9a1."""
+
+    model = af.Collection(gaussian=af.Model(af.ex.Gaussian))
+
+    # Touch model.info → exercises the same propagation path that every
+    # workspace script hits at construction time.
+    _ = model.info
+    _ = model.parameterization  # second access uses the cache
+
+    # The cache must live behind an underscore key on the model.
+    assert "_parameterization_cache" in model.__dict__
+    assert "parameterization" not in model.__dict__
+
+    instance = model.instance_from_prior_medians()
+
+    # Neither the cached key nor the public name may appear on the
+    # constructed instance.
+    assert "parameterization" not in instance.__dict__
+    assert "_parameterization_cache" not in instance.__dict__
+    assert "parameterization" not in instance.dict
+    assert "_parameterization_cache" not in instance.dict
+
+    # The instance must yield only model components when iterated.
+    for child in instance:
+        assert not isinstance(child, str)
+
+
 def test_integer_attributes():
     model = af.Model(af.ex.Gaussian)
 

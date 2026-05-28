@@ -1,5 +1,4 @@
 import copy
-import functools
 import inspect
 import json
 import logging
@@ -1860,12 +1859,26 @@ class AbstractPriorModel(AbstractModel):
         ]
         return ":".join(values)
 
-    @functools.cached_property
+    @property
     def parameterization(self) -> str:
         """
         Describes the path to each of the PriorModels, its class
-        and its number of free parameters
+        and its number of free parameters.
+
+        Cached on first access in ``self.__dict__`` under the
+        ``_`` -prefixed key ``_parameterization_cache`` so that
+        ``Collection._instance_for_arguments`` and
+        ``ModelInstance.dict`` (which iterate ``__dict__`` and filter
+        underscore-prefixed keys) do not propagate the cached string
+        onto the constructed ``ModelInstance``. A plain
+        ``functools.cached_property`` writes to ``__dict__[name]``
+        without a leading underscore, which would leak the string as
+        a non-array JAX pytree leaf and break ``jax.jit(fit_from)``.
         """
+        cached = self.__dict__.get("_parameterization_cache")
+        if cached is not None:
+            return cached
+
         from .prior_model import Model
 
         formatter = TextFormatter(line_length=info_whitespace())
@@ -1900,6 +1913,7 @@ class AbstractPriorModel(AbstractModel):
         for group in find_groups(paths, limit=0):
             formatter.add(*group)
 
+        self.__dict__["_parameterization_cache"] = formatter.text
         return formatter.text
 
     @property
