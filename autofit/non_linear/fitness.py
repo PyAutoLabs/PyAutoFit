@@ -122,6 +122,12 @@ class Fitness:
         self.use_jax_vmap = use_jax_vmap
         self.use_jax_jit = use_jax_jit
 
+        if getattr(self.analysis, "_use_jax", False):
+            from autofit.jax.pytrees import enable_pytrees, register_model
+
+            enable_pytrees()
+            register_model(self.model)
+
         self._call = self.call
 
         if self.use_jax_vmap:
