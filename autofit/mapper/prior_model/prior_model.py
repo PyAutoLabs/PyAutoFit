@@ -494,12 +494,14 @@ class Model(AbstractPriorModel):
         else:
             result = self.cls(**constructor_arguments)
 
+        excluded = type(self)._cached_property_names()
         for key, value in self.__dict__.items():
             if (
                 not hasattr(result, key)
                 and not isinstance(value, Prior)
                 and not key == "cls"
                 and not key.startswith("_")
+                and key not in excluded
             ):
                 if isinstance(value, Model):
                     value = value.instance_for_arguments(

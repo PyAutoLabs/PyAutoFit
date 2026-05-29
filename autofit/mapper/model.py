@@ -83,9 +83,28 @@ class AbstractModel(ModelObject):
         self._frozen_cache = dict()
         super().__init__(label=label, id_=id_)
 
+    @classmethod
+    def _cached_property_names(cls) -> frozenset:
+        """
+        Return the names of every ``cached_property``-style descriptor
+        declared anywhere in ``cls``'s MRO.
+
+        Used by the ``__dict__``-iteration sites in this module and in
+        ``autofit/mapper/prior_model/`` to exclude cached descriptor values
+        from instance construction, ``ModelInstance.dict``, pickling, and
+        downstream JAX pytree flattening. See PyAutoFit#1300 for the
+        diagnosed leak this defends against.
+        """
+        from autoconf.tools.decorators import cached_property_names
+
+        return cached_property_names(cls)
+
     def __getstate__(self):
+        excluded = type(self)._cached_property_names()
         return {
-            key: value for key, value in self.__dict__.items() if key != "_frozen_cache"
+            key: value
+            for key, value in self.__dict__.items()
+            if key != "_frozen_cache" and key not in excluded
         }
 
     def __setstate__(self, state):
@@ -446,11 +465,13 @@ class ModelInstance(AbstractModel):
 
     @property
     def dict(self):
+        excluded = type(self)._cached_property_names()
         return {
             key: value
             for key, value in self.__dict__.items()
             if key not in ("id", "component_number", "item_number")
             and not (isinstance(key, str) and key.startswith("_"))
+            and key not in excluded
         }
 
     def tree_flatten(self) -> Tuple[List, Tuple]:
