@@ -355,28 +355,38 @@ class NSS(abstract_nest.AbstractNest):
             ]
         )
 
-        nss_kwargs = dict(
-            logprior_fn=prior_logprob,
-            loglikelihood_fn=log_likelihood,
-            num_delete=self.num_delete,
-            num_inner_steps=self.num_mcmc_steps,
-        )
-        # When ``chunk_size`` is set and below ``num_delete``, swap blackjax's
-        # default ``update_with_mcmc_take_last`` for a chunked variant whose
-        # inner vmap becomes ``jax.lax.map(batch_size=chunk_size)`` — see
-        # ``_chunked_update.py`` for the rationale and PyAutoFit#1301 for
-        # per-A100-cell evidence. ``chunk_size=None`` / ``>= num_delete`` are
-        # no-ops (the chunked builder still falls back to ``jax.vmap``).
-        if self.chunk_size is not None and self.chunk_size < self.num_delete:
-            from autofit.non_linear.search.nest.nss._chunked_update import (
-                make_chunked_update_strategy,
+        # When ``chunk_size`` is set and below the wider of ``n_live`` /
+        # ``num_delete``, build the algorithm via the PyAutoFit-local
+        # ``build_chunked_nss_algorithm``. That replicates
+        # ``blackjax.ns.nss.as_top_level_api`` (~30 lines) with both vmap
+        # sites chunked: the inner MCMC step (matches PyAutoFit#1303's
+        # ``make_chunked_update_strategy``) **and** the n_live-wide
+        # ``algo.init`` (PyAutoFit#1304 — the OOM-causing site for
+        # inversion-heavy lensing cells before this PR). ``chunk_size=None``
+        # or ``chunk_size >= max(n_live, num_delete)`` keeps using upstream
+        # ``blackjax.nss(...)`` bit-for-bit.
+        if (
+            self.chunk_size is not None
+            and self.chunk_size < max(self.n_live, self.num_delete)
+        ):
+            from autofit.non_linear.search.nest.nss._chunked_nss import (
+                build_chunked_nss_algorithm,
             )
 
-            nss_kwargs["update_strategy"] = make_chunked_update_strategy(
-                self.chunk_size
+            algo = build_chunked_nss_algorithm(
+                logprior_fn=prior_logprob,
+                loglikelihood_fn=log_likelihood,
+                num_inner_steps=self.num_mcmc_steps,
+                num_delete=self.num_delete,
+                chunk_size=self.chunk_size,
             )
-
-        algo = _blackjax.nss(**nss_kwargs)
+        else:
+            algo = _blackjax.nss(
+                logprior_fn=prior_logprob,
+                loglikelihood_fn=log_likelihood,
+                num_delete=self.num_delete,
+                num_inner_steps=self.num_mcmc_steps,
+            )
 
         @jax.jit
         def one_step(carry, _):
