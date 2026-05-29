@@ -70,6 +70,42 @@ def test__chunked_update_strategy_factory():
         ]
 
 
+def test__chunked_nss_algorithm_factory():
+    """``build_chunked_nss_algorithm`` returns a ``blackjax.SamplingAlgorithm``-
+    shape NamedTuple with ``init`` and ``step`` attributes. This is what
+    ``af.NSS._fit`` relies on as a drop-in for ``_blackjax.nss(...)``.
+
+    No JAX execution — library policy keeps JAX-traced tests in
+    ``autofit_workspace_test``.
+    """
+    blackjax = pytest.importorskip("blackjax")
+    from autofit.non_linear.search.nest.nss._chunked_nss import (
+        build_chunked_nss_algorithm,
+    )
+
+    algo = build_chunked_nss_algorithm(
+        logprior_fn=lambda p: 0.0,
+        loglikelihood_fn=lambda p: 0.0,
+        num_inner_steps=3,
+        num_delete=4,
+        chunk_size=2,
+    )
+
+    assert isinstance(algo, blackjax.SamplingAlgorithm)
+    assert callable(algo.init)
+    assert callable(algo.step)
+
+    # chunk_size=None → still returns the same shape (unchunked path).
+    algo_unchunked = build_chunked_nss_algorithm(
+        logprior_fn=lambda p: 0.0,
+        loglikelihood_fn=lambda p: 0.0,
+        num_inner_steps=3,
+        num_delete=4,
+        chunk_size=None,
+    )
+    assert isinstance(algo_unchunked, blackjax.SamplingAlgorithm)
+
+
 def test__identifier_fields():
     search = af.NSS()
     for field in ("n_live", "num_mcmc_steps", "num_delete", "termination", "seed"):
