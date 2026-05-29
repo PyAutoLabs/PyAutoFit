@@ -139,6 +139,7 @@ class NSS(abstract_nest.AbstractNest):
         n_live: int = 200,
         num_mcmc_steps: int = 5,
         num_delete: int = 50,
+        chunk_size: Optional[int] = None,
         termination: float = -3.0,
         checkpoint_interval: int = 100,
         iterations_per_quick_update: Optional[int] = None,
@@ -195,6 +196,17 @@ class NSS(abstract_nest.AbstractNest):
             Number of particles killed per outer iteration. Larger
             ``num_delete`` reduces JIT overhead per iteration at the cost of
             slightly worse posterior coverage.
+        chunk_size
+            Optional GPU-memory knob. When set and ``< num_delete``, the
+            inner MCMC step vmap (which fans out ``num_delete`` particles
+            in parallel inside ``blackjax.ns.from_mcmc.update_with_mcmc_take_last``)
+            is replaced with ``jax.lax.map(..., batch_size=chunk_size)``.
+            Peak GPU memory becomes ``chunk_size × per_particle_state``
+            instead of ``num_delete × per_particle_state`` — required to
+            run NSS on inversion-heavy likelihoods (PyAutoLens pixelization
+            / Delaunay) at A100 80 GB scale. Default ``None`` preserves the
+            upstream un-chunked behaviour (and is the right choice on CPU
+            or whenever ``num_delete`` already fits the device).
         termination
             Convergence criterion. The fit stops when
             ``logZ_live - logZ < termination``. Default ``-3.0`` corresponds
@@ -262,6 +274,7 @@ class NSS(abstract_nest.AbstractNest):
         self.n_live = n_live
         self.num_mcmc_steps = num_mcmc_steps
         self.num_delete = num_delete
+        self.chunk_size = chunk_size
         self.termination = termination
         self.checkpoint_interval = checkpoint_interval
         self.seed = seed
@@ -342,12 +355,28 @@ class NSS(abstract_nest.AbstractNest):
             ]
         )
 
-        algo = _blackjax.nss(
+        nss_kwargs = dict(
             logprior_fn=prior_logprob,
             loglikelihood_fn=log_likelihood,
             num_delete=self.num_delete,
             num_inner_steps=self.num_mcmc_steps,
         )
+        # When ``chunk_size`` is set and below ``num_delete``, swap blackjax's
+        # default ``update_with_mcmc_take_last`` for a chunked variant whose
+        # inner vmap becomes ``jax.lax.map(batch_size=chunk_size)`` — see
+        # ``_chunked_update.py`` for the rationale and PyAutoFit#1301 for
+        # per-A100-cell evidence. ``chunk_size=None`` / ``>= num_delete`` are
+        # no-ops (the chunked builder still falls back to ``jax.vmap``).
+        if self.chunk_size is not None and self.chunk_size < self.num_delete:
+            from autofit.non_linear.search.nest.nss._chunked_update import (
+                make_chunked_update_strategy,
+            )
+
+            nss_kwargs["update_strategy"] = make_chunked_update_strategy(
+                self.chunk_size
+            )
+
+        algo = _blackjax.nss(**nss_kwargs)
 
         @jax.jit
         def one_step(carry, _):
@@ -370,11 +399,12 @@ class NSS(abstract_nest.AbstractNest):
             iteration = 0
             self.logger.info(
                 "NSS configuration: n_live=%d, num_mcmc_steps=%d, num_delete=%d, "
-                "termination=%s, ndim=%d, checkpoint_interval=%d. JIT compile on "
-                "first iteration may take 25-30 s.",
+                "chunk_size=%s, termination=%s, ndim=%d, checkpoint_interval=%d. "
+                "JIT compile on first iteration may take 25-30 s.",
                 self.n_live,
                 self.num_mcmc_steps,
                 self.num_delete,
+                self.chunk_size,
                 self.termination,
                 ndim,
                 self.checkpoint_interval,
