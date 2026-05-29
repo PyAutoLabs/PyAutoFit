@@ -24,6 +24,7 @@ def test__explicit_params():
         n_live=500,
         num_mcmc_steps=10,
         num_delete=20,
+        chunk_size=4,
         termination=-2.0,
         seed=7,
     )
@@ -31,6 +32,7 @@ def test__explicit_params():
     assert search.n_live == 500
     assert search.num_mcmc_steps == 10
     assert search.num_delete == 20
+    assert search.chunk_size == 4
     assert search.termination == -2.0
     assert search.seed == 7
 
@@ -38,8 +40,34 @@ def test__explicit_params():
     assert default.n_live == 200
     assert default.num_mcmc_steps == 5
     assert default.num_delete == 50
+    assert default.chunk_size is None
     assert default.termination == -3.0
     assert default.seed == 42
+
+
+def test__chunked_update_strategy_factory():
+    """``make_chunked_update_strategy`` returns a callable with the same
+    signature as blackjax's ``update_with_mcmc_take_last`` regardless of
+    whether ``chunk_size`` is set. This lets ``af.NSS._fit`` drop it into
+    ``blackjax.nss(update_strategy=...)`` without further branching.
+    """
+    from autofit.non_linear.search.nest.nss._chunked_update import (
+        make_chunked_update_strategy,
+    )
+
+    strategy_none = make_chunked_update_strategy(None)
+    strategy_chunked = make_chunked_update_strategy(4)
+    # Both are callables with the upstream three-arg signature
+    # (constrained_mcmc_step_fn, num_mcmc_steps, num_delete).
+    import inspect
+
+    for strategy in (strategy_none, strategy_chunked):
+        params = list(inspect.signature(strategy).parameters)
+        assert params == [
+            "constrained_mcmc_step_fn",
+            "num_mcmc_steps",
+            "num_delete",
+        ]
 
 
 def test__identifier_fields():
