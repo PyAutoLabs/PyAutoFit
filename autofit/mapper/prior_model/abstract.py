@@ -1275,12 +1275,17 @@ class AbstractPriorModel(AbstractModel):
     def items(self):
         """Return (name, value) pairs for all public, non-internal attributes.
 
-        Excludes private attributes (prefixed with ``_``), ``cls``, and ``id``.
+        Excludes private attributes (prefixed with ``_``), ``cls``, ``id``,
+        and any ``cached_property``-style descriptors declared on the class
+        (see ``AbstractModel._cached_property_names``).
         """
+        excluded = type(self)._cached_property_names()
         return [
             (key, value)
             for key, value in self.__dict__.items()
-            if not key.startswith("_") and key not in ("cls", "id")
+            if not key.startswith("_")
+            and key not in ("cls", "id")
+            and key not in excluded
         ]
 
     @property

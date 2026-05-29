@@ -1,3 +1,4 @@
+import functools
 import itertools
 
 import pytest
@@ -174,6 +175,92 @@ def test_parameterization_cache_does_not_leak_into_instance():
     # The instance must yield only model components when iterated.
     for child in instance:
         assert not isinstance(child, str)
+
+
+def test_cached_property_names_classmethod_walks_mro():
+    """The ``_cached_property_names`` classmethod on AbstractModel exposes the
+    autoconf ``cached_property_names`` MRO walker. It must pick up
+    descriptors declared on any ancestor and memoise the result on the class."""
+
+    import functools
+
+    import autofit as af
+
+    # Build a synthetic subclass with a cached_property to verify the walker
+    # finds it. We use af.Collection because both AbstractPriorModel and
+    # ModelInstance inherit from AbstractModel.
+    class SyntheticCollection(af.Collection):
+        @functools.cached_property
+        def synthetic_value(self):
+            return "a synthetic cached string"
+
+    names = SyntheticCollection._cached_property_names()
+    assert "synthetic_value" in names
+
+    # Result is memoised on the synthetic class.
+    assert "__cached_property_names_cache__" in SyntheticCollection.__dict__
+
+    # Plain af.Collection (no synthetic_value) has its own cache.
+    base_names = af.Collection._cached_property_names()
+    assert "synthetic_value" not in base_names
+
+
+class _GuardedCollection(af.Collection):
+    """Module-level subclass used by
+    ``test_cached_property_excluded_from_all_dict_walks`` — must live at
+    module scope so ``pickle.dumps`` can locate the class on round-trip."""
+
+    @functools.cached_property
+    def derived(self):
+        return "leaky-string"
+
+
+def test_cached_property_excluded_from_all_dict_walks():
+    """Regression: a future ``@functools.cached_property`` declared anywhere
+    in the model class hierarchy must not surface through any of:
+    ``Collection._instance_for_arguments`` (via ``instance.__dict__``),
+    ``ModelInstance.dict``, ``ModelInstance.tree_flatten()``,
+    ``AbstractModel.items()``, ``ModelObject._dict``, or pickling via
+    ``__getstate__``.
+
+    Covers the class of bug PyAutoFit#1300 fixed for ``parameterization``;
+    this test will fail if a maintainer reintroduces an un-prefixed
+    cached_property on the model hierarchy without the
+    ``_cached_property_names`` defense applied at every site."""
+
+    import pickle
+
+    model = _GuardedCollection(gaussian=af.Model(af.ex.Gaussian))
+
+    # Trigger the cache. After this, model.__dict__["derived"] = "leaky-string".
+    _ = model.derived
+    assert model.__dict__.get("derived") == "leaky-string"
+
+    instance = model.instance_from_prior_medians()
+
+    # Site 1+4: Collection._instance_for_arguments + ModelInstance.dict
+    assert "derived" not in instance.__dict__
+    assert "derived" not in instance.dict
+
+    # Site 4 also feeds tree_flatten — no string leaves.
+    leaves = instance.dict.values()
+    for leaf in leaves:
+        assert not isinstance(leaf, str)
+
+    # Site 3: AbstractModel.items() on the model itself.
+    assert all(key != "derived" for key, _ in model.items())
+
+    # Site 5: __getstate__ drops the cached value from pickles.
+    state = model.__getstate__()
+    assert "derived" not in state
+
+    # Round-trip via pickle: the unpickled model re-computes the cached value,
+    # rather than carrying the pickled string on the wire.
+    blob = pickle.dumps(model)
+    revived = pickle.loads(blob)
+    assert "derived" not in revived.__dict__
+    # Touching it recomputes.
+    assert revived.derived == "leaky-string"
 
 
 def test_integer_attributes():

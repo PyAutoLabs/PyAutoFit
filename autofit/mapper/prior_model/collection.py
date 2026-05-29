@@ -286,8 +286,9 @@ class Collection(AbstractPriorModel):
             A list of instances constructed from the list of prior models.
         """
         result = ModelInstance()
+        excluded = type(self)._cached_property_names()
         for key, value in self.__dict__.items():
-            if key.startswith("_"):
+            if key.startswith("_") or key in excluded:
                 continue
             if isinstance(value, AbstractPriorModel):
                 value = value.instance_for_arguments(

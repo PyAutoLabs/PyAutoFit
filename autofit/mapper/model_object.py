@@ -330,9 +330,20 @@ class ModelObject:
 
     @property
     def _dict(self):
+        # Pick up any cached_property descriptors declared on the class so
+        # their cached values don't propagate via `Collection.items()` (which
+        # delegates here) or any other downstream consumer. The lookup is
+        # gated on hasattr because ModelObject is the base for the whole
+        # mapper module: a few non-AbstractModel descendants do not carry the
+        # ``_cached_property_names`` classmethod.
+        try:
+            excluded = type(self)._cached_property_names()
+        except AttributeError:
+            excluded = frozenset()
         return {
             key: value
             for key, value in self.__dict__.items()
             if key not in ("component_number", "item_number", "id", "cls", "label")
             and not key.startswith("_")
+            and key not in excluded
         }
