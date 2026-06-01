@@ -36,7 +36,13 @@ class Analysis(af.Analysis):
 
     LATENT_KEYS = ["gaussian.fwhm"]
 
-    def __init__(self, data: np.ndarray, noise_map: np.ndarray, use_jax=False):
+    def __init__(
+        self,
+        data: np.ndarray,
+        noise_map: np.ndarray,
+        use_jax=False,
+        share_model_data=False,
+    ):
         """
         In this example the `Analysis` object only contains the data and noise-map. It can be easily extended,
         for more complex data-sets and model fitting problems.
@@ -48,13 +54,45 @@ class Analysis(af.Analysis):
         noise_map
             A 1D numpy array containing the noise values of the data, used for computing the goodness of fit
             metric.
+        share_model_data
+            If `True`, opt this `Analysis` into the `FactorGraphModel` cross-factor shared-state mechanism
+            (see `shared_state_from`). This is only valid when the *entire* model is shared across every
+            factor, so the model data is identical for all of them and can be computed once instead of being
+            rebuilt by each factor. It is `False` by default, so the standard per-analysis behaviour is
+            unchanged.
         """
         super().__init__(use_jax=use_jax)
 
         self.data = data
         self.noise_map = noise_map
+        self.share_model_data = share_model_data
 
-    def log_likelihood_function(self, instance: af.ModelInstance, xp=np) -> float:
+    def shared_state_from(self, instance: af.ModelInstance):
+        """
+        Compute the model data once so that it can be shared across the factors of a `FactorGraphModel`.
+
+        This is the worked example of `Analysis.shared_state_from` (see that method). When every factor of
+        the graph shares the *entire* model — for example several datasets fit by the same 1D profile via
+        shared priors — the model data is identical for every factor, so it is wasteful to rebuild it once
+        per factor. Returning it here means the `FactorGraphModel` computes it a single time on the lead
+        factor and reuses it for all the others.
+
+        In this toy the model data is cheap, but it stands in for an expensive shared computation: it is the
+        1D analog of the lensing case, where the shared work (ray-tracing, the source-plane mapper, the
+        mapping matrix and the curvature matrix) dominates the per-factor cost.
+
+        Sharing is opt-in (`share_model_data`) because it is only correct when the model really is fully
+        shared. If only some parameters are shared the model data differs between factors and this returns
+        `None`, so each factor computes its own as usual.
+        """
+        if not self.share_model_data:
+            return None
+
+        return self.model_data_1d_from(instance=instance)
+
+    def log_likelihood_function(
+        self, instance: af.ModelInstance, shared=None, xp=np
+    ) -> float:
         """
         Determine the log likelihood of a fit of multiple profiles to the dataset.
 
@@ -62,12 +100,20 @@ class Analysis(af.Analysis):
         ----------
         instance : af.Collection
             The model instances of the profiles.
+        shared
+            The model data shared across the factors of a `FactorGraphModel`, computed once by
+            `shared_state_from` (see that method). When provided it is used directly instead of being
+            recomputed here; when `None` (the default, e.g. a standalone fit) the model data is computed
+            as normal.
 
         Returns
         -------
         The log likelihood value indicating how well this model fit the dataset.
         """
-        model_data_1d = self.model_data_1d_from(instance=instance)
+        if shared is None:
+            model_data_1d = self.model_data_1d_from(instance=instance)
+        else:
+            model_data_1d = shared
 
         residual_map = self.data - model_data_1d
         chi_squared_map = (residual_map / self.noise_map) ** 2.0

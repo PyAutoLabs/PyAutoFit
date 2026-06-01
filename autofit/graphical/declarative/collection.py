@@ -91,6 +91,17 @@ class FactorGraphModel(AbstractDeclarativeFactor):
         Compute the combined likelihood of each factor from a collection of instances
         with the same ordering as the factors.
 
+        Before the per-factor loop, the lead factor is asked to compute a `shared`
+        object via `Analysis.shared_state_from` (see that method). If it returns a
+        non-`None` value — the opt-in case — that object is forwarded as the `shared`
+        keyword argument to every factor's `log_likelihood_function`, so that work
+        which is identical for all factors at this point in parameter space is computed
+        once and reused rather than recomputed for each factor.
+
+        When no factor provides a shared object (the default) the loop calls each
+        factor's `log_likelihood_function` exactly as it would without this mechanism,
+        so existing graphs are unchanged.
+
         Parameters
         ----------
         instance
@@ -100,11 +111,36 @@ class FactorGraphModel(AbstractDeclarativeFactor):
         -------
         The combined likelihood of all factors
         """
+        shared = self._shared_state_from(instance)
+
         log_likelihood = 0
         for model_factor, instance_ in zip(self.model_factors, instance):
-            log_likelihood += model_factor.log_likelihood_function(instance_)
+            if shared is None:
+                log_likelihood += model_factor.log_likelihood_function(instance_)
+            else:
+                log_likelihood += model_factor.log_likelihood_function(
+                    instance_, shared=shared
+                )
 
         return log_likelihood
+
+    def _shared_state_from(self, instance: ModelInstance):
+        """
+        Compute the per-evaluation object shared across factors, by asking each factor's
+        `Analysis` in turn (via `Analysis.shared_state_from`) until one returns a
+        non-`None` value — the "lead" factor. Returns `None` if no factor opts in, in
+        which case no state is shared this evaluation.
+        """
+        for model_factor, instance_ in zip(self.model_factors, instance):
+            analysis = getattr(model_factor, "analysis", None)
+            shared_state_from = getattr(analysis, "shared_state_from", None)
+            if shared_state_from is None:
+                continue
+            shared = shared_state_from(instance_)
+            if shared is not None:
+                return shared
+
+        return None
 
     @property
     def model_factors(self):

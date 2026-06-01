@@ -47,13 +47,17 @@ class PriorFactor(FactorKW, Analysis):
         """
         return self
 
-    def log_likelihood_function(self, instance) -> float:
+    def log_likelihood_function(self, instance, shared=None) -> float:
         """
         Compute the likelihood.
 
         The instance is a collection with a single argument expressing a
         possible value for this prior. The likelihood is computed by simply
         evaluating the prior's PDF for the given value.
+
+        The `shared` argument (the cross-factor shared state of a
+        `FactorGraphModel`) is accepted for a uniform calling convention but is
+        not used by a prior factor.
         """
         return self.prior.factor(instance[0])
 

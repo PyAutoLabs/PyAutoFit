@@ -250,8 +250,10 @@ class AnalysisFactor(AbstractModelFactor):
         """
         self.analysis.save_results(paths=paths, result=result)
 
-    def log_likelihood_function(self, instance: ModelInstance) -> float:
-        return self.analysis.log_likelihood_function(instance)
+    def log_likelihood_function(self, instance: ModelInstance, shared=None) -> float:
+        if shared is None:
+            return self.analysis.log_likelihood_function(instance)
+        return self.analysis.log_likelihood_function(instance, shared=shared)
 
 
 class EPAnalysisFactor(AnalysisFactor):

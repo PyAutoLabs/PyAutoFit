@@ -190,7 +190,7 @@ class _HierarchicalFactor(AbstractModelFactor):
     def variable(self):
         return self.drawn_prior
 
-    def log_likelihood_function(self, instance):
+    def log_likelihood_function(self, instance, shared=None):
         return instance.distribution_model.message(instance.drawn_prior, xp=self._xp)
 
     @property
