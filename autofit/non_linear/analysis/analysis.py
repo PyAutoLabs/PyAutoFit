@@ -174,10 +174,26 @@ class Analysis(ABC):
                 start = time.time()
                 if self.LATENT_BATCH_MODE == "vmap":
                     logger.info("JAX: Applying vmap and jit to likelihood function for latent variables -- may take a few seconds.")
+                    # vmap traces `compute_latent_variables` once for the whole
+                    # batch, so a per-sample try/except is not possible here —
+                    # latent functions on the vmap path must express failures as
+                    # NaN (e.g. `jnp.where`), never by raising. The `jit` and
+                    # numpy paths below do guard per sample.
                     batched_compute_latent = jax.jit(jax.vmap(compute_latent_for_model))
                 elif self.LATENT_BATCH_MODE == "jit":
                     logger.info("JAX: Applying per-sample jit to latent variables (LATENT_BATCH_MODE='jit') -- may take a few seconds on first sample.")
                     jitted_compute_latent = jax.jit(compute_latent_for_model)
+                    n_latents = len(self.LATENT_KEYS)
+                    nan_tuple = tuple(jnp.nan for _ in range(n_latents))
+
+                    def _safe_jitted(p):
+                        # A latent that raises (any exception, not just
+                        # FitException) becomes a NaN row, which the global mask
+                        # below drops — one bad sample must not abort the batch.
+                        try:
+                            return jitted_compute_latent(p)
+                        except Exception:
+                            return nan_tuple
 
                     def batched_compute_latent(parameters_batch):
                         # Per-sample jit returns one (l1, l2, ..., lN) tuple per
@@ -185,7 +201,7 @@ class Analysis(ABC):
                         # downstream `jnp.stack(latent_values_batch, axis=-1)`
                         # works identically to the vmap path.
                         sample_results = [
-                            jitted_compute_latent(p) for p in parameters_batch
+                            _safe_jitted(p) for p in parameters_batch
                         ]
                         n_latents = len(sample_results[0])
                         return tuple(
@@ -202,9 +218,12 @@ class Analysis(ABC):
                 nan_row = np.full(n_latents, np.nan)
 
                 def _safe_compute(xx):
+                    # Any exception (not just FitException) becomes a NaN row,
+                    # which the global mask below drops — a single failing latent
+                    # evaluation must not abort the whole post-fit latent pass.
                     try:
                         return compute_latent_for_model(xx)
-                    except exc.FitException:
+                    except Exception:
                         return nan_row
 
                 def batched_compute_latent(x):
@@ -255,26 +274,48 @@ class Analysis(ABC):
             else:
                 all_values = np.empty((0, len(self.LATENT_KEYS)))
 
-            # Global masking, in two stages:
-            # 1. Drop a latent column only if it is non-finite for EVERY sample
-            #    (a genuinely degenerate latent, e.g. a µJy latent with no magzero).
-            col_mask = np.any(np.isfinite(all_values), axis=0)
-            kept_keys = [k for k, keep in zip(self.LATENT_KEYS, col_mask) if keep]
-            kept_values = all_values[:, col_mask]
+            # Global masking. Every retained sample must share one identical,
+            # fully-finite latent key set (a `Samples` object is a rectangular
+            # samples x latents block; NaNs anywhere break `quantile`).
+            #
+            # 1. Drop a latent column that is non-finite for EVERY sample
+            #    (genuinely degenerate, e.g. a µJy latent with no magzero).
+            kept_idx = [
+                i
+                for i in range(all_values.shape[1])
+                if np.isfinite(all_values[:, i]).any()
+            ]
 
-            # 2. Drop individual samples that still carry a NaN in a surviving
-            #    latent (e.g. a FitException NaN row, or a latent that went NaN
-            #    for just that sample). Every survivor now has all `kept_keys`.
-            if kept_values.size:
-                row_mask = np.all(np.isfinite(kept_values), axis=1)
-            else:
-                row_mask = np.zeros(len(all_samples), dtype=bool)
-            kept_values = kept_values[row_mask]
-            kept_samples = [s for s, keep in zip(all_samples, row_mask) if keep]
+            # 2. Keep samples that are finite across all currently-kept latents.
+            #    Normally at least one sample is finite everywhere and we stop
+            #    immediately (behaviour unchanged). But if NaNs are anti-correlated
+            #    across latents — every sample NaN in some latent — the rectangular
+            #    block is empty. Rather than discard ALL latent output, greedily
+            #    sacrifice the worst-coverage latent and retry, retaining the
+            #    maximal-coverage latents and their finite samples.
+            while kept_idx:
+                row_mask = np.isfinite(all_values[:, kept_idx]).all(axis=1)
+                if row_mask.any():
+                    break
+                nan_counts = (~np.isfinite(all_values[:, kept_idx])).sum(axis=0)
+                kept_idx.pop(int(np.argmax(nan_counts)))
 
             print(f"Time to compute latent variables: {time.time() - start_latent} seconds for {len(samples)} samples.")
 
-            if not kept_keys or len(kept_samples) == 0:
+            if not kept_idx:
+                logger.warning(
+                    "compute_latent_samples: no finite latent samples remained "
+                    "after masking; skipping latent output."
+                )
+                return None
+
+            kept_keys = [self.LATENT_KEYS[i] for i in kept_idx]
+            kept_values = all_values[:, kept_idx]
+            row_mask = np.isfinite(kept_values).all(axis=1)
+            kept_values = kept_values[row_mask]
+            kept_samples = [s for s, keep in zip(all_samples, row_mask) if keep]
+
+            if len(kept_samples) == 0:
                 logger.warning(
                     "compute_latent_samples: no finite latent samples remained "
                     "after masking; skipping latent output."
