@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 
 import autofit as af
@@ -223,3 +224,128 @@ def test_complex_model():
     assert lens.brightness == 2.0
 
     assert instance.source.brightness == 3.0
+
+
+class RaisingAnalysis(af.Analysis):
+    """Latent that raises a non-FitException (e.g. an unexpected solver error)
+    for some samples."""
+
+    LATENT_KEYS = ["fwhm"]
+
+    def log_likelihood_function(self, instance):
+        return 1.0
+
+    def compute_latent_variables(self, parameters, model):
+        if parameters[0] < 0:
+            raise ValueError("boom from latent function")
+        instance = model.instance_from_vector(vector=parameters)
+        return (instance.fwhm,)
+
+
+def test_compute_latent_samples_skips_arbitrary_exception_samples():
+    """
+    A latent function that raises ANY exception (not just FitException) must
+    drop that sample rather than crashing the whole latent pass.
+    """
+    analysis = RaisingAnalysis()
+    latent_samples = analysis.compute_latent_samples(
+        SamplesPDF(
+            model=af.Model(af.ex.Gaussian),
+            sample_list=[
+                af.Sample(log_likelihood=1.0, log_prior=0.0, weight=1.0,
+                          kwargs={"centre": 1.0, "normalization": 2.0, "sigma": 3.0}),
+                af.Sample(log_likelihood=-1.0, log_prior=0.0, weight=0.0,
+                          kwargs={"centre": -1.0, "normalization": 2.0, "sigma": 3.0}),
+            ],
+        ),
+    )
+    assert len(latent_samples.sample_list) == 1
+    assert latent_samples.sample_list[0].kwargs == {("fwhm",): 7.0644601350928475}
+
+
+class AntiCorrelatedNaNAnalysis(af.Analysis):
+    """Two latents whose NaNs are anti-correlated across samples: latent ``a`` is
+    NaN where ``centre < 0`` and latent ``b`` is NaN where ``centre >= 0``. No
+    single sample is finite in both."""
+
+    LATENT_KEYS = ["a", "b"]
+
+    def log_likelihood_function(self, instance):
+        return 1.0
+
+    def compute_latent_variables(self, parameters, model):
+        c = parameters[0]
+        a = np.nan if c < 0 else 1.0
+        b = np.nan if c >= 0 else 2.0
+        return (a, b)
+
+
+def test_compute_latent_samples_salvages_anti_correlated_nans():
+    """
+    When NaNs are anti-correlated so the rectangular (samples x latents) block is
+    empty, the masking must NOT discard all latent output. It sacrifices the
+    worst-coverage latent and retains the maximal-coverage one with its finite
+    samples — rather than returning None.
+    """
+    analysis = AntiCorrelatedNaNAnalysis()
+    latent_samples = analysis.compute_latent_samples(
+        SamplesPDF(
+            model=af.Model(af.ex.Gaussian),
+            sample_list=[
+                af.Sample(log_likelihood=1.0, log_prior=0.0, weight=1.0,
+                          kwargs={"centre": cv, "normalization": 2.0, "sigma": 3.0})
+                for cv in (1.0, -1.0, 2.0, -2.0)
+            ],
+        ),
+    )
+    assert latent_samples is not None
+    # The two latents tie on NaN count; the first (a) is sacrificed, b is kept.
+    surviving_keys = set(latent_samples.sample_list[0].kwargs)
+    assert surviving_keys == {("b",)}
+    # All retained samples share the same single-key set (no KeyError downstream).
+    assert all(set(s.kwargs) == surviving_keys for s in latent_samples.sample_list)
+
+
+class OneSurvivorAnalysis(af.Analysis):
+    """Only the ``centre == 1.0`` sample yields a finite latent; all others NaN."""
+
+    LATENT_KEYS = ["fwhm"]
+
+    def log_likelihood_function(self, instance):
+        return 1.0
+
+    def compute_latent_variables(self, parameters, model):
+        if parameters[0] != 1.0:
+            return (np.nan,)
+        instance = model.instance_from_vector(vector=parameters)
+        return (instance.fwhm,)
+
+
+def test_compute_latent_samples_single_survivor_summary_does_not_crash():
+    """
+    When masking leaves exactly one finite latent sample whose weight is < 0.99
+    (so `pdf_converged` is True and `median_pdf` uses `quantile`), `summary()` and
+    `median_pdf()` must succeed. Regression for the `quantile` n=1 IndexError.
+    """
+    analysis = OneSurvivorAnalysis()
+    latent_samples = analysis.compute_latent_samples(
+        SamplesPDF(
+            model=af.Model(af.ex.Gaussian),
+            sample_list=[
+                af.Sample(log_likelihood=3.0, log_prior=0.0, weight=0.5,
+                          kwargs={"centre": 1.0, "normalization": 2.0, "sigma": 3.0}),
+                af.Sample(log_likelihood=2.0, log_prior=0.0, weight=0.3,
+                          kwargs={"centre": 2.0, "normalization": 2.0, "sigma": 3.0}),
+                af.Sample(log_likelihood=1.0, log_prior=0.0, weight=0.2,
+                          kwargs={"centre": 3.0, "normalization": 2.0, "sigma": 3.0}),
+            ],
+        ),
+    )
+    assert latent_samples is not None
+    assert len(latent_samples.sample_list) == 1
+    # weight 0.5 <= 0.99 => pdf_converged True => median_pdf routes to quantile (n=1).
+    assert latent_samples.pdf_converged
+    # The real regression: these must not raise.
+    _ = latent_samples.summary()
+    instance = latent_samples.median_pdf()
+    assert instance.fwhm == pytest.approx(7.0644601350928475)

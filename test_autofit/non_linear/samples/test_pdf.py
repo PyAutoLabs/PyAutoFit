@@ -497,3 +497,18 @@ def test__covariance_matrix(make_samples):
     assert samples_x5.covariance_matrix == pytest.approx(
         np.array([[0.90909, -0.90909], [-0.90909, 0.90909]]), 1.0e-4
     )
+
+
+def test__quantile_single_weighted_sample_does_not_crash():
+    """
+    A weighted `quantile` over a single sample must return that sample's value
+    for every quantile rather than raising. Previously `np.cumsum(sw)[:-1]` was
+    empty for one sample and `cdf[-1]` raised IndexError — surfaced when latent
+    masking left exactly one finite sample whose weight was < 0.99.
+    """
+    from autofit.non_linear.samples.pdf import quantile
+
+    assert quantile(x=[5.0], q=0.5, weights=[0.3]) == [5.0]
+    assert quantile(x=[5.0], q=[0.16, 0.5, 0.84], weights=[0.3]) == [5.0, 5.0, 5.0]
+    # n >= 2 weighted path is unchanged.
+    assert quantile(x=[1.0, 2.0], q=0.5, weights=[0.5, 0.5]) == pytest.approx([1.5])

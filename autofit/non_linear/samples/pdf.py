@@ -481,6 +481,13 @@ def quantile(x, q, weights=None):
     if np.any(q < 0.0) or np.any(q > 1.0):
         raise ValueError("Quantiles must be between 0 and 1")
 
+    if x.shape[0] == 1:
+        # A single sample places all PDF mass at one point, so every quantile is
+        # that value. Handle this explicitly: the weighted branch below computes
+        # `np.cumsum(sw)[:-1]`, which is empty for one sample and then indexes
+        # `cdf[-1]`, raising IndexError.
+        return [float(x[0])] * len(q)
+
     if weights is None:
         return np.percentile(x, list(100.0 * q))
     else:
