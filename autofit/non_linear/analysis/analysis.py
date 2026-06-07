@@ -382,8 +382,48 @@ class Analysis(ABC):
 
         return ModelAnalysis(analysis=self, model=model)
 
-    def log_likelihood_function(self, instance):
+    def log_likelihood_function(self, instance, shared=None):
         raise NotImplementedError()
+
+    def shared_state_from(self, instance):
+        """
+        Optionally compute a per-evaluation object that is shared across the factors
+        of a `FactorGraphModel`.
+
+        This is the per-evaluation, cross-factor sibling of `modify_before_fit`. Where
+        `modify_before_fit` runs once before sampling to precompute analysis state that
+        does not depend on the model, `shared_state_from` runs once per likelihood
+        evaluation (the model parameters change every sample) and computes state that
+        is identical for every factor at the current point in parameter space.
+
+        When a `FactorGraphModel` evaluates its likelihood it calls this method on its
+        lead factor's `Analysis`. If the returned value is not `None` it is forwarded as
+        the `shared` keyword argument to every factor's `log_likelihood_function`, so
+        that work which is identical for all factors (because they share model
+        parameters) is computed once and reused rather than recomputed `N` times.
+
+        The default implementation returns `None`, meaning no state is shared and every
+        factor's `log_likelihood_function` runs exactly as it does without this
+        mechanism. An `Analysis` opts in by overriding this method.
+
+        The returned object must be a valid JAX pytree of traced arrays when the fit is
+        JIT-compiled: it is recomputed inside the jitted region each evaluation (it
+        depends on the traced model parameters) and must not be memoised on the instance.
+
+        Correctness is the responsibility of the overriding `Analysis`: only return a
+        shared object when the parameters it depends on really are shared across every
+        factor. If they are not, return `None` and let each factor compute its own state.
+
+        Parameters
+        ----------
+        instance
+            The model instance of the factor whose `Analysis` is acting as the lead.
+
+        Returns
+        -------
+        An object shared across all factors for this evaluation, or `None` for no sharing.
+        """
+        return None
 
     def save_attributes(self, paths: AbstractPaths):
         pass
