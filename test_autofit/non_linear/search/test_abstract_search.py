@@ -111,6 +111,27 @@ class TestSearchConfig:
         assert "nwalkers" in emcee.__identifier_fields__
         assert "nlive" in dynesty.__identifier_fields__
 
+    def test__bypass_fake_samples_support_multi_batch_checks(self):
+        model = af.Model(af.m.MockClassx2)
+        parameter_vector = [1.0, 2.0]
+
+        sample_list = af.DynestyStatic._build_fake_samples(
+            model=model,
+            parameter_vector=parameter_vector,
+            log_likelihood=-10.0,
+        )
+
+        assert len(sample_list) == 4
+        assert sample_list[0].parameter_lists_for_model(model) == parameter_vector
+        assert sample_list[0].log_likelihood == -10.0
+        assert [sample.log_likelihood for sample in sample_list] == [
+            -10.0,
+            -11.0,
+            -12.0,
+            -13.0,
+        ]
+        assert all(sample.weight > 0.0 for sample in sample_list)
+
 
 class TestUpdaterPathsRefresh:
     """

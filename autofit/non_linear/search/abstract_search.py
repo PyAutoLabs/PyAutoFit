@@ -917,22 +917,27 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         """
         Build a minimal list of fake Sample objects for test mode bypass.
 
-        Creates two samples: the "best" at the prior median and a second
-        with slightly perturbed parameters and worse likelihood, so that
-        SamplesPDF methods like median_pdf work correctly.
+        Creates a small deterministic sample set: the "best" at the prior
+        median and additional slightly perturbed parameters with worse
+        likelihoods. Four samples keeps bypass mode cheap while allowing
+        downstream structural checks to exercise multi-batch sample handling.
         """
         from autofit.non_linear.samples.sample import Sample
 
-        perturbed = [
-            p * 1.001 if p != 0.0 else 0.001 for p in parameter_vector
-        ]
+        parameter_lists = [parameter_vector]
+        for scale in (1.001, 0.999, 1.002):
+            parameter_lists.append(
+                [p * scale if p != 0.0 else scale - 1.0 for p in parameter_vector]
+            )
 
         return Sample.from_lists(
             model=model,
-            parameter_lists=[parameter_vector, perturbed],
-            log_likelihood_list=[log_likelihood, log_likelihood - 1.0],
-            log_prior_list=[0.0, 0.0],
-            weight_list=[1.0, 0.5],
+            parameter_lists=parameter_lists,
+            log_likelihood_list=[
+                log_likelihood - offset for offset in range(len(parameter_lists))
+            ],
+            log_prior_list=[0.0] * len(parameter_lists),
+            weight_list=[1.0, 0.5, 0.25, 0.125],
         )
 
     @abstractmethod
