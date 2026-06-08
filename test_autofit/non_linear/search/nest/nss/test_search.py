@@ -17,8 +17,13 @@ from autofit.non_linear.search.nest.nss.samples import NSSamples
 
 
 pytestmark = pytest.mark.filterwarnings("ignore::FutureWarning")
+requires_nss = pytest.mark.skipif(
+    not nss_search_module._HAS_NSS,
+    reason="requires optional `nss` extra",
+)
 
 
+@requires_nss
 def test__explicit_params():
     search = af.NSS(
         n_live=500,
@@ -70,6 +75,7 @@ def test__chunked_update_strategy_factory():
         ]
 
 
+@requires_nss
 def test__chunked_nss_algorithm_factory():
     """``build_chunked_nss_algorithm`` returns a ``blackjax.SamplingAlgorithm``-
     shape NamedTuple with ``init`` and ``step`` attributes. This is what
@@ -106,12 +112,14 @@ def test__chunked_nss_algorithm_factory():
     assert isinstance(algo_unchunked, blackjax.SamplingAlgorithm)
 
 
+@requires_nss
 def test__identifier_fields():
     search = af.NSS()
     for field in ("n_live", "num_mcmc_steps", "num_delete", "termination", "seed"):
         assert field in search.__identifier_fields__
 
 
+@requires_nss
 def test__test_mode_loosens_termination():
     search = af.NSS(termination=-3.0)
     search.apply_test_mode()
@@ -124,6 +132,7 @@ def test__init_raises_when_nss_unavailable(monkeypatch):
         af.NSS()
 
 
+@requires_nss
 def test__init_warns_when_number_of_cores_gt_one(caplog):
     with caplog.at_level("WARNING"):
         af.NSS(number_of_cores=4)
@@ -157,6 +166,7 @@ def _make_synthetic_internal(n_live=20, ndim=2, seed=0):
     )
 
 
+@requires_nss
 def test__samples_info_from_synthetic_internal():
     search = af.NSS()
     internal = _make_synthetic_internal()
@@ -178,6 +188,7 @@ def test__samples_info_from_synthetic_internal():
     assert info["sampling_time"] == pytest.approx(10.0, abs=1e-12)
 
 
+@requires_nss
 def test__samples_via_internal_from_returns_nssamples():
     model = af.Model(af.m.MockClassx2)
     model.one = af.UniformPrior(lower_limit=-3.0, upper_limit=3.0)
@@ -201,6 +212,7 @@ def test__samples_via_internal_from_returns_nssamples():
     )
 
 
+@requires_nss
 def test__samples_weight_normalisation_handles_zero_total():
     """When every log_weight is -inf (e.g. catastrophic underflow) we should
     not divide by zero. The implementation clamps via max-subtraction so this
@@ -222,6 +234,7 @@ def test__samples_weight_normalisation_handles_zero_total():
     assert np.allclose(weights, 1.0 / 10, atol=1e-12)
 
 
+@requires_nss
 def test__nssamples_log_evidence_error_property():
     model = af.Model(af.m.MockClassx2)
     model.one = af.UniformPrior(lower_limit=-3.0, upper_limit=3.0)

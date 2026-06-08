@@ -21,6 +21,10 @@ from autofit.non_linear.search.nest.nss.search import (
 
 
 pytestmark = pytest.mark.filterwarnings("ignore::FutureWarning")
+requires_nss = pytest.mark.skipif(
+    not nss_search_module._HAS_NSS,
+    reason="requires optional `nss` extra",
+)
 
 
 jax = pytest.importorskip("jax")
@@ -119,6 +123,7 @@ def test__save_checkpoint_is_atomic(tmp_path):
     assert path.read_bytes() == good_blob
 
 
+@requires_nss
 def test__nss_checkpoint_path_is_none_for_null_paths():
     """Without a real output dir (NullPaths), checkpoint resolution returns None.
 
@@ -131,6 +136,7 @@ def test__nss_checkpoint_path_is_none_for_null_paths():
     assert search.checkpoint_file is None
 
 
+@requires_nss
 def test__init_accepts_checkpoint_interval():
     search = af.NSS(checkpoint_interval=25)
     assert search.checkpoint_interval == 25
@@ -139,6 +145,7 @@ def test__init_accepts_checkpoint_interval():
     assert default.checkpoint_interval == 100
 
 
+@requires_nss
 def test__init_iterations_per_quick_update_no_longer_warns(caplog):
     """Phase 1's no-op log when the kwarg is set is gone in Phase 3 (the kwarg
     is now actually wired). The warning text must not appear.
@@ -151,6 +158,7 @@ def test__init_iterations_per_quick_update_no_longer_warns(caplog):
     )
 
 
+@requires_nss
 def test__load_checkpoint_called_when_file_exists(tmp_path):
     """Verify ``_load_checkpoint`` is invoked from ``_fit`` when a checkpoint
     file exists at the resolved path.
