@@ -12,6 +12,34 @@ the non-linear search) fits the dataset and returns the log likelihood of that m
 """
 
 
+class LatentExample(af.Latent):
+    """
+    Example latent-variable catalogue, declared on `Analysis` as
+    `Latent = LatentExample` (mirrors `Visualizer` / `Result`).
+
+    A latent variable is not a model parameter but can be derived from it — here
+    the full-width half maximum (FWHM) of the 1D Gaussian, derived from its
+    `sigma`. Subclass `af.Latent` and override `keys` / `variables` to define
+    your own; the values returned by `variables` are positionally aligned with
+    `keys` and written to `latent/` alongside `samples.csv`.
+    """
+
+    @staticmethod
+    def keys(analysis):
+        return ["gaussian.fwhm"]
+
+    @staticmethod
+    def variables(analysis, parameters, model):
+        instance = model.instance_from_vector(vector=parameters)
+        try:
+            return (instance.fwhm,)
+        except AttributeError:
+            try:
+                return (instance[0].fwhm,)
+            except AttributeError:
+                return (instance[0].gaussian.fwhm,)
+
+
 class Analysis(af.Analysis):
 
     """
@@ -34,7 +62,7 @@ class Analysis(af.Analysis):
     """
     Result = ResultExample
 
-    LATENT_KEYS = ["gaussian.fwhm"]
+    Latent = LatentExample
 
     def __init__(
         self,
@@ -249,46 +277,3 @@ class Analysis(af.Analysis):
             search_internal=search_internal,
             analysis=self,
         )
-
-    def compute_latent_variables(self, parameters, model) -> Dict[str, float]:
-        """
-        A latent variable is not a model parameter but can be derived from the model. Its value and errors may be
-        of interest and aid in the interpretation of a model-fit.
-
-        For example, for the simple 1D Gaussian example, it could be the full-width half maximum (FWHM) of the
-        Gaussian. This is not included in the model but can be easily derived from the Gaussian's sigma value.
-
-        By overwriting this method we can manually specify latent variables that are calculated and output to
-        a `latent.csv` file, which mirrors the `samples.csv` file.
-
-        In the example below, the `latent.csv` file will contain one column with the FWHM of every Gausian model
-        sampled by the non-linear search.
-
-        This function is called at the end of search, following one of two schemes depending on the settings in
-        `output.yaml`:
-
-        1) Call for every search sample, which produces a complete `latent/samples.csv` which mirrors the normal
-        `samples.csv` file but takes a long time to compute.
-
-        2) Call only for N random draws from the posterior inferred at the end of the search, which only produces a
-        `latent/latent_summary.json` file with the median and 1 and 3 sigma errors of the latent variables but is
-        fast to compute.
-
-        Parameters
-        ----------
-        instance
-            The instances of the model which the latent variable is derived from.
-
-        Returns
-        -------
-
-        """
-        instance = model.instance_from_vector(vector=parameters)
-
-        try:
-            return (instance.fwhm, )
-        except AttributeError:
-            try:
-                return (instance[0].fwhm,)
-            except AttributeError:
-                return (instance[0].gaussian.fwhm,)
