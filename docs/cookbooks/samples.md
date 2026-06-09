@@ -543,10 +543,10 @@ Derived quantities (also called latent variables) are those which are not sample
 but one may still wish to know their values and errors after the fit is complete. For example, what if we want the
 error on the full width half maximum (FWHM) of the Gaussian?
 
-This is achieved by adding them to the `compute_latent_variables` method of the `Analysis` class, which is called
-after the non-linear search has completed. The analysis cookbook illustrates how to do this.
+This is achieved by declaring a `Latent` class (subclass of `af.Latent`) on the `Analysis` class, whose
+`variables` are computed after the non-linear search has completed. The analysis cookbook illustrates how to do this.
 
-The example analysis used above includes a `compute_latent_variables` method that computes the FWHM of the Gaussian
+The example analysis used above declares a `Latent` (`LatentExample`) that computes the FWHM of the Gaussian
 profile.
 
 This leads to a number of noteworthy outputs:
