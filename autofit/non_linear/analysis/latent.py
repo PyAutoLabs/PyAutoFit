@@ -102,6 +102,9 @@ def latent_samples_from(
     )
     keys = latent.keys(analysis)
 
+    if not keys:
+        return None
+
     try:
 
         start_latent = time.time()
