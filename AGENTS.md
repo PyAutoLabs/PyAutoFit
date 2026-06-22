@@ -1,68 +1,100 @@
 # PyAutoFit — Agent Instructions
 
-**PyAutoFit** is a Python probabilistic programming language for model fitting and Bayesian inference.
+Canonical, agent-agnostic instructions for this repo. `CLAUDE.md` imports this
+file; any tool that does not process `@`-imports should read this directly.
 
-## Setup
+## What this repo is
+
+**PyAutoFit** (package `autofit`) is a probabilistic programming language for
+model composition, non-linear search, and Bayesian inference: `af.Model` /
+`af.Collection`, the `af.Analysis` interface, MCMC / nested-sampling / MLE
+searches, samples, aggregator, and a SQLAlchemy results database.
+
+Dependency direction: autofit depends on **autoconf** only. It does **not**
+import `autoarray`, `autogalaxy`, or `autolens` — never add such an import.
+Shared utilities (e.g. `test_mode`, `jax_wrapper`) belong in autoconf.
+
+## Related repos
+
+- **Source siblings:** PyAutoConf (upstream). PyAutoGalaxy / PyAutoLens are
+  downstream consumers (they build `Analysis` subclasses on autofit).
+- **autofit_workspace** — runnable tutorials/examples (`../autofit_workspace`).
+- **autofit_workspace_test** — integration + JAX/likelihood parity scripts.
+- **HowToFit** — the lecture-style tutorial series (`../HowToFit`).
+- **docs/** — Sphinx source; published to ReadTheDocs.
+
+## Quick commands
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[dev]"                       # install with dev/test extras
+python -m pytest test_autofit/                # full test suite
+python -m pytest test_autofit/non_linear/     # one focused subtree (add -s for output)
+black autofit/                                # formatter (advisory — not gated)
 ```
 
-## Running Tests
-
-```bash
-python -m pytest test_autofit/
-python -m pytest test_autofit/non_linear/
-python -m pytest test_autofit/mapper/
-```
-
-### Sandboxed / Codex runs
+In a sandboxed / restricted environment, point numba and matplotlib at
+writable caches:
 
 ```bash
 NUMBA_CACHE_DIR=/tmp/numba_cache MPLCONFIGDIR=/tmp/matplotlib python -m pytest test_autofit/
 ```
 
-## Key Architecture
+## CI / definition of green
 
-- **Non-linear searches** (`non_linear/search/`): MCMC (emcee), nested sampling (dynesty, nautilus), MLE (LBFGS, BFGS, drawer)
-- **Model composition** (`mapper/`): `af.Model`, `af.Collection`, prior distributions
-- **Analysis** (`non_linear/analysis/`): base `af.Analysis` class with `log_likelihood_function`
-- **Aggregator** (`aggregator/`): results aggregation across runs
-- **Database** (`database/`): SQLAlchemy backend for results storage
-- **Graphical models** (`graphical/`): expectation propagation
+PRs must pass `pytest --cov` on the CI matrix (Python 3.12 **and** 3.13). There
+is no black/ruff/flake8 gate — formatting is advisory. (`requires-python` in
+`pyproject.toml` is `>=3.9`.)
 
-## Key Rules
+## Configuration & defaults
 
-- All files must use Unix line endings (LF)
-- Format with `black autofit/`
+autoconf supplies the packaged defaults under `autofit/config/`. Workspaces
+override them via their own `config/` directory; the test suite pushes a local
+config dir via `conf.instance.push(...)` in `test_autofit/conftest.py`. When a
+change adds a new config key, mirror it into the packaged defaults so
+downstream workspaces inherit it.
 
-## Working on Issues
+## Public API
+
+The public surface is defined authoritatively in `autofit/__init__.py` — read
+it rather than trusting a hand-maintained list. Canonical import:
+
+```python
+import autofit as af
+```
+
+Key subsystems: `non_linear/search/` (MCMC: emcee/zeus; nested: dynesty,
+nautilus, NSS; MLE: LBFGS/BFGS/drawer), `mapper/` (model + priors),
+`non_linear/analysis/` (`af.Analysis.log_likelihood_function`), `aggregator/`,
+`database/` (SQLAlchemy), `graphical/` (expectation propagation),
+`interpolator/`.
+
+## Key rules / footguns
+
+- Import direction: autoconf only — never `autoarray` / `autogalaxy` /
+  `autolens`.
+- The `[nss]` extra (for `af.NSS`) needs a pinned **handley-lab/blackjax** fork
+  installed manually *after* the extras step; that fork conflicts with the
+  mainline `blackjax` pinned in `[optional]`. Do not naively combine or bump
+  them — see the install notes in `pyproject.toml`.
+- All files use Unix line endings (LF, `\n`) — never `\r\n`.
+
+## Working on issues
 
 1. Read the issue description and any linked plan.
-2. Identify affected files and write your changes.
-3. Run the full test suite: `python -m pytest test_autofit/`
-4. Ensure all tests pass before opening a PR.
-5. If changing public API, note the change in your PR description — downstream packages (PyAutoArray, PyAutoGalaxy, PyAutoLens) and workspaces may need updates.
-## Never rewrite history
+2. Identify affected files and make the change.
+3. Run the full suite: `python -m pytest test_autofit/`.
+4. If you changed public API, say so explicitly — downstream packages
+   (PyAutoGalaxy, PyAutoLens) and the workspaces may need updates.
+5. Ensure all tests pass before opening a PR.
 
-NEVER perform these operations on any repo with a remote:
+## Clean state
 
-- `git init` in a directory already tracked by git
-- `rm -rf .git && git init`
-- Commit with subject "Initial commit", "Fresh start", "Start fresh", "Reset
-  for AI workflow", or any equivalent message on a branch with a remote
-- `git push --force` to `main` (or any branch tracked as `origin/HEAD`)
-- `git filter-repo` / `git filter-branch` on shared branches
-- `git rebase -i` rewriting commits already pushed to a shared branch
+Never rewrite history on a repo with a remote (no `git init` over a tracked
+tree, no force-push to `main`, no rebasing pushed shared branches). To reset a
+dirty tree the only correct sequence is:
 
-If the working tree needs a clean state, the **only** correct sequence is:
-
-    git fetch origin
-    git reset --hard origin/main
-    git clean -fd
-
-This applies equally to humans, local Claude Code, cloud Claude agents, Codex,
-and any other agent. The "Initial commit — fresh start for AI workflow" pattern
-that appeared independently on origin and local for three workspace repos is
-exactly what this rule prevents — it costs ~40 commits of redundant local work
-every time it happens.
+```bash
+git fetch origin
+git reset --hard origin/main
+git clean -fd
+```
