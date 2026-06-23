@@ -1,25 +1,10 @@
 # Copilot Coding Agent Instructions
 
-You are working on **PyAutoFit**, a Python probabilistic programming library for model fitting and Bayesian inference.
+You are working on **PyAutoFit**, a probabilistic programming library for model
+composition and non-linear search / Bayesian inference (package `autofit`).
 
-## Key Rules
-
-- Run tests after every change: `python -m pytest test_autofit/`
-- Format code with `black autofit/`
-- All files must use Unix line endings (LF, `\n`)
-- If changing public API (function signatures, class names, import paths), clearly document what changed in your PR description — downstream packages depend on this
-
-## Architecture
-
-- `autofit/non_linear/search/` — Non-linear search algorithms (MCMC, nested sampling, MLE)
-- `autofit/mapper/` — Model composition and prior machinery
-- `autofit/graphical/` — Graphical models and expectation propagation
-- `autofit/aggregator/` — Results aggregation
-- `autofit/database/` — SQLAlchemy results database
-- `test_autofit/` — Test suite
-
-## Sandboxed runs
-
-```bash
-NUMBA_CACHE_DIR=/tmp/numba_cache MPLCONFIGDIR=/tmp/matplotlib python -m pytest test_autofit/
-```
+The canonical, agent-agnostic instructions for this repo live in **`AGENTS.md`** at
+the repository root — build and test commands, architecture, the model/search
+subsystems, and conventions (including the `[nss]` / blackjax install gotcha). Read
+it directly (Copilot does not process `@`-imports) and treat it as the single source
+of truth.

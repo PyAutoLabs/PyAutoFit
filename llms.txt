@@ -1,0 +1,20 @@
+# PyAutoFit
+
+> PyAutoFit (package `autofit`) is a probabilistic programming library for model composition and non-linear search / Bayesian inference — `af.Model`/`af.Collection`, the `af.Analysis` interface, MCMC / nested-sampling / MLE searches, and a results aggregator and database. This file is a signpost: it points you to the right resource by intent — use the API, learn it, or work on the library itself.
+
+## Use it (examples & tutorials)
+
+- [autofit_workspace navigator](https://github.com/PyAutoLabs/autofit_workspace/blob/main/llms.txt): end-to-end example scripts and notebooks per task — the paste-friendly task router. Send any "how do I compose a model / run a search / inspect results?" question here.
+- [HowToFit](https://github.com/PyAutoLabs/HowToFit): from-first-principles lecture series on model fitting and Bayesian inference.
+
+## API reference & docs
+
+- [PyAutoFit documentation (ReadTheDocs)](https://pyautofit.readthedocs.io/en/latest/): API reference, feature overviews, and the installation guide.
+
+## Work on it (contributors / coding agents)
+
+- [AGENTS.md](./AGENTS.md): build, tests, architecture, and conventions.
+
+## Ecosystem
+
+- Built on PyAutoConf (config); used by PyAutoGalaxy and PyAutoLens, which build `Analysis` subclasses on it.
