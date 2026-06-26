@@ -3,7 +3,7 @@
 [![Project Status: Active](https://www.repostatus.org/badges/latest/active.svg)](https://www.repostatus.org/#active)
 [![Python Versions](https://img.shields.io/pypi/pyversions/autofit)](https://pypi.org/project/autofit/)
 [![PyPI Version](https://img.shields.io/pypi/v/autofit.svg)](https://pypi.org/project/autofit/)
-[![Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.6.25.641/notebooks/overview/overview_1_the_basics.ipynb)
+[![Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.6.26.642/notebooks/overview/overview_1_the_basics.ipynb)
 [![Tests](https://github.com/PyAutoLabs/PyAutoFit/actions/workflows/main.yml/badge.svg)](https://github.com/PyAutoLabs/PyAutoFit/actions)
 [![Build](https://github.com/PyAutoLabs/PyAutoBuild/actions/workflows/release.yml/badge.svg)](https://github.com/PyAutoLabs/PyAutoBuild/actions)
 [![Documentation Status](https://readthedocs.org/projects/pyautofit/badge/?version=latest)](https://pyautofit.readthedocs.io/en/latest/?badge=latest)
@@ -11,7 +11,7 @@
 
 [Installation Guide](https://pyautofit.readthedocs.io/en/latest/installation/overview.html) |
 [readthedocs](https://pyautofit.readthedocs.io/en/latest/index.html) |
-[Introduction on Colab](https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.6.25.641/notebooks/overview/overview_1_the_basics.ipynb) |
+[Introduction on Colab](https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.6.26.642/notebooks/overview/overview_1_the_basics.ipynb) |
 [HowToFit](https://github.com/PyAutoLabs/HowToFit)
 
 **PyAutoFit** is a Python based probabilistic programming language for model fitting and Bayesian inference
@@ -31,7 +31,7 @@ notably [a big data framework for Bayesian hierarchical analysis](https://pyauto
 The following links are useful for new starters:
 
 - [The PyAutoFit readthedocs](https://pyautofit.readthedocs.io/en/latest), which includes an [installation guide](https://pyautofit.readthedocs.io/en/latest/installation/overview.html) and an overview of **PyAutoFit**'s core features.
-- [The introduction Jupyter Notebook on Colab](https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.6.25.641/notebooks/overview/overview_1_the_basics.ipynb), where you can try **PyAutoFit** in a web browser (without installation).
+- [The introduction Jupyter Notebook on Colab](https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.6.26.642/notebooks/overview/overview_1_the_basics.ipynb), where you can try **PyAutoFit** in a web browser (without installation).
 - [The autofit_workspace GitHub repository](https://github.com/PyAutoLabs/autofit_workspace), which includes example scripts demonstrating **PyAutoFit**'s features.
 - [The standalone HowToFit repository](https://github.com/PyAutoLabs/HowToFit), a series of Jupyter notebook lectures which give new users a step-by-step introduction to **PyAutoFit**.
 
