@@ -142,7 +142,7 @@ def save_abc(pickler, obj):
     pickle._Pickler.save_type(pickler, obj)
 
 
-__version__ = "2026.6.26.642"
+__version__ = "2026.6.29.643"
 
 from autoconf import check_version
 
