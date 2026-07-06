@@ -96,6 +96,11 @@ class TestTestModeOutputPath:
         paths = af.DirectoryPaths(name="name", path_prefix="prefix")
         assert "test_mode" not in paths.output_path.parts
 
+    def test_output_path_excludes_segment_when_env_zero(self, monkeypatch):
+        monkeypatch.setenv("PYAUTO_TEST_MODE", "0")
+        paths = af.DirectoryPaths(name="name", path_prefix="prefix")
+        assert "test_mode" not in paths.output_path.parts
+
     def test_make_path_contains_segment_when_env_set(self, monkeypatch):
         monkeypatch.setenv("PYAUTO_TEST_MODE", "2")
         paths = af.DirectoryPaths(name="name", path_prefix="prefix")
