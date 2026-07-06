@@ -18,9 +18,11 @@ name: NSS install smoke
 
 on:
   pull_request:
-  schedule:
-    # Sundays at 03:00 UTC — quiet hours, catches upstream drift weekly.
-    - cron: '0 3 * * 0'
+  workflow_dispatch:
+  # --- PAUSED 2026-07-06: routine cron disabled org-wide; re-enable by uncommenting ---
+  # schedule:
+  #   # Sundays at 03:00 UTC — quiet hours, catches upstream drift weekly.
+  #   - cron: '0 3 * * 0'
 
 jobs:
   fresh_venv_install:
