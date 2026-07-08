@@ -388,6 +388,17 @@ class MeanField(Collection, Dict[Variable, AbstractMessage], Factor):
         return VariableData({v: dist.sample(n_samples) for v, dist in self.items()})
 
     def kl(self, mean_field: "MeanField") -> np.ndarray:
+        """
+        The KL divergence between two mean fields, summed over variables:
+
+            KL(self || mean_field) = Σᵢ KL( self[xᵢ] || mean_field[xᵢ] )
+
+        which is exact because both mean fields factorise over variables.
+
+        Direction contract: ``message.kl(other)`` means ``KL(message || other)``
+        for every message family. ``EPHistory`` uses this sum between
+        successive global mean fields as its convergence criterion.
+        """
         return sum(np.sum(dist.kl(mean_field[k])) for k, dist in self.items())
 
     __hash__ = Factor.__hash__
@@ -405,7 +416,44 @@ class MeanField(Collection, Dict[Variable, AbstractMessage], Factor):
         delta: Delta = 1.0,
         status: Status = Status(),
     ) -> Tuple["MeanField", Status]:
+        """
+        The EP factor update: given ``self`` = the newly-fitted model
+        distribution q* (the moment-matched projection of the tilted
+        distribution), divide out the cavity to recover the factor's new
+        message, damped by ``delta``:
 
+            q_a_new = (q*)^δ · (q_a_old)^(1−δ) / (cavity)^δ
+
+        which on natural parameters is an exponential moving average,
+
+            η_a ← (1 − δ)·η_a + δ·(η_q* − η_cavity)
+
+        ``delta`` may be a scalar or a per-variable ``MeanField`` of scalars
+        (see ``DynamicUpdater``). At ``delta == 1`` this reduces to the
+        undamped ``q* / cavity``.
+
+        The natural-parameter subtraction is not closed in the family (it can
+        produce e.g. a negative variance). If the result is invalid, the
+        invalid parameters are reverted per-parameter to ``last_dist`` via
+        ``update_invalid`` and the status is flagged ``BAD_PROJECTION``.
+
+        Parameters
+        ----------
+        cavity_dist
+            The cavity distribution: the product of every other factor's
+            messages on this factor's variables.
+        last_dist
+            The factor's previous message distribution ``q_a_old`` (required
+            when ``delta < 1`` and as the fallback for invalid projections).
+        delta
+            Damping coefficient in (0, 1]; scalar or per-variable MeanField.
+        status
+            Status carried through from the factor optimisation.
+
+        Returns
+        -------
+        The factor's new message distribution and the updated status.
+        """
         success, messages, _, flag = status
         updated = False
         try:
@@ -505,9 +553,9 @@ class FactorApproximation(AbstractNode):
         returns q⁺ᵃ(x₀), {xₐ: dq⁺ᵃ(x₀)/dxₐ}
 
     project_mean_field(mean_field, delta=1., status=Status())
-        for qᶠ = mean_field, finds qₐ such that qᶠₐ * q⁻ᵃ = qᶠ
-        delta controls how much to change from the original factor qₐ
-        so qʳₐ = (qᶠₐ)ᵟ * (qᶠₐ)¹⁻ᵟ
+        for qᶠ = mean_field, finds qᶠₐ such that qᶠₐ * q⁻ᵃ = qᶠ
+        delta controls how much to change from the previous factor
+        distribution qₐ, so qʳₐ = (qᶠₐ)ᵟ * (qₐ)¹⁻ᵟ
 
         returns qʳₐ, status
     """
