@@ -217,7 +217,35 @@ semantics: cavities within a sweep are stale relative to serial EP, so
 serial and parallel runs converge along different trajectories (to the
 same fixed points when EP converges).
 
-## 8. Reading
+## 8. The lowering contract (declarative → graph)
+
+`autofit.graphical` is two layers: the **inner layer** above (factor
+graphs, messages, EP updates — this document's §1–§7) and the
+**declarative layer** (`declarative/`: `FactorGraphModel`,
+`AnalysisFactor`, `HierarchicalFactor`) that scientists actually use.
+This section is the seam contract: what every declarative concept
+*lowers to* on the graph, and which inner-layer capabilities survive
+the translation. When either layer changes, this table is the thing to
+re-verify (see the seam tests in
+`test_autofit/graphical/test_declarative_deterministic.py`).
+
+| Declarative concept | Lowers to | Notes / invariants |
+|---|---|---|
+| `FactorGraphModel(*factors)` | `FactorGraph` = the product Eq. (1) | one graph; `mean_field_approximation()` builds the `EPMeanField` |
+| `AnalysisFactor(prior_model, analysis, optimiser)` | one `Factor` whose value is `analysis.log_likelihood_function` on the instance built from its variables | carries its own tilted-fit optimiser (§3.2) |
+| each free `Prior` | one graph `Variable` **and** one `PriorFactor` | priors are ordinary factors (§1); `PriorFactor` currently wraps the message's bound `factor` method, which strips the exact-update hooks — the conjugate update of §3.2 is *not* auto-selected declaratively (tracked: #1337 / plan #1338 WP1) |
+| the *same prior object* assigned to several models | one shared `Variable` connecting those factors | this is how information flows between datasets |
+| compound prior (`prior_a * x + prior_b`, `mapper/prior/arithmetic/`) | **no graph variable** — the arithmetic is evaluated at instance-creation inside every factor that references it; only its component priors are variables | the relation is enforced *exactly* inside each tilted fit (no extra approximation — cf. §6); consequently the compound quantity has no message, no marginal, no evidence contribution of its own. (A `model.<property>` sugar for building these was deliberately reverted in `be6411755`.) |
+| `HierarchicalFactor` | one `Factor` per drawn variable (plus the distribution's parameter variables) | deliberate dimensionality choice |
+| — (no declarative expression) | `Factor(..., factor_out=v)` graph-level deterministic variables (§6.1) | **not reachable** from the declarative layer, by design as of the 2026-07 review (Phase 5, #1336): it trades the exact in-factor relation for a factorised q(v) with messages |
+
+Contract for contributors: a new statistical capability lands in the
+inner layer **together with** its row in this table — either a
+declarative expression, or an explicit "not exposed" entry with the
+reason. Capabilities that exist below but are silently absent above
+(the `PriorFactor` exact-hooks row) are the seam's known failure mode.
+
+## 9. Reading
 
 - T. Minka (2001), *Expectation Propagation for Approximate Bayesian
   Inference* — the algorithm of §3.
