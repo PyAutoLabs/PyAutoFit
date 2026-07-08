@@ -1,4 +1,5 @@
 import math
+import warnings
 
 import numpy as np
 import pytest
@@ -214,6 +215,30 @@ class TestLogUniformPrior:
         )
         assert log_uniform.log_prior_from_value(value=4.0) == pytest.approx(
             -np.log(4.0), 1.0e-12
+        )
+
+    def test__log_prior_from_value__non_positive_returns_neg_inf(self):
+        # Regression (PyAutoHeart #27 / release run 28784914443): Emcee's stretch
+        # move proposes physical values that can go non-positive for a LogUniform
+        # parameter. `-log(value)` of a non-positive value is NaN, which propagated
+        # into the summed figure-of-merit and crashed the search with
+        # "ValueError: Probability function returned NaN". Non-positive values must
+        # return -inf (zero density -> the move is rejected), and evaluating the
+        # log-prior must not emit a NumPy "invalid value in log" RuntimeWarning.
+        log_uniform = af.LogUniformPrior(lower_limit=1e-3, upper_limit=1e3)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", category=RuntimeWarning)
+            assert log_uniform.log_prior_from_value(value=-1.0) == float("-inf")
+            assert log_uniform.log_prior_from_value(value=0.0) == float("-inf")
+
+        # Positive values are unchanged: the NumPy path stays unnormalised and
+        # unbounded, returning -log(value) regardless of (lower_limit, upper_limit).
+        assert log_uniform.log_prior_from_value(value=10.0) == pytest.approx(
+            -np.log(10.0), 1.0e-12
+        )
+        assert log_uniform.log_prior_from_value(value=1.0e4) == pytest.approx(
+            -np.log(1.0e4), 1.0e-12
         )
 
     def test__lower_limit_zero_or_below_raises_error(self):
