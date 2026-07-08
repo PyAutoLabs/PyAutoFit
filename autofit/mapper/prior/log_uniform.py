@@ -123,10 +123,21 @@ class LogUniformPrior(Prior):
         used by ``UniformPrior.log_prior_from_value`` which drops ``-log(b - a)``
         to return ``0.0``.
 
-        Out-of-support (``value`` outside ``[lower_limit, upper_limit]``) returns
-        ``-inf`` on the JAX path; the NumPy path returns ``-log(value)`` without
-        bounds-checking to mirror the existing ``UniformPrior`` NumPy semantics
-        which trust the search to stay inside bounds.
+        Non-positive ``value`` (``value <= 0``) returns ``-inf``. Emcee's stretch
+        move proposes physical values that can leave the support and go
+        non-positive; ``-log`` of a non-positive value is ``NaN``, which propagates
+        into the summed figure-of-merit and crashes the search with
+        ``ValueError: Probability function returned NaN``. Returning ``-inf``
+        (zero density -> rejected move) keeps the figure-of-merit finite. The
+        "double where" pattern (a safe surrogate inside the ``log``) ensures no
+        ``log`` of a non-positive value is evaluated, avoiding NumPy
+        ``RuntimeWarning``s.
+
+        The NumPy path is otherwise unnormalised and unbounded: for any positive
+        ``value`` it returns ``-log(value)`` regardless of ``[lower_limit,
+        upper_limit]`` (dropping the normalisation constant, matching
+        ``UniformPrior``'s convention of returning ``0.0``). The JAX path
+        additionally returns ``-inf`` outside ``[lower_limit, upper_limit]``.
 
         Parameters
         ----------
@@ -137,7 +148,8 @@ class LogUniformPrior(Prior):
             Array-module to dispatch on (``numpy`` or ``jax.numpy``). Default ``numpy``.
         """
         if xp is np:
-            return -np.log(value)
+            positive = value > 0.0
+            return xp.where(positive, -xp.log(xp.where(positive, value, 1.0)), -xp.inf)
         in_bounds = (value >= self.lower_limit) & (value <= self.upper_limit)
         return xp.where(in_bounds, -xp.log(value), -xp.inf)
 
