@@ -295,3 +295,4 @@ test_autofit/output/non_linear/dynesty/dynesty_static[nlive_150__bound_multi_vol
 
 test_autofit/tools/files/aggregator/phase/
 test_autofit/tools/files/aggregator/phase_completed/
+docs/api/_autosummary

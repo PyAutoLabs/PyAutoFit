@@ -43,6 +43,7 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
     "numpydoc",
+    "sphinx_autodoc_typehints",
     # External stuff
     "myst_parser",
     "sphinx_copybutton",
@@ -50,6 +51,9 @@ extensions = [
     "sphinx_inline_tabs",
 ]
 templates_path = ["_templates"]
+
+set_type_checking_flag = True  # Enable 'expensive' imports for sphinx_autodoc_typehints
+add_module_names = False  # Remove namespaces from class/method signatures
 
 # -- Options for extlinks ----------------------------------------------------
 
@@ -78,14 +82,19 @@ myst_enable_extensions = [
 myst_heading_anchors = 3
 
 autosummary_generate = True
+autosummary_imported_members = True
 autodoc_member_order = "bysource"
-autodoc_default_flags = ["members"]
-
-autoclass_content = "both"
+autodoc_default_options = {
+    "members": True,
+    "undoc-members": True,
+    "show-inheritance": True,
+}
+autodoc_class_signature = "separated"
+autoclass_content = "init"
 
 numpydoc_show_class_members = False
 numpydoc_show_inherited_class_members = False
-numpydoc_class_members_toctree = False
+numpydoc_class_members_toctree = True
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
@@ -109,18 +118,12 @@ html_show_copyright = True
 # pygments_dark_style = "monokai"
 add_function_parentheses = False
 
-html_context = {
-    "menu_links_name": "Repository",
-    "doc_path": "docs",
-    "github_project": "pyautofit",
-    "github_repo": "pyautofit",
-    "github_version": "master",
-}
 language = "en"
-
-html_static_path = ["_static"]
-html_css_files = ["pied-piper-admonition.css"]
 
 from sphinx.builders.html import StandaloneHTMLBuilder
 
 StandaloneHTMLBuilder.supported_image_types = ["image/gif", "image/png", "image/jpeg"]
+
+typehints_fully_qualified = False
+always_document_param_types = False
+typehints_document_rtype = False
