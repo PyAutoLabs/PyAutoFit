@@ -140,7 +140,6 @@ test_autofit/config/priors/old
 
 # docs
 docs/_build
-docs/_static
 docs/_templates
 docs/generated
 docs/api/generated
@@ -279,7 +278,6 @@ test_autofit/config/priors/old
 
 # docs
 docs/_build
-docs/_static
 docs/_templates
 docs/generated
 docs/api/generated
