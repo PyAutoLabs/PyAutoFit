@@ -298,6 +298,14 @@ def test_full_hierachical(data):
         },
     )
 
+    # This fits a *marginal* hierarchical EP model whose Laplace refinement draws
+    # stochastic samples from the global np.random state (n_refine=3 via
+    # NormalMessage.sample). The fit sits near a convergence boundary, so its
+    # recovered fixed point (good vs sigma-collapse) depends on the ambient RNG
+    # state left by whatever ran before — an inherently stochastic test. Seed here
+    # so the fit is reproducible; this is the pragmatic fix (see PyAutoFit #1352).
+    np.random.seed(0)
+
     laplace = graph.LaplaceOptimiser()
     ep_opt = graph.EPOptimiser(model, default_optimiser=laplace)
     new_approx = ep_opt.run(model_approx, max_steps=10)
