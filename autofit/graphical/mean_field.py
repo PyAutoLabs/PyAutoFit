@@ -123,7 +123,9 @@ class MeanField(Collection, Dict[Variable, AbstractMessage], Factor):
         )
 
     @classmethod
-    def from_priors(cls, priors: Iterable[Prior]) -> "MeanField":
+    def from_priors(
+        cls, priors: Iterable[Prior], log_norm: float = 0.0
+    ) -> "MeanField":
         """
         Create a MeanField from a list of priors.
 
@@ -134,12 +136,22 @@ class MeanField(Collection, Dict[Variable, AbstractMessage], Factor):
         ----------
         priors
             A list of priors
+        log_norm
+            The log-normalisation carried by this mean field. For a
+            search-driven factor update this is the sampler's log-evidence of
+            the tilted-distribution fit — the per-factor ``Ẑₐ`` of README §5
+            Eq. (14), which the projection is documented to carry on
+            ``MeanField.log_norm`` (#1332 F7(b)). Defaults to 0.0 for callers
+            with no evidence to record.
 
         Returns
         -------
         A mean field
         """
-        return MeanField({prior: prior.message for prior in priors})
+        return MeanField(
+            {prior: prior.message for prior in priors},
+            log_norm=log_norm,
+        )
 
     pop = dict.pop
     values = dict.values

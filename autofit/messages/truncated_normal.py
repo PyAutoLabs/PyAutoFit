@@ -304,11 +304,21 @@ class TruncatedNormalMessage(AbstractMessage):
 
     def kl(self, dist : "TruncatedNormalMessage") -> float:
         """
-        Compute the Kullback-Leibler (KL) divergence between two truncated Gaussian distributions.
+        The exact Kullback-Leibler divergence KL(self || dist) between two
+        truncated Gaussians sharing the same support (#1332 F6).
 
-        This is an approximate KL divergence that assumes both distributions are truncated Gaussians
-        with the same support (i.e. the same lower and upper limits). If the supports differ, this
-        expression is invalid and should raise an error or be corrected for normalization.
+        With p, q truncated to the same ``[a, b]``, standardised bounds
+        ``α = (a − μ)/σ``, ``β = (b − μ)/σ``, truncation mass
+        ``Z = Φ(β) − Φ(α)`` and the *truncated* moments ``m_p``, ``V_p`` of p:
+
+            KL(p‖q) = log(σ_q/σ_p) + log(Z_q/Z_p)
+                      + ½·[ (V_p + (m_p − μ_q)²)/σ_q² − (V_p + (m_p − μ_p)²)/σ_p² ]
+
+        As the bounds recede (Z → 1, m_p → μ_p, V_p → σ_p²) this reduces to the
+        untruncated Gaussian KL. Previously this method *used* the untruncated
+        formula, which degrades as posterior mass approaches the bounds —
+        directly distorting the ``EPHistory`` convergence metric for models
+        built on ``af.TruncatedGaussianPrior`` (e.g. HowToFit chapter 3).
 
         Parameters
         ----------
@@ -323,10 +333,29 @@ class TruncatedNormalMessage(AbstractMessage):
         if (self.lower_limit != dist.lower_limit) or (self.upper_limit != dist.upper_limit):
             raise ValueError("KL divergence between truncated Gaussians with different support is not implemented.")
 
+        from scipy.stats import norm, truncnorm
+
+        a_p = (self.lower_limit - self.mean) / self.sigma
+        b_p = (self.upper_limit - self.mean) / self.sigma
+        a_q = (self.lower_limit - dist.mean) / dist.sigma
+        b_q = (self.upper_limit - dist.mean) / dist.sigma
+
+        log_Z_p = np.log(norm.cdf(b_p) - norm.cdf(a_p))
+        log_Z_q = np.log(norm.cdf(b_q) - norm.cdf(a_q))
+
+        # Truncated mean and variance of p (scipy returns them for the
+        # standardised bounds with loc/scale applied).
+        m_p, V_p = truncnorm.stats(
+            a_p, b_p, loc=self.mean, scale=self.sigma, moments="mv"
+        )
+
+        e_zp2 = (V_p + (m_p - self.mean) ** 2) / self.sigma**2
+        e_zq2 = (V_p + (m_p - dist.mean) ** 2) / dist.sigma**2
+
         return (
             np.log(dist.sigma / self.sigma)
-            + (self.sigma**2 + (self.mean - dist.mean) ** 2) / 2 / dist.sigma**2
-            - 1 / 2
+            + (log_Z_q - log_Z_p)
+            + 0.5 * (e_zq2 - e_zp2)
         )
 
     @classmethod

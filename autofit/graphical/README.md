@@ -185,15 +185,30 @@ The EP approximation to the model evidence factorises as:
     log ∫ ∏ₖ qₖ = Σₖ (log hₖ − A(ηₖ)) − ( log h − A(Σₖ ηₖ) )          (16)
 
 and the per-factor `Ẑₐ` is carried on `MeanField.log_norm` by the
-projection. (Audit note: as of 2026-07 the `log_norm` bookkeeping is
-broken in three places — issue #1332 finding F7 — so Eq. (15) should
-not be used for model comparison until those fixes land; the
-decomposition itself is correct.)
+projection: a search-driven factor update records the sampler's
+log-evidence of the tilted fit there (`AbstractSearch.optimise` →
+`MeanField.from_priors(..., log_norm=...)`).
+
+All three legs of the 2026-07 audit's finding F7 (#1332) are now fixed:
+(a) `MeanField.__truediv__`/`__pow__` propagate `log_norm` (#1351),
+(b) the search-driven projection records `Ẑₐ` (this section),
+(c) the truncated-normal log-partition is complete (#1345). Evidence-
+correct model comparison additionally requires **nested-sampling factor
+searches** — MCMC/MLE searches carry no evidence estimate and contribute
+`log_norm = 0`.
 
 ## 6. Deterministic variables
 
-Three composition mechanisms exist; they are **not** interchangeable
-and reconciling them is an open design item (EP review Phase 5):
+Three composition mechanisms exist; they are **not** interchangeable.
+**Decision (EP review Phase 5, #1336, 2026-07-10): keep all three —
+no unification, no deprecation.** The trade-off users should choose by:
+compound priors / shared variables are statistically *tighter* (the
+relation holds exactly inside each factor), while `factor_out` trades
+that exactness for modularity (the deterministic variable receives its
+own messages and `q(z)` factorises from its parents). The declarative
+surface for deterministic quantities is the explicit compound pattern
+(e.g. `model.sigma * 2.355`), pinned by the seam tests (§8); the
+`model.<property>` sugar from #1153 was deliberately retired.
 
 1. **Graph-level deterministic variables**: `Factor(..., factor_out=v)`
    declares outputs computed by the factor

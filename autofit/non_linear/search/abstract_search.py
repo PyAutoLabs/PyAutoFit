@@ -367,7 +367,22 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
 
         result = self.fit(model=model, analysis=analysis)
 
-        new_model_dist = MeanField.from_priors(result.projected_model.priors)
+        # Record the sampler's log-evidence of this tilted-distribution fit on
+        # the projected mean field — the per-factor Ẑₐ that README §5 documents
+        # `MeanField.log_norm` as carrying (#1332 F7(b)). Previously always 0,
+        # so `EPMeanField.log_evidence` could not be trusted for model
+        # comparison in sampler-driven EP fits. Searches with no evidence
+        # estimate (MCMC / MLE) yield None and keep the 0.0 default — evidence-
+        # correct model comparison requires nested-sampling factor searches.
+        # (Both levels guarded: e.g. StaticResult carries no samples at all.)
+        log_evidence = getattr(
+            getattr(result, "samples", None), "log_evidence", None
+        )
+
+        new_model_dist = MeanField.from_priors(
+            result.projected_model.priors,
+            log_norm=log_evidence if log_evidence is not None else 0.0,
+        )
 
         status.result = result
 
