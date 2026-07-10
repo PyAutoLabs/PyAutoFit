@@ -76,65 +76,13 @@ def diag_sr1_update(
     return state1
 
 
-def diag_sr1_update_(
-    state1: OptimisationState, state: OptimisationState, tol=1e-8, **kwargs
-) -> OptimisationState:
-    yk = VariableData.sub(state1.gradient, state.gradient)
-    dk = VariableData.sub(state1.parameters, state.parameters)
-    Bk = state.hessian
-    zk = yk + Bk * dk
-    dzk = dk * zk
-    # alpha = -zk.dot(dk) / dzk.dot(dzk)
-    alpha = -(zk * dk).var_sum()
-    tols = tol * dk.var_norm() ** 2 * zk.var_norm() ** 2
-    for v, d in (dzk ** 2).var_sum().items():
-        if d > tols[v]:
-            alpha[v] /= d
-        else:
-            alpha[v] = 0.0
-
-    Bk = Bk.diagonalupdate((zk ** 2) * alpha)
-
-    state1.hessian = Bk
-    return state1
-
-
-def diag_sr1_bfgs_update(
-    state1: OptimisationState, state: OptimisationState, **kwargs
-) -> OptimisationState:
-    yk = VariableData.sub(state1.gradient, state.gradient)
-    dk = VariableData.sub(state1.parameters, state.parameters)
-    Bk = state.hessian
-    zk = yk + Bk * dk
-    dzk = dk * zk
-
-
-def bfgs1_update(
-    state1: OptimisationState, state: OptimisationState, **kwargs,
-) -> OptimisationState:
-    """
-    y_k = g_{k+1} - g{k}
-    d_k = x_{k+1} - x{k}
-    B_{k+1} = B_{k}
-    + \frac
-        {y_{k}y_{k}^T}
-        {y_{k}^T d_{k}}}
-    - \frac
-        {B_{k} d_{k} (B_{k} d_{k})^T}
-        {d_{k}^T B_{k} d_{k}}}}
-    """
-    yk = VariableData.sub(state.gradient, state1.gradient)
-    dk = VariableData.sub(state1.parameters, state.parameters)
-    Bk = state.hessian
-
-    ykTdk = yk.dot(dk)
-    Bdk = Bk.dot(dk)
-    dkTBdk = -VariableData.dot(Bdk, dk)
-
-    state1.hessian = Bk.update(
-        (yk, VariableData(yk).div(ykTdk)), (Bdk, VariableData(Bdk).div(dkTBdk))
-    )
-    return state1
+# Dead/suspect quasi-Newton variants removed (#1332 F8):
+# - `diag_sr1_update_` — never referenced anywhere in the codebase.
+# - `diag_sr1_bfgs_update` — computed locals then implicitly returned None
+#   (would have nuked the optimiser state if ever wired in).
+# - `bfgs1_update` — disagreed with the exported `bfgs_update` on the sign of
+#   the y_k difference and carried a stray minus on d_k^T B d_k; the exported
+#   `bfgs_update` below is the verified-correct implementation.
 
 
 def bfgs_update(

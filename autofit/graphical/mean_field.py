@@ -320,19 +320,28 @@ class MeanField(Collection, Dict[Variable, AbstractMessage], Factor):
     __mul__ = prod
 
     def __truediv__(self, other: "MeanField") -> "MeanField":
+        # log_norm must be passed by keyword: the second positional ctor slot
+        # is `plates`, and passing it positionally silently dropped the
+        # evidence AND stored a float in `_plates` (#1332 F1).
         return type(self)(
             {k: m / other.get(k, 1.0) for k, m in self.items()},
-            self.log_norm - other.log_norm,
+            log_norm=self.log_norm - other.log_norm,
         )
 
     def __pow__(self, other: Union[float, "MeanField"]) -> "MeanField":
         if isinstance(other, Real):
             return type(self)(
-                {k: m ** other for k, m in self.items()}, self.log_norm * other
+                {k: m ** other for k, m in self.items()},
+                log_norm=self.log_norm * other,
             )
+        # Per-variable exponents: there is no meaningful scalar aggregate of
+        # the two mean-field log_norms (the per-message log_norms carry
+        # through each message's __pow__); the previous
+        # `self.log_norm * other.log_norm` was not a meaningful quantity and
+        # additionally landed in the plates slot (#1332 F1).
         return type(self)(
             {key: value ** other[key] for key, value in self.items()},
-            self.log_norm * other.log_norm,
+            log_norm=0.0,
         )
 
     def log_normalisation(self, other: "MeanField") -> float:
