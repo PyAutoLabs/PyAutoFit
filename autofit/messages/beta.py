@@ -343,13 +343,15 @@ class BetaMessage(AbstractMessage):
         from scipy.special import betaln
         from scipy.special import psi
 
-        # TODO check this is correct
-        # https://arxiv.org/pdf/0911.4863.pdf
+        # Family-wide contract (#1332 F2): kl(self, dist) = KL(self || dist).
+        # Previously P was taken from `dist` and Q from `self`, computing the
+        # reverse direction KL(dist || self) despite this docstring.
+        # Reference: https://arxiv.org/pdf/0911.4863.pdf
         if self._support != dist._support:
             raise TypeError('Support does not match')
 
-        aP, bP = dist.parameters
-        aQ, bQ = self.parameters
+        aP, bP = self.parameters
+        aQ, bQ = dist.parameters
         return (
                 betaln(aQ, bQ) - betaln(aP, bP)
                 - (aQ - aP) * psi(aP)

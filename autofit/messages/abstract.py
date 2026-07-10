@@ -350,7 +350,12 @@ class AbstractMessage(MessageInterface, ABC):
                 np.where(valid, p, p_safe) for p, p_safe in zip(self, other)
             )
         else:
-            # TODO: Fairly certain this would not work
+            # Scalar (ndim == 0) messages: `valid` is a scalar bool and
+            # messages iterate over their parameters, so this all-or-nothing
+            # swap is correct — keep self's parameters when valid, take
+            # other's when not. Empirically verified (#1332 F4); the previous
+            # "fairly certain this would not work" TODO was a stale false
+            # alarm, now pinned by unit tests on both branches.
             valid_parameters = iter(self if valid else other)
         cls = self._Base_class or type(self)
         new = cls(

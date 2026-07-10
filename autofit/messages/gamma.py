@@ -86,12 +86,21 @@ class GammaMessage(AbstractMessage):
         return cls(alpha, beta, **kwargs)
 
     def kl(self, dist):
+        """
+        The Kullback-Leibler divergence KL(self || dist).
+
+        Family-wide contract (#1332 F2): ``message.kl(other)`` returns
+        ``KL(message || other)``, matching ``NormalMessage.kl``. Previously
+        this method assigned ``P, Q = dist, self`` and returned the reverse
+        direction ``KL(dist || self)`` — a graph mixing Normal and Gamma
+        variables summed KLs measured in opposite directions inside
+        ``EPHistory.kl_divergence``.
+
+        Reference: https://arxiv.org/pdf/0911.4863.pdf
+        """
         from scipy import special
 
-        P, Q = dist, self
-        logP = np.log(P.alpha)
-        # TODO check this is correct
-        # https://arxiv.org/pdf/0911.4863.pdf
+        P, Q = self, dist
         return (
                 (P.alpha - Q.alpha) * special.psi(P.alpha)
                 - special.gammaln(P.alpha)
