@@ -37,6 +37,27 @@ class Prior(Variable, ABC, ArithmeticMixin):
 
         self.width_modifier = None
 
+    def log_normalisation(self, xp=np) -> float:
+        """
+        The additive constant dropped from :meth:`log_prior_from_value`.
+
+        By contract ``log_prior_from_value`` returns the log prior density *up to
+        an additive constant*: the value-independent normaliser is dropped because
+        it is irrelevant to posterior shape (it cancels in the Metropolis ratio,
+        and nested samplers use the unit-cube transform rather than the prior
+        density). This is harmless for sampling but means absolute ``log_prior``
+        values are not comparable across prior types.
+
+        For code that needs the *fully normalised* log density — e.g. evidence or
+        Bayes-factor arithmetic — the normalised value is::
+
+            log_prior_from_value(value) + log_normalisation()
+
+        The default is ``0.0`` (constant unknown / already normalised). Priors with
+        a known closed-form normaliser override this.
+        """
+        return 0.0
+
     @classmethod
     def tree_unflatten(cls, aux_data, children):
         """

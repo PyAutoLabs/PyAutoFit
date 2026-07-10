@@ -133,6 +133,21 @@ class TruncatedGaussianPrior(Prior):
                 f"upper_limit = {self.upper_limit}"
                 )
 
+    def log_normalisation(self, xp=np) -> float:
+        """The constant ``-log(sigma) - 0.5*log(2*pi) - log(Z)`` dropped from
+        ``TruncatedNormalMessage.log_prior_from_value``, where
+        ``Z = Phi((upper - mean)/sigma) - Phi((lower - mean)/sigma)`` is the
+        truncation mass. See ``Prior.log_normalisation``."""
+        if xp.__name__.startswith("jax"):
+            import jax.scipy.stats as jstats
+            norm = jstats.norm
+        else:
+            from scipy.stats import norm
+        a = (self.lower_limit - self.mean) / self.sigma
+        b = (self.upper_limit - self.mean) / self.sigma
+        Z = norm.cdf(b) - norm.cdf(a)
+        return -xp.log(self.sigma) - 0.5 * xp.log(2.0 * np.pi) - xp.log(Z)
+
     def value_for(self, unit, xp=np):
         """
         Map a unit value in [0, 1] to a physical value drawn from this truncated Gaussian prior.
