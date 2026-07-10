@@ -1053,6 +1053,20 @@ class AbstractPriorModel(AbstractModel):
                 width = r * mean
             else:
                 width = width_modifier(mean)
+                if width <= 0:
+                    path = ".".join(map(str, self.path_for_prior(prior)))
+                    raise exc.PriorException(
+                        f"Prior passing produced a non-positive width "
+                        f"(sigma={width}) for parameter '{path}' (posterior "
+                        f"median mean={mean}). This happens when the posterior "
+                        "median is zero and the parameter's width modifier is "
+                        "relative with no floor. Configure an "
+                        "AbsoluteWidthModifier or set absolute_floor on the "
+                        "RelativeWidthModifier for this parameter in the "
+                        "priors config. (Explicit a=/r= widths are exempt from "
+                        "this check and keep their historical point-mass "
+                        "semantics at mean=0.)"
+                    )
 
             if no_limits:
                 limits = (float("-inf"), float("inf"))
