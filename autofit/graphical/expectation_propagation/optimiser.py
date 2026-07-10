@@ -16,6 +16,7 @@ from autofit.mapper.identifier import Identifier
 from autofit.non_linear.paths import DirectoryPaths
 from autofit.non_linear.paths.abstract import AbstractPaths
 from autofit.tools.util import IntervalCounter
+from .diagnostics import EPDiagnostics, check_sigma_collapse, mean_field_summary
 from .factor_optimiser import AbstractFactorOptimiser, ExactFactorFit
 from .visualise import Visualise
 
@@ -206,6 +207,7 @@ class EPOptimiser:
 
             
         self.ep_history = ep_history or EPHistory()
+        self.diagnostics = EPDiagnostics()
 
         self.visualiser = None
         if paths is None:
@@ -340,6 +342,7 @@ class EPOptimiser:
                 model_approx, status = self.updater.update_model_approx(
                     new_model_dist, factor_approx, model_approx, status
                 )
+                self.diagnostics.snapshot(factor, model_approx, status)
                 if status and _should_log:
                     self._log_factor(factor)
 
@@ -352,12 +355,15 @@ class EPOptimiser:
                     self.visualiser()
                 if self.output_path and _should_output:
                     self._output_results(model_approx)
+                    self._output_diagnostics()
                 continue
             break  # stop iterations
 
         if self.paths:
             self.visualiser()
             self._output_results(model_approx)
+            self._output_diagnostics(final=True, model_approx=model_approx)
+        self._warn_sigma_collapse()
 
         return model_approx
 
@@ -368,6 +374,38 @@ class EPOptimiser:
         if self.paths:
             with open(self.output_path / "graph.results", "w+") as f:
                 f.write(self.factor_graph.make_results_text(model_approx))
+
+    def _output_diagnostics(
+        self, final: bool = False, model_approx: Optional[EPMeanField] = None
+    ):
+        """
+        Write the diagnostics CSVs (`ep_history.csv`, `mean_field_history.csv`)
+        and the mean-field evolution plot to the output folder. At the end of
+        a run (``final=True``) also write ``ep_diagnostics.results``: the
+        mean-field summary table plus any sigma-collapse warnings.
+        """
+        if not self.output_path:
+            return
+        self.diagnostics.write(self.output_path)
+        self.diagnostics.plot(self.output_path)
+
+        if final and model_approx is not None:
+            warnings_list = check_sigma_collapse(self.diagnostics)
+            with open(self.output_path / "ep_diagnostics.results", "w+") as f:
+                f.write(mean_field_summary(model_approx.mean_field))
+                f.write("\n")
+                if warnings_list:
+                    f.write("\nWARNINGS\n\n")
+                    f.write("\n".join(warnings_list))
+                    f.write("\n")
+
+    def _warn_sigma_collapse(self):
+        """
+        Log any sigma-collapse warnings (PyAutoFit #1332 F10) at the end of a
+        run — emitted regardless of whether output paths are enabled.
+        """
+        for warning in check_sigma_collapse(self.diagnostics):
+            logger.warning(warning)
 
 
 class ParallelEPOptimiser(EPOptimiser):
@@ -480,6 +518,7 @@ class ParallelEPOptimiser(EPOptimiser):
                     new_model_dist, factor_approx, model_approx, status
                 )
                 factor = factor_approx.factor
+                self.diagnostics.snapshot(factor, model_approx, status)
                 if status and _should_log:
                     self._log_factor(factor)
 
@@ -488,14 +527,19 @@ class ParallelEPOptimiser(EPOptimiser):
                     break  # callback controls convergence
 
             else:  # If no break do next iteration
-                if _should_visualise:
+                if self.visualiser and _should_visualise:
                     self.visualiser()
-                if _should_output:
+                if self.output_path and _should_output:
                     self._output_results(model_approx)
+                    self._output_diagnostics()
                 continue
             break  # stop iterations
 
-        self.visualiser()
-        self._output_results(model_approx)
+        if self.visualiser:
+            self.visualiser()
+        if self.output_path:
+            self._output_results(model_approx)
+            self._output_diagnostics(final=True, model_approx=model_approx)
+        self._warn_sigma_collapse()
 
         return model_approx
