@@ -106,13 +106,21 @@ class UniformPrior(Prior):
         Parameters
         ----------
         x
-            The value at which to evaluate the log PDF.
+            The value(s) at which to evaluate the log PDF. May be a scalar or a
+            numpy array.
         """
-        # TODO: handle x as a numpy array
-        if x == self.lower_limit:
-            x += epsilon
-        elif x == self.upper_limit:
-            x -= epsilon
+        # Nudge values sitting exactly on a boundary inwards by epsilon, where the
+        # PDF is otherwise undefined. The scalar path is kept bit-identical to the
+        # historical behaviour; the array path vectorises the same snap with
+        # ``np.where`` (the previous scalar-only ``==`` comparison raised on arrays).
+        if np.ndim(x) == 0:
+            if x == self.lower_limit:
+                x += epsilon
+            elif x == self.upper_limit:
+                x -= epsilon
+        else:
+            x = np.where(x == self.lower_limit, x + epsilon, x)
+            x = np.where(x == self.upper_limit, x - epsilon, x)
         return self.message.logpdf(x)
 
     def dict(self) -> dict:
@@ -177,6 +185,11 @@ class UniformPrior(Prior):
             return 0.0
         in_bounds = (value >= self.lower_limit) & (value <= self.upper_limit)
         return xp.where(in_bounds, xp.zeros_like(value), -xp.inf)
+
+    def log_normalisation(self, xp=np) -> float:
+        """The constant ``-log(upper - lower)`` dropped from ``log_prior_from_value``
+        (which returns ``0.0``). See ``Prior.log_normalisation``."""
+        return -xp.log(self.upper_limit - self.lower_limit)
 
     @property
     def limits(self) -> Tuple[float, float]:

@@ -95,8 +95,6 @@ class LogGaussianPrior(Prior):
         return cls(
             mean=(lower_limit + upper_limit) / 2,
             sigma=upper_limit - lower_limit,
-            lower_limit=lower_limit,
-            upper_limit=upper_limit,
         )
 
     def _new_for_base_message(self, message):
@@ -108,9 +106,7 @@ class LogGaussianPrior(Prior):
         """
         return LogGaussianPrior(
             *message.parameters,
-            lower_limit=self.lower_limit,
-            upper_limit=self.upper_limit,
-            id_=self.instance().id,
+            id_=self.id,
         )
 
     def value_for(self, unit, xp=np):
@@ -140,6 +136,12 @@ class LogGaussianPrior(Prior):
     @property
     def parameter_string(self) -> str:
         return f"mean = {self.mean}, sigma = {self.sigma}"
+
+    def log_normalisation(self, xp=np) -> float:
+        """The constant ``-log(sigma) - 0.5*log(2*pi)`` dropped from the Gaussian-in-log
+        density in ``log_prior_from_value`` (the value-dependent ``-log(value)``
+        change-of-variables Jacobian is kept). See ``Prior.log_normalisation``."""
+        return -xp.log(self.sigma) - 0.5 * xp.log(2.0 * np.pi)
 
     def log_prior_from_value(self, value, xp=np):
         """

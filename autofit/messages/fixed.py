@@ -54,12 +54,12 @@ class FixedMessage(AbstractMessage):
             return self.value
         return np.array([self.value])
 
-    logpdf_cache = {}
-
     def logpdf(self, x: np.ndarray) -> np.ndarray:
-        if x.shape not in FixedMessage.logpdf_cache:
-            FixedMessage.logpdf_cache[x.shape] = np.zeros_like(x)
-        return FixedMessage.logpdf_cache[x.shape]
+        # A fixed message contributes zero log-density everywhere. Return a
+        # fresh zero array each call: the previous class-level ``logpdf_cache``
+        # was an unbounded dict keyed on shape that also handed back an aliased
+        # mutable array, so mutating one result silently corrupted later calls.
+        return np.zeros_like(x)
 
     @cached_property
     def mean(self) -> np.ndarray:

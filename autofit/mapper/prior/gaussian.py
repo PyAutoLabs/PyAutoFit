@@ -114,6 +114,12 @@ class GaussianPrior(Prior):
         """
         return f"mean = {self.mean}, sigma = {self.sigma}"
 
+    def log_normalisation(self, xp=np) -> float:
+        """The constant ``-log(sigma) - 0.5*log(2*pi)`` dropped from the density-form
+        quadratic returned by ``NormalMessage.log_prior_from_value``. See
+        ``Prior.log_normalisation``."""
+        return -xp.log(self.sigma) - 0.5 * xp.log(2.0 * np.pi)
+
     def value_for(self, unit, xp=np):
         """
         Map a unit value in [0, 1] to a physical value drawn from this Gaussian prior.

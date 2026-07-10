@@ -30,11 +30,20 @@ class TruncatedNormalMessage(AbstractMessage):
         """
         Compute the log-partition function (normalizer) of the truncated Gaussian.
 
-        This is the log of the normalization constant Z of the truncated normal:
+        For the exponential-family interface this is the full cumulant, made of
+        two parts:
 
-            Z = Φ((b - μ)/σ) - Φ((a - μ)/σ)
+        1. the untruncated Gaussian log-partition ``A(η) = μ²/(2σ²) + log σ``
+           (identical to ``NormalMessage.log_partition``), and
+        2. the truncation-mass correction ``log Z`` with
+           ``Z = Φ((b - μ)/σ) - Φ((a - μ)/σ)``, where Φ is the standard normal
+           CDF and ``[a, b]`` are the truncation bounds.
 
-        where Φ is the standard normal CDF and [a, b] are the truncation bounds.
+        Previously only ``log Z`` was returned, dropping the Gaussian term. That
+        made the generic exponential-family pdf integrate to
+        ``σ·exp(μ²/2σ²)`` (e.g. 2.27 for the unit case) instead of 1.0 — the path
+        the EP machinery consumes. Sampling and ``log_prior_from_value`` use a
+        separate, correct path and were unaffected.
 
         Returns
         -------
@@ -43,10 +52,14 @@ class TruncatedNormalMessage(AbstractMessage):
         """
         from scipy.stats import norm
 
+        # Untruncated Gaussian log-partition — see NormalMessage.log_partition.
+        gaussian = (self.mean ** 2) / (2 * self.sigma ** 2) + xp.log(self.sigma)
+
         a = (self.lower_limit - self.mean) / self.sigma
         b = (self.upper_limit - self.mean) / self.sigma
         Z = norm.cdf(b) - norm.cdf(a)
-        return xp.log(Z) if Z > 0 else -xp.inf
+        log_Z = xp.log(Z) if Z > 0 else -xp.inf
+        return gaussian + log_Z
 
     log_base_measure = -0.5 * np.log(2 * np.pi)
 
@@ -472,9 +485,19 @@ class TruncatedNormalMessage(AbstractMessage):
         """
         Compute the log prior probability of a given physical value under this truncated Gaussian prior.
 
-        This accounts for truncation by normalizing the Gaussian density over the
-        interval [lower_limit, upper_limit], returning -inf if the value lies outside
-        these limits.
+        Returns ``log p(value)`` in density form, up to an additive constant, and
+        ``-inf`` for values outside ``[lower_limit, upper_limit]``.
+
+        The value-independent constants ``-log(sigma) - 0.5*log(2*pi)`` (the
+        Gaussian normaliser) and ``-log(Z)`` (the truncation mass) are dropped, so
+        this matches the constant-dropping convention already used by
+        ``NormalMessage.log_prior_from_value`` (and Uniform / LogUniform / LogGaussian).
+        Previously this method returned the *fully normalised* truncated density,
+        making it the odd one out — harmless to posterior shape (constants cancel
+        in the Metropolis ratio and nested samplers use the unit-cube transform),
+        but inconsistent for anyone reading absolute ``log_prior`` values or doing
+        evidence arithmetic. The dropped constant is recoverable via
+        ``TruncatedGaussianPrior.log_normalisation``.
 
         Parameters
         ----------
@@ -483,33 +506,18 @@ class TruncatedNormalMessage(AbstractMessage):
 
         Returns
         -------
-        The log prior probability of the given value, or -inf if outside truncation bounds.
+        The log prior density at the given value up to an additive constant, or
+        -inf if outside the truncation bounds.
         """
 
-        if xp.__name__.startswith("jax"):
-            import jax.scipy.stats as jstats
-            norm = jstats.norm
-        else:
-            from scipy.stats import norm
-
-        # Normalization term (truncation)
-        a = (self.lower_limit - self.mean) / self.sigma
-        b = (self.upper_limit - self.mean) / self.sigma
-        Z = norm.cdf(b) - norm.cdf(a)
-
-        # Log pdf
+        # Density-form quadratic, constants dropped (see docstring / NormalMessage).
         z = (value - self.mean) / self.sigma
-        log_pdf = (
-                -0.5 * z ** 2
-                - xp.log(self.sigma)
-                - 0.5 * xp.log(2.0 * xp.pi)
-        )
-        log_trunc_pdf = log_pdf - xp.log(Z)
+        log_pdf = -0.5 * z ** 2
 
-        # Truncation mask (must be xp.where for JAX)
+        # Truncation mask (must be xp.where for JAX).
         in_bounds = (self.lower_limit <= value) & (value <= self.upper_limit)
 
-        return xp.where(in_bounds, log_trunc_pdf, -xp.inf)
+        return xp.where(in_bounds, log_pdf, -xp.inf)
 
     def __str__(self):
         """

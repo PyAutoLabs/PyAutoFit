@@ -76,8 +76,13 @@ class GammaMessage(AbstractMessage):
     def from_mode(cls, mode, covariance, **kwargs):
         m, V = cls._get_mean_variance(mode, covariance)
 
-        alpha = 1 + m ** 2 * V  # match variance
-        beta = alpha / m  # match mean
+        # Match the requested mean m and variance V, consistent with the Normal
+        # family. For a Gamma, mean = alpha / beta and variance = alpha / beta**2,
+        # which inverts to alpha = m**2 / V, beta = m / V. The previous
+        # ``alpha = 1 + m**2 * V`` had the variance the wrong way up (requesting
+        # variance 0.25 produced 2.0, and 4.0 produced 0.235).
+        alpha = m ** 2 / V
+        beta = m / V
         return cls(alpha, beta, **kwargs)
 
     def kl(self, dist):

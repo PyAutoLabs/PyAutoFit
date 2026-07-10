@@ -26,16 +26,35 @@ def test__values(truncated_gaussian, unit, value):
     assert truncated_gaussian.value_for(unit) == pytest.approx(value, rel=0.1)
 
 @pytest.mark.parametrize(
-    "unit, value",
+    "value, expected",
     [
-        (0.01, -np.inf),
-        (1.0, 2.3026892553),
-        (2.0, -np.inf),
+        (0.01, -np.inf),   # below lower_limit -> out of support
+        (1.0, 0.0),        # at the mode (== mean): bare quadratic, constants dropped
+        (2.0, -np.inf),    # above upper_limit -> out of support
     ],
 )
-def test__log_prior_from_value(truncated_gaussian, unit, value):
+def test__log_prior_from_value(truncated_gaussian, value, expected):
+    # Drop-constants contract (#1331 Decision 4): log_prior_from_value returns the
+    # density-form quadratic -0.5*((x-mean)/sigma)**2 up to an additive constant,
+    # and -inf outside [lower_limit, upper_limit]. Previously this method was the
+    # odd one out, returning the fully normalised truncated density (2.30 at the
+    # mode); now it matches NormalMessage / Uniform / LogUniform / LogGaussian.
+    assert truncated_gaussian.log_prior_from_value(value) == pytest.approx(expected, abs=1e-9)
 
-    assert truncated_gaussian.log_prior_from_value(unit) == pytest.approx(value, rel=0.1)
+
+def test__log_normalisation_recovers_normalised_density(truncated_gaussian):
+    # The dropped constant is recoverable via log_normalisation: adding it back to
+    # log_prior_from_value must reproduce the fully normalised truncated-normal
+    # log-density (scipy.stats.truncnorm.logpdf). This is the evidence-user path.
+    mean, sigma, lower, upper = 1.0, 2.0, 0.95, 1.05
+    a, b = (lower - mean) / sigma, (upper - mean) / sigma
+    for value in (0.96, 1.0, 1.04):
+        recovered = (
+            truncated_gaussian.log_prior_from_value(value)
+            + truncated_gaussian.log_normalisation()
+        )
+        expected = truncnorm.logpdf(value, a=a, b=b, loc=mean, scale=sigma)
+        assert float(recovered) == pytest.approx(float(expected), rel=1e-9)
 
 
 # --- Numerical equivalence: new direct-ndtr path vs the OLD scipy.stats.norm
