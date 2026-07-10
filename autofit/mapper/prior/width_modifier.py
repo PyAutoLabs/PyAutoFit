@@ -22,9 +22,14 @@ class WidthModifier(ABC):
 
     @classmethod
     def from_dict(cls, width_modifier_dict):
-        return width_modifier_type_dict[width_modifier_dict["type"]](
-            value=width_modifier_dict["value"]
-        )
+        # Forward every key except "type" so optional keys (e.g. the
+        # RelativeWidthModifier absolute_floor) round-trip from config.
+        kwargs = {
+            key: value
+            for key, value in width_modifier_dict.items()
+            if key != "type"
+        }
+        return width_modifier_type_dict[width_modifier_dict["type"]](**kwargs)
 
     @abstractmethod
     def __call__(self, mean):
@@ -72,12 +77,47 @@ class WidthModifier(ABC):
             return RelativeWidthModifier(0.5)
 
     def __eq__(self, other):
-        return self.__class__ is other.__class__ and self.value == other.value
+        return self.__class__ is other.__class__ and self.dict == other.dict
 
 
 class RelativeWidthModifier(WidthModifier):
+    def __init__(self, value, absolute_floor=None):
+        """
+        Prior-passing width proportional to the magnitude of the posterior
+        median: ``sigma = value * abs(mean)`` (#1331 Decision 5).
+
+        ``abs`` guards the negative-median case, which previously produced a
+        negative sigma that flowed silently into the passed prior and flipped
+        its scale. For medians at (or very near) zero the relative width
+        collapses; set ``absolute_floor`` (here or via the ``width_modifier``
+        entry in the priors config) to impose a minimum width. Without a floor,
+        a zero width is rejected loudly at prior-passing time.
+
+        Parameters
+        ----------
+        value
+            The proportionality constant applied to ``abs(mean)``.
+        absolute_floor
+            Optional minimum width. When set, the returned width is
+            ``max(value * abs(mean), absolute_floor)``.
+        """
+        super().__init__(value)
+        self.absolute_floor = (
+            float(absolute_floor) if absolute_floor is not None else None
+        )
+
     def __call__(self, mean):
-        return self.value * mean
+        sigma = self.value * abs(mean)
+        if self.absolute_floor is not None:
+            sigma = max(sigma, self.absolute_floor)
+        return sigma
+
+    @property
+    def dict(self):
+        d = super().dict
+        if self.absolute_floor is not None:
+            d["absolute_floor"] = self.absolute_floor
+        return d
 
 
 class AbsoluteWidthModifier(WidthModifier):

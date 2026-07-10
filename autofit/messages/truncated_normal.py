@@ -88,7 +88,7 @@ class TruncatedNormalMessage(AbstractMessage):
         mean
             The mean (μ) of the normal distribution.
         sigma
-            The standard deviation (σ) of the distribution. Must be non-negative.
+            The standard deviation (σ) of the distribution. Must be strictly positive.
         log_norm
             An additive constant to the log probability of the message. Used internally for message-passing normalization.
             Default is 0.0.
@@ -96,7 +96,9 @@ class TruncatedNormalMessage(AbstractMessage):
             An optional unique identifier used to track the message in larger probabilistic graphs or models.
         """
         if (np.array(sigma) < 0).any():
-            raise exc.MessageException("Sigma cannot be negative")
+            raise exc.MessageException(
+                f"TruncatedNormalMessage sigma cannot be negative, got sigma={sigma}."
+            )
 
         super().__init__(
             mean,
