@@ -1,3 +1,45 @@
+"""
+Messages composed with deterministic transforms.
+
+A ``TransformedMessage`` represents a distribution over a *physical*
+variable as a base exponential-family message over a *base* variable plus
+a stack of invertible transforms. For example::
+
+    UniformPrior(0, 2)  =  TransformedMessage(
+        UniformNormalMessage,                        # base: N(0, 1) + Φ
+        LinearShiftTransform(shift=0, scale=2),      # base → physical
+    )
+
+Composition-order convention (the single most important fact in this
+module):
+
+- ``transforms`` are stored **innermost-first**: going base → physical
+  they apply in tuple order (first element first), so the outermost
+  transform — the last function applied — is the *last* tuple element.
+- ``_transform`` maps **physical → base** and therefore applies the
+  transforms in *reverse* tuple order, unwinding the outermost transform
+  (the last element) first.
+- ``_inverse_transform`` maps **base → physical** and applies
+  ``inv_transform`` in *forward* tuple order, rebuilding the composition
+  from the inside out.
+
+Worked example for ``UniformPrior(0, 2).value_for(0.5)`` (base →
+physical, forward order):
+
+    1. ``NormalMessage(0, 1).value_for(0.5)``  →  0.0
+    2. ``phi_transform.inv_transform(0.0)`` = Φ(0) →  0.5
+    3. ``LinearShiftTransform(0, 2).inv_transform(0.5)`` = 0.5·2 + 0 → 1.0
+
+Evaluating ``logpdf(x)`` at a physical ``x`` runs the same three steps in
+reverse (physical → base) via ``_transform``, accumulating the
+log-Jacobian ``log_det`` of each transform for the change of variables.
+
+A new transform added to the stack must therefore implement
+``transform`` (physical → base), ``inv_transform`` (base → physical) and
+``log_det`` (the log-Jacobian of ``transform``); a ``LinearTransform``'s
+stored operator is the Jacobian of the physical → base direction, which
+is why ``LinearShiftTransform(scale=s)`` stores ``1/s``.
+"""
 import functools
 import numpy as np
 import warnings
@@ -155,6 +197,15 @@ class TransformedMessage(MessageInterface):
         )
 
     def kl(self, dist):
+        """
+        KL divergence computed between the base messages.
+
+        Valid because KL is invariant under a common invertible change of
+        variables — which requires ``dist`` to share this message's
+        transform stack (true inside EP, where both messages describe the
+        same variable). For messages with different transforms the result
+        is meaningless; no check is performed here.
+        """
         return self.base_message.kl(dist.base_message)
 
     def natural_parameters(self, xp=np) -> np.ndarray:
@@ -166,8 +217,13 @@ class TransformedMessage(MessageInterface):
 
     def _transform(self, x: float) -> float:
         """
-        Transform some value in the space of the transformed message to
-        the space of the underlying message.
+        Map a value from *physical* space (the transformed message) to
+        *base* space (the underlying message).
+
+        Applies the transforms in REVERSE tuple order: the stack is stored
+        innermost-first, so going physical -> base must unwind the outermost
+        transform (the last tuple element) first (see the module docstring
+        for the worked UniformPrior example).
 
         For example, a UniformPrior with limits 10 and 20 could be passed
         a value 15. If the underlying message is a NormalMessage with a
@@ -188,10 +244,12 @@ class TransformedMessage(MessageInterface):
 
     def _inverse_transform(self, x: float) -> float:
         """
-        Transform some value in the space of the base message to a value in
-        the space of the transformed message.
+        Map a value from *base* space (the underlying message) to *physical*
+        space (the transformed message). Inverts ``_transform``.
 
-        Inverts transform (above)
+        Applies each transform's ``inv_transform`` in FORWARD tuple order,
+        rebuilding the composition from the inside out — the asymmetry with
+        ``_transform`` is deliberate and load-bearing (module docstring).
         """
         for _transform in self.transforms:
             x = _transform.inv_transform(x)

@@ -153,6 +153,12 @@ class LogUniformPrior(Prior):
         in_bounds = (value >= self.lower_limit) & (value <= self.upper_limit)
         return xp.where(in_bounds, -xp.log(value), -xp.inf)
 
+    def log_normalisation(self, xp=np) -> float:
+        """The constant ``-log(log(upper / lower))`` dropped from
+        ``log_prior_from_value`` (which returns ``-log(value)``). See
+        ``Prior.log_normalisation``."""
+        return -xp.log(xp.log(self.upper_limit / self.lower_limit))
+
     def value_for(self, unit, xp=np):
         """
         Returns a physical value from an input unit value according to the limits of the log10 uniform prior.

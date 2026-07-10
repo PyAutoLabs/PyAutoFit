@@ -266,9 +266,26 @@ class AbstractMessage(MessageInterface, ABC):
     def project(
         cls, samples: np.ndarray, log_weight_list: Optional[np.ndarray] = None, **kwargs
     ) -> "AbstractMessage":
-        """Calculates the sufficient statistics of a set of samples
-        and returns the distribution with the appropriate parameters
-        that match the sufficient statistics
+        """
+        Moment-matching projection: the exponential-family member closest
+        (in inclusive KL) to the weighted sample distribution.
+
+        For an exponential family, argmin_q KL(p || q) is the member whose
+        expected sufficient statistics match p's:
+
+            E_q[T(x)] = E_p[T(x)]
+
+        Estimated by importance-weighted sample moments over weighted
+        samples {x_s, log w_s} (e.g. from a nested sampler run on the EP
+        tilted distribution):
+
+            E[T] ≈ Σ_s w̃_s T(x_s) / Σ_s w̃_s ,  w̃_s = exp(log w_s − max log w)
+
+        The max-log-weight shift is the standard numerical stabilisation;
+        the mean unshifted weight supplies the projection's ``log_norm``
+        (the tilted distribution's normalisation estimate).
+        ``from_sufficient_statistics`` then inverts the moment equations to
+        natural parameters for the concrete family.
         """
         # if weight_list aren't passed then equally weight all samples
 

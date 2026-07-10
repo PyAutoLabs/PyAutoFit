@@ -74,9 +74,12 @@ def inv_beta_suffstats(
     b
         Estimated beta parameter(s) of the Beta distribution.
 
-    Warnings
-    --------
-    Emits a RuntimeWarning if negative parameters are found, and clamps them to 0.5.
+    Raises
+    ------
+    ValueError
+        If the Newton-Raphson projection produces a negative alpha or beta, which
+        is not a valid Beta distribution. Previously this was silently warned and
+        clamped into a local that was immediately overwritten (a no-op).
     """
 
     _lnX, _ln1X = np.ravel(lnX), np.ravel(ln1X)
@@ -94,12 +97,14 @@ def inv_beta_suffstats(
         ab += np.linalg.solve(jac, - f)
 
     if np.any(ab < 0):
-        warnings.warn(
-            "invalid negative parameters found for inv_beta_suffstats, "
-            "clampling value to 0.5",
-            RuntimeWarning
+        raise ValueError(
+            "inv_beta_suffstats produced negative Beta parameters "
+            f"(alpha, beta):\n\n{ab}\n\n"
+            "A negative alpha or beta is not a valid Beta distribution, so the "
+            "moment-matching projection has failed. The previous behaviour "
+            "silently warned and clamped into a local that was immediately "
+            "overwritten (a no-op), letting the invalid parameters escape."
         )
-        b = np.clip(ab, 0.5, None)
 
     shape = np.shape(lnX)
     if shape:

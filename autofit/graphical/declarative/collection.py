@@ -302,28 +302,50 @@ class FactorGraphModel(AbstractDeclarativeFactor):
         """
         self._for_each_analysis("save_results", paths, result)
 
+    def _factors_grouped_by_visualizer(self, instance):
+        """
+        ``(factors, instances)`` pairs grouped by each factor's analysis ``Visualizer``
+        class, order preserved within groups.
+
+        A combined visualization can only draw analyses its ``Visualizer`` understands,
+        so a mixed-dataset graph (e.g. imaging + weak-lensing factors) must dispatch one
+        combined call per visualizer type rather than routing every factor into the lead
+        factor's visualizer. A homogeneous graph produces exactly one group, making the
+        dispatch identical to the previous lead-factor-takes-all behaviour.
+        """
+        groups = {}
+        for factor, single_instance in zip(self.model_factors, instance):
+            analysis = getattr(factor, "analysis", factor)
+            key = getattr(type(analysis), "Visualizer", type(analysis))
+            groups.setdefault(key, ([], []))
+            groups[key][0].append(factor)
+            groups[key][1].append(single_instance)
+        return groups.values()
+
     def visualize_combined(
         self,
         instance,
         paths: AbstractPaths,
         during_analysis,
     ):
-        self.model_factors[0].visualize_combined(
-            self.model_factors,
-            paths,
-            instance,
-            during_analysis=during_analysis,
-        )
+        for factors, instances in self._factors_grouped_by_visualizer(instance):
+            factors[0].visualize_combined(
+                factors,
+                paths,
+                instances,
+                during_analysis=during_analysis,
+            )
 
     def perform_quick_update(self, paths, instance):
 
         try:
-            self.model_factors[0].visualize_combined(
-                analyses=self.model_factors,
-                paths=paths,
-                instance=instance,
-                during_analysis=True,
-                quick_update=True,
-            )
+            for factors, instances in self._factors_grouped_by_visualizer(instance):
+                factors[0].visualize_combined(
+                    analyses=factors,
+                    paths=paths,
+                    instance=instances,
+                    during_analysis=True,
+                    quick_update=True,
+                )
         except Exception as e:
             pass

@@ -72,6 +72,15 @@ nautilus, NSS; MLE: LBFGS/BFGS/drawer), `mapper/` (model + priors),
 
 - Import direction: autoconf only — never `autoarray` / `autogalaxy` /
   `autolens`.
+- **The EP seam rule**: `autofit/graphical` is two layers — the inner
+  factor-graph/message engine and the `declarative/` user layer. A new
+  statistical capability in the inner layer must land **in the same PR**
+  with its declarative expression *or* an explicit "not exposed" row in
+  the lowering-contract table (`autofit/graphical/README.md` §8), plus a
+  seam test where behaviour crosses the boundary
+  (`test_autofit/graphical/test_declarative_deterministic.py` is the
+  pattern). Capabilities that exist below but are silently absent above
+  are the seam's known failure mode (see PyAutoFit#1336/#1337).
 - The `[nss]` extra (for `af.NSS`) needs a pinned **handley-lab/blackjax** fork
   installed manually *after* the extras step; that fork conflicts with the
   mainline `blackjax` pinned in `[optional]`. Do not naively combine or bump

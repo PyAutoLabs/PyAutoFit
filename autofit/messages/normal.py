@@ -24,25 +24,32 @@ def is_nan(value):
     return is_nan_
 
 def assert_sigma_non_negative(sigma, xp=np):
+    """
+    Reject ``sigma < 0`` on the NumPy path (#1331 Decision 2), matching
+    ``TruncatedNormalMessage`` — the two classes previously disagreed, so a
+    negative sigma (e.g. from a negative posterior median through a relative
+    width modifier) constructed a ``NormalMessage`` silently and flipped the
+    scale of ``value_for`` / ``sample``.
 
-    is_negative = sigma < 0
+    ``sigma == 0`` is deliberately permitted: it is the established point-mass
+    idiom — the latent-variables machinery wraps known values as
+    ``GaussianPrior(mean=value, sigma=0.0)`` (``non_linear/samples/util.py``),
+    ``from_mode(..., covariance=0)`` requests a point-mass projection, and
+    ``model_centred_relative`` pins ``sigma == 0`` for zero-centred parameters.
 
-    if xp.__name__.startswith("jax"):
-        import jax
-        # JAX path: cannot convert to Python bool
-        # Raise using JAX control flow:
-        return jax.lax.cond(
-            is_negative,
-            lambda _: (_ for _ in ()).throw(
-                ValueError("Sigma cannot be negative")
-            ),
-            lambda _: None,
-            operand=None,
-        )
-    else:
-        # NumPy path: normal boolean works
-        if bool(is_negative):
-            raise ValueError("Sigma cannot be negative")
+    The JAX path is a deliberate no-op: a traced ``sigma`` cannot be converted
+    to a Python bool, so validity defers to NaN propagation. (The previous
+    ``jax.lax.cond`` branch here never worked — ``lax.cond`` traces both
+    branches, so the generator-throw lambda was suppressed under ``jit``.)
+    """
+    if xp is np:
+        if (np.asarray(sigma) < 0).any():
+            raise exc.MessageException(
+                f"NormalMessage sigma cannot be negative, got sigma={sigma}. "
+                "Negative widths typically come from prior passing with a "
+                "parameter whose posterior median is negative — see "
+                "RelativeWidthModifier in the priors config."
+            )
 
 class NormalMessage(AbstractMessage):
 
@@ -84,7 +91,7 @@ class NormalMessage(AbstractMessage):
             The mean (μ) of the normal distribution.
 
         sigma
-            The standard deviation (σ) of the distribution. Must be non-negative.
+            The standard deviation (σ) of the distribution. Must be strictly positive.
 
         log_norm
             An additive constant to the log probability of the message. Used internally for message-passing normalization.
@@ -100,7 +107,7 @@ class NormalMessage(AbstractMessage):
             import jax.numpy as jnp
             xp = jnp
 
-        # assert_sigma_non_negative(sigma, xp=xp)
+        assert_sigma_non_negative(sigma, xp=xp)
 
         super().__init__(
             mean,
