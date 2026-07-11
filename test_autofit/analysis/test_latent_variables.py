@@ -1,9 +1,19 @@
+import importlib.util
+
 import numpy as np
 import pytest
 
 import autofit as af
 from autoconf.conf import with_config
 from autofit import DirectoryPaths, SamplesPDF
+
+# This test drives the `use_jax=True` path, which needs jax installed (it ships
+# via the `[optional]` extras). The NumPy-only Python-version matrix has no jax,
+# so skip there rather than fail.
+requires_jax = pytest.mark.skipif(
+    importlib.util.find_spec("jax") is None,
+    reason="requires jax (installed via the [optional] extras; absent on the NumPy-only matrix env)",
+)
 from autofit.text.text_util import result_info_from
 
 
@@ -104,6 +114,7 @@ def test_latent_batch_mode_default_is_vmap():
     assert Analysis.LATENT_BATCH_MODE == "vmap"
 
 
+@requires_jax
 def test_latent_batch_mode_invalid_value_raises_clear_error():
     """
     Misspelt `LATENT_BATCH_MODE` values should fail with a clear ValueError

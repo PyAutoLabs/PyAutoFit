@@ -1,3 +1,4 @@
+import importlib.util
 import os
 import numpy as np
 import pytest
@@ -5,6 +6,14 @@ import pytest
 import autofit as af
 from autofit.non_linear.search.mcmc.blackjax.nuts.search import (
     _times_from_positions,
+)
+
+# `_times_from_positions` is jax-backed; it needs jax installed to run (jax
+# ships via the `[optional]` extras). The NumPy-only Python-version matrix has
+# no jax, so skip there rather than fail.
+requires_jax = pytest.mark.skipif(
+    importlib.util.find_spec("jax") is None,
+    reason="requires jax (installed via the [optional] extras; absent on the NumPy-only matrix env)",
 )
 
 pytestmark = pytest.mark.filterwarnings("ignore::FutureWarning")
@@ -92,6 +101,7 @@ def test__identifier_fields_distinguish_run_shape():
     assert (c.num_warmup, c.num_samples, c.num_chains) == (100, 999, 1)
 
 
+@requires_jax
 def test__times_from_positions_clamps_low_ess():
     # Construct a degenerate "chain" — every sample is identical → ESS
     # collapses; the clamp must keep ``times`` finite and equal to N.
@@ -108,6 +118,7 @@ def test__times_from_positions_clamps_low_ess():
     assert np.all(times <= n_samples + 1e-9)
 
 
+@requires_jax
 def test__times_from_positions_independent_chain():
     # Independent draws → ESS ≈ N, so τ ≈ 1.
     rng = np.random.default_rng(1)
