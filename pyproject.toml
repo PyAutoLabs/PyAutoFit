@@ -75,35 +75,6 @@ optional = [
     "nautilus-sampler==1.0.5",
     "zeus-mcmc==2.5.4",
 ]
-# Phase 4 of nss_first_class_sampler — support package for `af.NSS`.
-#
-# The `handley-lab/blackjax` fork (BSD-3-Clause) carries the
-# `blackjax.ns.adaptive.init` entrypoint that mainline blackjax lacks, and
-# `yallup/nss` (BSD-3-Clause) sits on top. Both are pinned to specific SHAs
-# below — but installed manually rather than declared here, because PyPI and
-# TestPyPI reject direct `git+https://` URLs in uploaded wheels with:
-#
-#   400 Can't have direct dependency: blackjax @ git+...
-#
-# After `pip install autofit[nss]`, complete the install with:
-#
-#   pip install \
-#     "blackjax @ git+https://github.com/handley-lab/blackjax.git@ef45acd2f2fa0cca15adbdcd3ff7cb3a98987cb5" \
-#     "nss @ git+https://github.com/yallup/nss.git@69159b0f4a3a53123b9eec7df91e4ed3885e4dc4"
-#
-# blackjax SHA `ef45acd2` is the May 2026 "Merge PR #60 — double_compile"
-# revision, locally validated against the Phase 1-3 work. blackjax HEAD
-# (5dbf89a9 at pin time) introduced `numpy>=1.25`. autofit's anesthetic
-# pin has since been bumped to `>=2.9.0` (numpy>=2 compatible) so the
-# previous "bump only after both pins move together" constraint is now
-# resolved. See PyAutoPrompt/issued/nss_install_simplification.md notes
-# #3-4 for the historic context.
-#
-# `fastprogress<1.1` stays here as a regular PyPI dep — it keeps fastprogress
-# from pulling `python-fasthtml` (1.1.5 transitively requires it).
-nss = [
-    "fastprogress<1.1",
-]
 docs=[
     "sphinx",
     "furo",
