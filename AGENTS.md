@@ -63,7 +63,7 @@ import autofit as af
 ```
 
 Key subsystems: `non_linear/search/` (MCMC: emcee/zeus; nested: dynesty,
-nautilus, NSS; MLE: LBFGS/BFGS/drawer), `mapper/` (model + priors),
+nautilus; MLE: LBFGS/BFGS/drawer), `mapper/` (model + priors),
 `non_linear/analysis/` (`af.Analysis.log_likelihood_function`), `aggregator/`,
 `database/` (SQLAlchemy), `graphical/` (expectation propagation),
 `interpolator/`.
@@ -81,10 +81,6 @@ nautilus, NSS; MLE: LBFGS/BFGS/drawer), `mapper/` (model + priors),
   (`test_autofit/graphical/test_declarative_deterministic.py` is the
   pattern). Capabilities that exist below but are silently absent above
   are the seam's known failure mode (see PyAutoFit#1336/#1337).
-- The `[nss]` extra (for `af.NSS`) needs a pinned **handley-lab/blackjax** fork
-  installed manually *after* the extras step; that fork conflicts with the
-  mainline `blackjax` pinned in `[optional]`. Do not naively combine or bump
-  them — see the install notes in `pyproject.toml`.
 - All files use Unix line endings (LF, `\n`) — never `\r\n`.
 
 ## Working on issues

@@ -83,7 +83,6 @@ from .non_linear.search.mcmc.blackjax.nuts.search import BlackJAXNUTS
 from .non_linear.search.mcmc.emcee.search import Emcee
 from .non_linear.search.mcmc.zeus.search import Zeus
 from .non_linear.search.nest.nautilus.search import Nautilus
-from .non_linear.search.nest.nss.search import NSS
 from .non_linear.search.nest.dynesty.search.dynamic import DynestyDynamic
 from .non_linear.search.nest.dynesty.search.static import DynestyStatic
 from .non_linear.search.mle.drawer.search import Drawer
