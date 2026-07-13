@@ -46,9 +46,14 @@ def assert_sigma_non_negative(sigma, xp=np):
         if (np.asarray(sigma) < 0).any():
             raise exc.MessageException(
                 f"NormalMessage sigma cannot be negative, got sigma={sigma}. "
-                "Negative widths typically come from prior passing with a "
-                "parameter whose posterior median is negative — see "
-                "RelativeWidthModifier in the priors config."
+                "A negative width means a Gaussian was parameterised outside its "
+                "support. Two common sources: (1) prior passing with a parameter "
+                "whose posterior median is negative (though RelativeWidthModifier "
+                "now uses abs(mean), so this is rare); (2) a hierarchical / EP "
+                "factor whose optimiser proposes a negative scale for a "
+                "GaussianPrior distribution. Callers that can legitimately reach "
+                "such points (e.g. HierarchicalFactor) must treat them as "
+                "zero-density (-inf) rather than constructing the message."
             )
 
 class NormalMessage(AbstractMessage):
