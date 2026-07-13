@@ -1,5 +1,8 @@
 from typing import Set, Optional, Type, List, Tuple, Dict
 
+import numpy as np
+
+from autofit import exc
 from autofit.mapper.model import ModelInstance
 from autofit.mapper.prior.abstract import Prior
 from autofit.mapper.prior_model.collection import Collection
@@ -140,9 +143,19 @@ class Factor:
             prior_id = int(name_.split("_")[1])
             prior = self.distribution_model.prior_with_id(prior_id)
             arguments[prior] = array
-        return self.distribution_model.instance_for_arguments(arguments).message(
-            argument
-        )
+        try:
+            return self.distribution_model.instance_for_arguments(arguments).message(
+                argument
+            )
+        except exc.MessageException:
+            # The distribution was parameterised outside its support — e.g. an EP
+            # factor optimiser proposing a (transiently) negative scale for a
+            # ``GaussianPrior`` distribution, just below a truncated hyper-prior's
+            # ``lower_limit=0``. Such a point has zero probability density, so the
+            # factor's log-value is ``-inf`` rather than a hard error. The strict
+            # ``NormalMessage`` sigma guard stays intact for genuine prior-passing
+            # misuse; here we translate it into the correct EP semantics.
+            return -np.inf
 
 
 class _HierarchicalFactor(AbstractModelFactor):
