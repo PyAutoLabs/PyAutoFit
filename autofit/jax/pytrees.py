@@ -15,6 +15,27 @@ _CLASS_FIELD_CLASSIFIERS: dict = {}
 _CLASS_CONSTRUCTOR_ARGS: dict = {}
 
 
+def _instances_carry_dict(cls) -> bool:
+    """Whether instances of ``cls`` have a ``__dict__``.
+
+    Only such classes may be registered as instance pytree nodes: the flatten
+    built by ``_build_instance_pytree_funcs`` reads ``vars(instance)``, which
+    raises ``TypeError`` on an instance without a ``__dict__``.
+
+    This excludes native JAX leaf types (``int``, ``float``, ``str``, ``bool``,
+    ``NoneType``, ``tuple``, ...) — which JAX already handles correctly as
+    opaque leaves — and any purely ``__slots__`` class. ``register_model``
+    reaches these via ``af.Model(int)`` sub-models (e.g. a ``ShapeletPolar``'s
+    integer ``n``/``m`` constructor args): without this guard ``int`` gets
+    registered, JAX then calls the instance-flatten on every ``int`` leaf, and
+    ``vars(5)`` crashes the whole ``jax.jit``/``jax.vmap`` flatten.
+
+    A class defines a ``__dict__`` for its instances iff some class in its MRO
+    carries the ``__dict__`` descriptor.
+    """
+    return any("__dict__" in vars(klass) for klass in cls.__mro__)
+
+
 def enable_pytrees() -> bool:
     """Register PyAutoFit model and prior classes as JAX pytree nodes.
 
@@ -92,7 +113,14 @@ def register_model(model) -> bool:
             _CLASS_CONSTRUCTOR_ARGS.setdefault(
                 cls, tuple(node.constructor_argument_names)
             )
-            if cls not in _REGISTERED_INSTANCE_CLASSES:
+            # Only register classes whose instances carry a ``__dict__`` — the
+            # instance flatten reads ``vars(instance)``. ``af.Model(int)``
+            # sub-models (e.g. a shapelet's integer ``n``/``m`` args) would
+            # otherwise register ``int`` and crash the flatten on every int leaf.
+            if (
+                cls not in _REGISTERED_INSTANCE_CLASSES
+                and _instances_carry_dict(cls)
+            ):
                 flatten, unflatten = _build_instance_pytree_funcs(cls)
                 try:
                     register_pytree_node(cls, flatten, unflatten)
