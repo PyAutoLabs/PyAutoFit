@@ -11,6 +11,7 @@ from typing import Optional
 import numpy as np
 
 from autoconf import conf
+from autoconf.test_mode import is_test_mode
 from autofit.mapper.identifier import Identifier, IdentifierField
 from autofit.non_linear.samples.summary import SamplesSummary
 
@@ -24,15 +25,15 @@ pattern = re.compile(r"(?<!^)(?=[A-Z])")
 
 def _test_mode_segment() -> Optional[str]:
     """
-    Returns ``"test_mode"`` when ``PYAUTO_TEST_MODE`` is set in the
-    environment, else ``None``.
+    Returns ``"test_mode"`` when ``PYAUTO_TEST_MODE`` has an active
+    test-mode level, else ``None``.
 
     Inserted into the output-path composition so that smoke runs land
     under ``output/test_mode/...`` instead of sharing a directory with
     real runs. Without this, a cached test-mode result short-circuits
     a later real run at the same paths ("Fit Already Completed").
     """
-    return "test_mode" if os.environ.get("PYAUTO_TEST_MODE") else None
+    return "test_mode" if is_test_mode() else None
 
 
 class AbstractPaths(ABC):
@@ -66,9 +67,8 @@ class AbstractPaths(ABC):
 
         /path/to/output/folder_0/folder_1/name
 
-        If the ``PYAUTO_TEST_MODE`` environment variable is set, a
-        ``test_mode`` segment is inserted directly after the output
-        root:
+        If ``PYAUTO_TEST_MODE`` has an active level greater than zero, a
+        ``test_mode`` segment is inserted directly after the output root:
 
         /path/to/output/test_mode/folder_0/folder_1/name
 
