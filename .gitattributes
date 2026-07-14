@@ -1,0 +1,2 @@
+# Shebang'd, directly-runnable module — keep LF so execution works on HPC/Linux.
+autofit/aggregator/aggregator.py eol=lf
