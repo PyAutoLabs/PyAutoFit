@@ -19,6 +19,7 @@ def test__explicit_params():
         n_starts=16,
         n_steps=100,
         learning_rate=0.05,
+        batch_size=4,
         start_lower_limit=0.2,
         start_upper_limit=0.8,
         initializer=af.InitializerBall(lower_limit=0.2, upper_limit=0.8),
@@ -27,6 +28,7 @@ def test__explicit_params():
     assert search.n_starts == 16
     assert search.n_steps == 100
     assert search.learning_rate == 0.05
+    assert search.batch_size == 4
     assert search.start_lower_limit == 0.2
     assert search.start_upper_limit == 0.8
     assert search.optax_method == "adam"
@@ -51,6 +53,22 @@ def test__per_rule_defaults():
     assert default.n_steps == 300
     assert default.start_lower_limit == 0.15
     assert default.start_upper_limit == 0.85
+    # batch_size defaults to None = evaluate all starts in one vmapped call
+    # (the pre-batch_size behaviour, so no regression).
+    assert default.batch_size is None
+
+
+def test__batch_size_is_carried_to_every_rule():
+    """``batch_size`` is a shared knob on the abstract base, not per-rule.
+
+    The numerical guarantee it must honour — chunked evaluation is identical to
+    the unchunked vmap — is a JAX property of ``jax.lax.map(..., batch_size=)``
+    and is asserted in autofit_workspace_test, since the library suite is
+    NumPy-only.
+    """
+    for cls in (af.MultiStartAdam, af.MultiStartADABelief, af.MultiStartLion):
+        assert cls().batch_size is None
+        assert cls(batch_size=8).batch_size == 8
 
 
 def test__dict_round_trip():

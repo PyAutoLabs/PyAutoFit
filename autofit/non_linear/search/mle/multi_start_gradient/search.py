@@ -30,6 +30,7 @@ class AbstractMultiStartGradient(AbstractMLE):
         n_starts: int = 48,
         n_steps: int = 300,
         learning_rate: Optional[float] = None,
+        batch_size: Optional[int] = None,
         start_lower_limit: float = 0.15,
         start_upper_limit: float = 0.85,
         initializer: Optional[AbstractInitializer] = None,
@@ -65,6 +66,20 @@ class AbstractMultiStartGradient(AbstractMLE):
         learning_rate
             The optax learning rate. If ``None``, the rule's default is used
             (Adam / ADABelief ``1e-2``; the sign-based Lion ``1e-3``).
+        batch_size
+            The number of starts evaluated per vmapped ``value_and_grad`` call,
+            via ``jax.lax.map``. ``None`` (default) evaluates all ``n_starts`` in
+            a single ``jax.vmap`` — fastest, but it allocates the whole batched
+            jvp at once, which for a memory-heavy likelihood (e.g. a pixelized
+            source at 16 starts, ~58 GB in float64) exhausts even an 80 GB GPU.
+            Setting it trades a little speed for a bounded memory footprint.
+
+            This is purely an **implementation-level tiling**: it is numerically
+            inert (identical results, only the allocation changes). That makes it
+            unlike ``af.Nautilus``'s ``n_batch``, which is Nautilus's own
+            algorithmic knob (how many points it proposes per iteration) that
+            autofit merely forwards. Here ``n_starts`` is the algorithm; this
+            only decides how many of those starts are evaluated at a time.
         start_lower_limit, start_upper_limit
             The unit-cube bounds broad starts are drawn uniformly from. The
             interior default ``(0.15, 0.85)`` avoids the prior edges where many
@@ -85,6 +100,7 @@ class AbstractMultiStartGradient(AbstractMLE):
 
         self.n_starts = n_starts
         self.n_steps = n_steps
+        self.batch_size = batch_size
         self.learning_rate = (
             learning_rate if learning_rate is not None else self._default_learning_rate
         )
@@ -134,8 +150,31 @@ class AbstractMultiStartGradient(AbstractMLE):
             convert_to_chi_squared=True,
         )
 
-        # -2 * log_posterior, to MINIMIZE. value_and_grad batched over starts.
-        batched_value_and_grad = jax.jit(jax.vmap(jax.value_and_grad(fitness.call)))
+        # -2 * log_posterior, to MINIMIZE. value_and_grad over every start.
+        #
+        # Unbatched we vmap all starts at once — fastest, but it allocates the
+        # whole batched jvp, which for a memory-heavy likelihood (e.g. a
+        # pixelized source at 16 starts, ~58 GB in float64) exhausts even an
+        # 80 GB GPU. When `batch_size` is set we hand the tiling to
+        # `jax.lax.map`, which vmaps *within* each chunk and scans across them,
+        # handling a ragged final chunk without a second compile. It is
+        # numerically identical to the vmap; `batch_size` never changes results,
+        # it only bounds memory.
+        #
+        # `lax.map` is only used when batching is requested: with
+        # `batch_size=None` it degrades to a sequential scan, which would throw
+        # away the parallelism of the default path.
+        _value_and_grad = jax.value_and_grad(fitness.call)
+        _vmapped = jax.jit(jax.vmap(_value_and_grad))
+
+        if self.batch_size is None:
+            batched_value_and_grad = _vmapped
+        else:
+            batch_size = self.batch_size
+
+            @jax.jit
+            def batched_value_and_grad(params):
+                return jax.lax.map(_value_and_grad, params, batch_size=batch_size)
 
         try:
             search_internal = self.paths.load_search_internal()
@@ -302,6 +341,7 @@ class AbstractMultiStartGradient(AbstractMLE):
         samples_info = {
             "n_starts": self.n_starts,
             "n_steps": self.n_steps,
+            "batch_size": self.batch_size,
             "total_steps": total_steps,
             "optax_method": self.optax_method,
             "learning_rate": self.learning_rate,
