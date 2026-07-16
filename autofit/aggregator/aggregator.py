@@ -152,6 +152,10 @@ class Aggregator:
         The whole directory structure is traversed and a Phase object created for each directory that contains a
         metadata file.
 
+        Zipped search outputs are extracted as they are encountered, in the same traversal. A zip whose
+        extracted directory already exists is skipped, so repeat calls do not pay the extraction cost again;
+        delete the extracted directory to force re-extraction.
+
         Parameters
         ----------
         directory
@@ -164,12 +168,23 @@ class Aggregator:
         """
         print("Aggregator loading search_outputs... could take some time.")
 
-        unzip_directory(directory)
-
         search_outputs = []
         grid_search_outputs = []
 
-        for root, _, filenames in os.walk(directory):
+        for root, dirs, filenames in os.walk(directory, topdown=True):
+            for filename in filenames:
+                if filename.endswith(".zip"):
+                    extracted = Path(root) / filename[:-4]
+                    if extracted.exists():
+                        continue
+                    try:
+                        with zipfile.ZipFile(Path(root) / filename, "r") as f:
+                            f.extractall(extracted)
+                    except zipfile.BadZipFile:
+                        raise zipfile.BadZipFile(
+                            f"File is not a zip file: \n " f"{root} \n" f"{filename}"
+                        )
+                    dirs.append(filename[:-4])
 
             def should_add():
                 return not completed_only or ".completed" in filenames
