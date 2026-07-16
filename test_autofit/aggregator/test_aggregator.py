@@ -1,3 +1,24 @@
+import pytest
+
+import autofit as af
+
+
+@pytest.fixture(name="aggregator_x3")
+def make_aggregator_x3(session):
+    fits = [af.db.Fit(id=f"fit_{i}", is_complete=True) for i in range(3)]
+    session.add_all(fits)
+    session.flush()
+    return af.Aggregator(session)
+
+
+def test_slicing(aggregator_x3):
+    assert len(aggregator_x3[:2]) == 2
+    assert len(aggregator_x3[1:3]) == 2
+    assert len(aggregator_x3[:-1]) == 2
+    assert len(aggregator_x3[-2:]) == 2
+    assert len(aggregator_x3[2:]) == 1
+
+
 def test_completed_aggregator(
         aggregator
 ):

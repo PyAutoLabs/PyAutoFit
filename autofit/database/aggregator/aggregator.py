@@ -343,16 +343,15 @@ class Aggregator(AbstractAggregator):
         if isinstance(item, int):
             return self.fits[item]
         elif isinstance(item, slice):
+            start_index = 0
             if item.start is not None:
-                if item.start >= 0:
-                    offset += item.start
-                else:
-                    offset = len(self) + item.start
+                start_index = (
+                    item.start if item.start >= 0 else len(self) + item.start
+                )
+                offset += start_index
             if item.stop is not None:
-                if item.stop >= 0:
-                    limit = len(self) - item.stop - offset
-                else:
-                    limit = len(self) + item.stop
+                stop_index = item.stop if item.stop >= 0 else len(self) + item.stop
+                limit = max(stop_index - start_index, 0)
         return self._new_with(offset=offset, limit=limit)
 
     def _fits_for_query(self, query: str) -> List[m.Fit]:

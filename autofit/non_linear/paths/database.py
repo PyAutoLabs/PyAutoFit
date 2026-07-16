@@ -1,14 +1,15 @@
 import shutil
 from typing import Optional, Union
 
-from autoconf.output import conditional_output
+from autoconf.output import conditional_output, should_output
 from autofit.database.sqlalchemy_ import sa
 from .abstract import AbstractPaths
 import numpy as np
 
 from autofit.database.model import Fit
-from autoconf.dictable import to_dict
+from autoconf.dictable import to_dict, from_dict
 from autofit.database.aggregator.info import Info
+from autofit.non_linear.samples.summary import SamplesSummary
 
 
 class DatabasePaths(AbstractPaths):
@@ -275,6 +276,43 @@ class DatabasePaths(AbstractPaths):
 
         self.fit.samples = samples
         self.fit.set_json("samples_info", samples.samples_info)
+
+    def save_samples_summary(
+        self, samples_summary: SamplesSummary, name="samples_summary"
+    ):
+        model = samples_summary.model
+
+        filter_args = tuple(
+            arg_name
+            for arg_name in (
+                "errors_at_sigma_1",
+                "errors_at_sigma_3",
+                "values_at_sigma_1",
+                "values_at_sigma_3",
+                "max_log_likelihood_sample",
+                "median_pdf_sample",
+            )
+            if not should_output(arg_name)
+        )
+
+        samples_summary.model = None
+        self.fit.set_json(
+            name or "samples_summary",
+            to_dict(samples_summary, filter_args=filter_args),
+        )
+        samples_summary.model = model
+
+    def load_samples_summary(self) -> SamplesSummary:
+        try:
+            summary_dict = self.fit.get_json("samples_summary")
+        except KeyError:
+            raise FileNotFoundError(
+                f"No samples_summary saved for fit {self.identifier}"
+            )
+        samples_summary = from_dict(summary_dict)
+        samples_summary.model = self.model
+
+        return samples_summary
 
     def save_latent_samples(self, latent_samples):
         if not self.save_all_samples:
