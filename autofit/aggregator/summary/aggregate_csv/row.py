@@ -37,21 +37,25 @@ class Row:
             )
         }
 
-    @property
+    @cached_property
+    def _latent_summary(self):
+        return self.result.value("latent.latent_summary")
+
+    @cached_property
     def median_pdf_sample_kwargs(self) -> dict:
         """
         The median_pdf_sample arguments for the search from the samples_summary and latent_summary.
         """
-        samples_summary = self.result.value("samples_summary")
+        samples_summary = self.result.samples_summary
         kwargs = self._add_paths(samples_summary.median_pdf_sample.kwargs)
 
-        latent_summary = self.result.value("latent.latent_summary")
+        latent_summary = self._latent_summary
         if latent_summary is not None:
             kwargs.update(latent_summary.median_pdf_sample.kwargs)
 
         return kwargs
 
-    @property
+    @cached_property
     def max_likelihood_kwargs(self):
         """
         The median_pdf_sample arguments for the search from the samples_summary and latent_summary.
@@ -59,7 +63,7 @@ class Row:
         samples_summary = self.result.samples_summary
         kwargs = self._add_paths(samples_summary.median_pdf_sample.kwargs)
 
-        latent_summary = self.result.value("latent.latent_summary")
+        latent_summary = self._latent_summary
         if latent_summary is not None:
             kwargs.update(latent_summary.max_log_likelihood_sample.kwargs)
 
@@ -72,7 +76,7 @@ class Row:
         """
         kwargs = self._add_paths(self.result.samples_summary.values_at_sigma_1)
 
-        latent_summary = self.result.value("latent.latent_summary")
+        latent_summary = self._latent_summary
         if latent_summary is not None:
             kwargs.update(
                 {
@@ -90,7 +94,7 @@ class Row:
         """
         kwargs = self._add_paths(self.result.samples_summary.values_at_sigma_3)
 
-        latent_summary = self.result.value("latent.latent_summary")
+        latent_summary = self._latent_summary
         if latent_summary is not None:
             kwargs.update(
                 {
@@ -109,10 +113,10 @@ class Row:
         for column in self._columns:
             value = column.value(self)
             if isinstance(value, dict):
-                for key, value in value.items():
-                    row[f"{column.name}_{key}" if key else column.name] = value
+                for key, item in value.items():
+                    row[f"{column.name}_{key}" if key else column.name] = item
             else:
-                row[column.name] = column.value(self)
+                row[column.name] = value
 
         return row
 

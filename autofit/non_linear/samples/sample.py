@@ -271,19 +271,25 @@ sample_args = set(inspect.getfullargspec(Sample.__init__).args)
 def samples_from_iterator(iterator):
     samples = list()
 
-    headers = next(iterator)
-    headers = [header.strip() for header in headers]
-    for row in iterator:
-        d = {header: float(value) for header, value in zip(headers, row)}
+    headers = [header.strip() for header in next(iterator)]
 
+    # Classify and split the headers once — doing it per row (and letting Sample
+    # re-split every string key) dominates load time for large samples.csv files.
+    excluded = sample_args | {"log_posterior"}
+    arg_indices = {
+        header: index for index, header in enumerate(headers) if header in sample_args
+    }
+    kwarg_indices = [
+        (index, tuple(header.split(".")))
+        for index, header in enumerate(headers)
+        if header not in excluded
+    ]
+
+    for row in iterator:
         samples.append(
             Sample(
-                **{key: value for key, value in d.items() if key in sample_args},
-                kwargs={
-                    key: value
-                    for key, value in d.items()
-                    if key not in (sample_args | {"log_posterior"})
-                },
+                **{name: float(row[index]) for name, index in arg_indices.items()},
+                kwargs={key: float(row[index]) for index, key in kwarg_indices},
             )
         )
     return samples

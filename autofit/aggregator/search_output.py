@@ -76,17 +76,24 @@ class AbstractSearchOutput(ABC):
     def files_path(self):
         return self.directory / "files"
 
-    def _outputs(self, suffix):
-        return self._outputs_in_directory("files", suffix) + self._outputs_in_directory(
-            "image", suffix
-        )
+    @cached_property
+    def _outputs_by_suffix(self) -> dict:
+        """
+        All output files in the files and image directories, grouped by suffix.
 
-    def _outputs_in_directory(self, name: str, suffix: str):
-        files_path = self.directory / name
-        outputs = []
-        for file_path in files_path.rglob(f"*{suffix}"):
-            name = ".".join(file_path.relative_to(files_path).with_suffix("").parts)
-            outputs.append(FileOutput(name, file_path))
+        A single traversal of each directory serves every suffix — building the
+        json/pickle/csv/fits lists separately makes eight sweeps per search output,
+        which dominates load time when aggregating many results.
+        """
+        outputs = {".json": [], ".pickle": [], ".csv": [], ".fits": []}
+        for directory_name in ("files", "image"):
+            files_path = self.directory / directory_name
+            for file_path in files_path.rglob("*"):
+                if file_path.suffix in outputs:
+                    name = ".".join(
+                        file_path.relative_to(files_path).with_suffix("").parts
+                    )
+                    outputs[file_path.suffix].append(FileOutput(name, file_path))
         return outputs
 
     @cached_property
@@ -94,28 +101,28 @@ class AbstractSearchOutput(ABC):
         """
         The json files in the search output files directory
         """
-        return cast(List[JSONOutput], self._outputs(".json"))
+        return cast(List[JSONOutput], self._outputs_by_suffix[".json"])
 
     @cached_property
     def arrays(self):
         """
         The csv files in the search output files directory
         """
-        return self._outputs(".csv")
+        return self._outputs_by_suffix[".csv"]
 
     @cached_property
     def pickles(self):
         """
         The pickle files in the search output files directory
         """
-        return self._outputs(".pickle")
+        return self._outputs_by_suffix[".pickle"]
 
     @cached_property
     def fits(self):
         """
         The fits files in the search output files directory
         """
-        return self._outputs(".fits")
+        return self._outputs_by_suffix[".fits"]
 
     @property
     def max_log_likelihood(self) -> Optional[float]:
@@ -201,6 +208,8 @@ class SearchOutput(AbstractSearchOutput, fit_interface.Fit):
         self.__model = None
         self._samples = None
         self._latent_samples = None
+        self.__samples_summary = None
+        self.__latent_summary = None
 
         self.directory = directory
 
@@ -223,9 +232,11 @@ class SearchOutput(AbstractSearchOutput, fit_interface.Fit):
 
         This is loaded from a JSON file.
         """
-        summary = self.value("samples_summary")
-        summary.model = self.model
-        return summary
+        if self.__samples_summary is None:
+            summary = self.value("samples_summary")
+            summary.model = self.model
+            self.__samples_summary = summary
+        return self.__samples_summary
 
     @property
     def latent_summary(self) -> SamplesSummary:
@@ -234,9 +245,11 @@ class SearchOutput(AbstractSearchOutput, fit_interface.Fit):
 
         This is loaded from a JSON file.
         """
-        summary = self.value("latent.latent_summary")
-        summary.model = self.model
-        return summary
+        if self.__latent_summary is None:
+            summary = self.value("latent.latent_summary")
+            summary.model = self.model
+            self.__latent_summary = summary
+        return self.__latent_summary
 
     @property
     def instance(self):
@@ -251,7 +264,7 @@ class SearchOutput(AbstractSearchOutput, fit_interface.Fit):
         except (AttributeError, NotImplementedError):
             return self.samples_summary.instance
 
-    @property
+    @cached_property
     def id(self) -> str:
         """
         The unique identifier of the search.
