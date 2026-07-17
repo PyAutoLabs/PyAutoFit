@@ -213,7 +213,7 @@ class ModelObject:
                     loaded_ids=loaded_ids,
                 )
                 for key, value in d["arguments"].items()
-                if value
+                if value is not None
             }
         elif type_ == "instance":
             class_path = get_class_path()

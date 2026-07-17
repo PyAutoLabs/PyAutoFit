@@ -157,3 +157,19 @@ def test_generic_from_dict(summary_dict):
     summary = from_dict(summary_dict)
     assert isinstance(summary, SamplesSummary)
     assert isinstance(summary.max_log_likelihood_sample, af.Sample)
+
+
+def test_sample_zero_valued_kwargs_round_trip():
+    """
+    Sample kwargs whose value is exactly 0.0 (e.g. a prior-median centre) must
+    survive to_dict -> from_dict — the dict branch previously filtered falsy
+    values, silently dropping them.
+    """
+    sample = af.Sample(
+        log_likelihood=1.0,
+        log_prior=0.0,
+        weight=1.0,
+        kwargs={"centre.centre_0": 0.0, "sigma": 6.0},
+    )
+    loaded = from_dict(to_dict(sample))
+    assert loaded.kwargs == {("centre", "centre_0"): 0.0, ("sigma",): 6.0}
