@@ -44,6 +44,12 @@ class AggregateFITS:
         """
         Extract the HDUs from a given fits for a given search.
 
+        Each source fits file is opened once (not once per requested HDU) and closed
+        deterministically — the extracted data is copied out of the memmap, so no
+        file handle stays open per result. Previously each HDU leaked one handle,
+        which exhausted the default open-file limit when aggregating many hundreds
+        of results.
+
         Parameters
         ----------
         result
@@ -58,19 +64,27 @@ class AggregateFITS:
         from astropy.io import fits
 
         row = []
-        for hdu in hdus:
-            source = result.value(subplot_filename(hdu))
-            source_hdu = source[source.index_of(hdu.value)]
+        sources = {}
+        try:
+            for hdu in hdus:
+                source_name = subplot_filename(hdu)
+                if source_name not in sources:
+                    sources[source_name] = result.value(source_name)
+                source = sources[source_name]
+                source_hdu = source[source.index_of(hdu.value)]
 
-            if extname_prefix is not None:
-                source_hdu.header["EXTNAME"] = f"{extname_prefix.upper()}_{source_hdu.header['EXTNAME']}"
+                if extname_prefix is not None:
+                    source_hdu.header["EXTNAME"] = f"{extname_prefix.upper()}_{source_hdu.header['EXTNAME']}"
 
-            row.append(
-                fits.ImageHDU(
-                    data=source_hdu.data,
-                    header=source_hdu.header,
+                row.append(
+                    fits.ImageHDU(
+                        data=source_hdu.data.copy(),
+                        header=source_hdu.header,
+                    )
                 )
-            )
+        finally:
+            for source in sources.values():
+                source.close()
         return row
 
     def extract_fits(self, hdus: List[Enum], extname_prefix_list = None) -> "fits.HDUList":
@@ -119,7 +133,11 @@ class AggregateFITS:
 
         output = []
         for result in self.aggregator:
-            output.append(Table.read(result.value(filename), format="fits"))
+            source = result.value(filename)
+            try:
+                output.append(Table.read(source, format="fits").copy())
+            finally:
+                source.close()
 
         return output
 
