@@ -916,6 +916,11 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
 
         model.unfreeze()
 
+        # Mark the fit complete, exactly as start_resume_fit does — a bypassed
+        # fit must be resumable (paths.is_complete -> result_via_completed_fit
+        # on the next run), or every rerun re-bypasses the whole pipeline.
+        self.paths.completed()
+
         return result
 
     def _test_mode_samples_info(self) -> dict:

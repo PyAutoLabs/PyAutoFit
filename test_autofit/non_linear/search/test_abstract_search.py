@@ -373,3 +373,50 @@ class TestLabels:
         assert conf.instance["notation"]["label"]["label"]["two"] == "two_label"
         assert conf.instance["notation"]["label"]["label"]["three"] == "three_label"
         assert conf.instance["notation"]["label"]["label"]["four"] == "four_label"
+
+
+class TestBypassWritesCompleted:
+    """
+    A bypassed fit (PYAUTO_TEST_MODE=2/3) must mark itself complete, exactly
+    as start_resume_fit does — otherwise paths.is_complete stays False and a
+    rerun re-bypasses the whole pipeline instead of resuming from the
+    completed output (found by the SLaM resume profiler, autolens_profiling#70).
+    """
+
+    def test__bypass_marks_complete__second_fit_takes_completed_path(
+        self, monkeypatch
+    ):
+        monkeypatch.setenv("PYAUTO_TEST_MODE", "3")
+
+        unique_tag = "bypass_completed_test"
+
+        model = af.Model(af.m.MockClassx2)
+        analysis = af.m.MockAnalysis()
+
+        search = af.DynestyStatic(name="bypass_completed", unique_tag=unique_tag)
+        search.fit(model=model, analysis=analysis)
+
+        # Under the test config's `remove_files: true` only the zip remains
+        # after fit() — the marker must have been zipped up with the output.
+        import zipfile
+        from pathlib import Path
+
+        with zipfile.ZipFile(search.paths._zip_path) as f:
+            assert ".completed" in {Path(n).name for n in f.namelist()}
+
+        search_resumed = af.DynestyStatic(
+            name="bypass_completed", unique_tag=unique_tag
+        )
+
+        def _poison(*args, **kwargs):
+            raise AssertionError(
+                "start_resume_fit taken — the .completed marker is missing"
+            )
+
+        monkeypatch.setattr(search_resumed, "start_resume_fit", _poison)
+
+        result = search_resumed.fit(
+            model=af.Model(af.m.MockClassx2), analysis=af.m.MockAnalysis()
+        )
+
+        assert result is not None
