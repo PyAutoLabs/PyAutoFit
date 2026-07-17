@@ -61,6 +61,68 @@ def test_projected_model():
     assert isinstance(projected_model.centre, af.UniformPrior)
 
 
+def test_projected_model_moments():
+    """
+    Regression test for PyAutoFit#1382: `projected_model` must convert the
+    samples' linear importance weights to log weights before the message
+    projection's weighted moment match.
+
+    The sample set mimics a nested-sampling run: a broad prior-exploration
+    phase with negligible weights plus a concentrated posterior with almost
+    all the weight. The projected prior's moments must match the posterior,
+    not the prior-phase spread — with linear weights fed in as log weights,
+    every sample counts almost equally and the projection lands near a
+    prior bound.
+    """
+    rng = np.random.default_rng(1)
+
+    posterior_mean = 2.05
+    posterior_sigma = 0.03
+
+    prior_phase = rng.uniform(1.5, 3.0, size=2000)
+    posterior_phase = rng.normal(posterior_mean, posterior_sigma, size=500)
+    values = np.concatenate([prior_phase, posterior_phase])
+
+    weights = np.concatenate(
+        [
+            np.full(prior_phase.size, 1.0e-9),
+            np.full(posterior_phase.size, (1.0 - prior_phase.size * 1.0e-9) / 500),
+        ]
+    )
+
+    model = af.Model(
+        af.ex.Gaussian,
+        centre=af.UniformPrior(lower_limit=1.5, upper_limit=3.0),
+    )
+    # normalization and sigma have UniformPrior(0, 1) under the test config, so
+    # they get their own in-support draws; the moment assertions are on centre.
+    unit_values = rng.uniform(0.05, 0.95, size=values.size)
+    samples = af.Samples(
+        model,
+        [
+            af.Sample(
+                -1.0,
+                -1.0,
+                weight=weight,
+                kwargs={
+                    ("centre",): value,
+                    ("normalization",): unit_value,
+                    ("sigma",): unit_value,
+                },
+            )
+            for value, unit_value, weight in zip(values, unit_values, weights)
+        ],
+    )
+    result = af.mock.MockResult(samples=samples)
+
+    projected_centre = result.projected_model.centre
+
+    assert projected_centre.mean == pytest.approx(posterior_mean, abs=0.02)
+    assert float(np.sqrt(projected_centre.variance)) == pytest.approx(
+        posterior_sigma, rel=0.5
+    )
+
+
 def test_uniform_normal(x):
     message = TransformedMessage(
         UniformNormalMessage,

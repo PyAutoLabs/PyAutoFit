@@ -343,12 +343,23 @@ class Result(AbstractResult):
         Create a new model with the same structure as the previous model,
         replacing each prior with a new prior created by calculating sufficient
         statistics from samples and corresponding weights for that prior.
+
+        `Samples.weight_list` holds *linear* importance weights; the message
+        projection is an importance-weighted moment match over *log* weights,
+        so they are converted here. Zero-weight samples map to -inf and drop
+        out of the moments.
         """
-        weights = self.samples.weight_list
+        weights = np.asarray(self.samples.weight_list)
+        if not np.any(weights > 0.0):
+            raise ValueError(
+                "Cannot project a model from samples whose weights are all zero."
+            )
+        with np.errstate(divide="ignore"):
+            log_weight_list = np.log(weights)
         arguments = {
             prior: prior.project(
                 samples=np.array(self.samples.values_for_path(path)),
-                weights=weights,
+                log_weight_list=log_weight_list,
             )
             for path, prior in self.samples.model.path_priors_tuples
         }

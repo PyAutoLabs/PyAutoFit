@@ -198,7 +198,7 @@ class Prior(Variable, ABC, ArithmeticMixin):
         _ = ignore_assertions
         return arguments[self]
 
-    def project(self, samples, weights):
+    def project(self, samples, log_weight_list):
         """Project this prior given samples and log weights from a search.
 
         Returns a copy of this prior whose message has been updated to
@@ -208,13 +208,17 @@ class Prior(Variable, ABC, ArithmeticMixin):
         ----------
         samples
             Array of sample values for this parameter.
-        weights
-            Log weights for each sample.
+        log_weight_list
+            Log weights for each sample. These must be log (not linear)
+            importance weights: the projection exponentiates them for its
+            weighted moment match. Passing linear weights makes every sample
+            count almost equally, which drags the projected message towards
+            the prior bounds (see PyAutoFit#1382).
         """
         result = copy(self)
         result.message = self.message.project(
             samples=samples,
-            log_weight_list=weights,
+            log_weight_list=log_weight_list,
             id_=self.id,
         )
         return result
