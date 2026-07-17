@@ -313,6 +313,35 @@ class AbstractPaths(ABC):
         except FileNotFoundError:
             pass
 
+    def preserve_in_zip(self, file_path):
+        """
+        Add a file (already inside this search's output directory) to the
+        search's ``.zip`` archive so it survives the resume cycle.
+
+        ``restore()`` deletes the output directory and re-extracts the zip, so
+        any file written into e.g. ``files/`` *after* a search completed — such
+        as a cache artifact derived from the finished result — would be
+        destroyed by the next resume unless it is also a member of the zip.
+
+        No-op when the zip does not exist (e.g. the search is still running,
+        so the file will be zipped with everything else at completion) and
+        when the member is already present.
+
+        Parameters
+        ----------
+        file_path
+            Absolute path of the file to preserve; must live under
+            ``output_path``, from which its archive name is derived.
+        """
+        if not Path(self._zip_path).exists():
+            return
+
+        arcname = str(Path(file_path).relative_to(self.output_path))
+
+        with zipfile.ZipFile(self._zip_path, "a") as f:
+            if arcname not in f.namelist():
+                f.write(file_path, arcname)
+
     def restore(self):
         """
         Copy files from the ``.zip`` file to the samples folder.
