@@ -207,6 +207,27 @@ class Fitness:
         A private method that calls the fitness function with the given parameters and additional keyword arguments.
         This method is intended for internal use only.
 
+        The NaN/inf guard below protects the **value only, never the gradient**.
+
+        A model whose likelihood is NaN or inf is mapped to `resample_figure_of_merit`, so searches that read only
+        the figure of merit (nested samplers, MCMC) get the resample sentinel and never select the point. Gradient
+        consumers get no such protection: under `jax.grad`, reverse-mode differentiates *both* branches of an
+        `xp.where` and multiplies the unselected one by zero, so if the likelihood's derivative is also non-finite
+        the guard yields `0 * NaN = NaN` and the returned gradient is NaN even though the value looks handled.
+
+        This bites only when the masked branch's *derivative* is non-finite — not merely its value. `sqrt(x)` at
+        x < 0 and `cholesky(A)` for non-positive-definite `A` are NaN in both value and derivative, so they trigger
+        it; `log(x)` at x < 0 is NaN in value but its derivative `1/x` stays finite, so it does not.
+
+        A guard here **cannot** repair this. By the time this method receives `log_likelihood` the non-finite
+        derivative is already recorded on the autodiff tape, and no transformation of the output can remove it —
+        an output-side "double-where" does not work. Gradient-safety must be established at the site that creates
+        the NaN, by never *evaluating* the offending operation at the invalid input.
+
+        See autolens_workspace_developer#104, where this was diagnosed, and
+        `autofit_workspace_test/scripts/jax_assertions/fitness_nan_gradient_contract.py`, which pins the behaviour
+        described here.
+
         Parameters
         ----------
         parameters
@@ -235,7 +256,9 @@ class Fitness:
             except exc.FitException:
                 return self.resample_figure_of_merit
 
-        # Penalize NaNs in the log-likelihood
+        # Penalize NaNs in the log-likelihood. Value-only: under jax.grad these `where`s still differentiate the
+        # masked branch, so a non-finite derivative propagates as `0 * NaN = NaN`. See the contract in the
+        # docstring above -- gradient-safety belongs at the site that creates the NaN, not here.
         log_likelihood = self._xp.where(self._xp.isnan(log_likelihood), self.resample_figure_of_merit, log_likelihood)
         log_likelihood = self._xp.where(self._xp.isinf(log_likelihood), self.resample_figure_of_merit, log_likelihood)
 
