@@ -115,3 +115,49 @@ class TestTestModeOutputPath:
         monkeypatch.setenv("PYAUTO_TEST_MODE", "0")
         paths = af.DirectoryPaths(name="name", path_prefix="prefix")
         assert "test_mode" not in paths._make_path().parts
+
+
+def test__preserve_in_zip__file_survives_restore(tmp_path):
+    import zipfile
+
+    paths = af.DirectoryPaths(name="preserve_test", path_prefix=str(tmp_path))
+
+    files_path = Path(paths._files_path)
+    files_path.mkdir(parents=True, exist_ok=True)
+    (files_path / "samples_summary.json").write_text("{}")
+
+    paths.zip_remove()
+    assert Path(paths._zip_path).exists()
+
+    # A post-completion cache write: on disk but not in the zip.
+    cache_file = files_path / "cache_artifact.json"
+    files_path.mkdir(parents=True, exist_ok=True)
+    cache_file.write_text('{"cached": true}')
+
+    paths.preserve_in_zip(cache_file)
+
+    with zipfile.ZipFile(paths._zip_path) as f:
+        assert "files/cache_artifact.json" in f.namelist()
+
+    # Idempotent — appending again must not duplicate the member.
+    paths.preserve_in_zip(cache_file)
+    with zipfile.ZipFile(paths._zip_path) as f:
+        assert f.namelist().count("files/cache_artifact.json") == 1
+
+    # The restore cycle (rmtree + re-extract) keeps the preserved file.
+    paths.restore()
+    assert cache_file.exists()
+
+
+def test__preserve_in_zip__no_zip_is_a_no_op(tmp_path):
+    paths = af.DirectoryPaths(name="preserve_noop_test", path_prefix=str(tmp_path))
+
+    files_path = Path(paths._files_path)
+    files_path.mkdir(parents=True, exist_ok=True)
+    cache_file = files_path / "cache_artifact.json"
+    cache_file.write_text('{"cached": true}')
+
+    paths.preserve_in_zip(cache_file)
+
+    assert not Path(paths._zip_path).exists()
+    assert cache_file.exists()
