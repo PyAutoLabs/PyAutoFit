@@ -190,8 +190,20 @@ class TransformedMessage(MessageInterface):
     def project(
         self, samples, log_weight_list, **_,
     ):
+        """
+        Moment-matching projection of weighted samples.
+
+        ``samples`` arrive in the transformed (physical) space, so they are
+        mapped through the transform stack into the base message's space
+        before its moment match — exactly as ``@transform`` does for pdf and
+        friends. The weights need no Jacobian correction: a weighted
+        empirical distribution transforms its atoms, not its weights.
+        (Previously the physical samples were projected directly in base
+        space, pinning the projected message near a prior bound —
+        PyAutoFit#1382.)
+        """
         return TransformedMessage(
-            self.base_message.project(samples, log_weight_list),
+            self.base_message.project(self._transform(samples), log_weight_list),
             *self.transforms,
             id_=self.id,
         )
