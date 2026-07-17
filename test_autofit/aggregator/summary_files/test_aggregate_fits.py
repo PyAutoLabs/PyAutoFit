@@ -57,3 +57,21 @@ def test_list_of_names(summary, output_directory):
         "one.fits",
         "two.fits",
     ])
+
+
+def test_extract_fits_closes_files(summary):
+    """
+    Each source fits file is opened once per result and closed deterministically —
+    previously one handle leaked per requested HDU, exhausting the open-file limit
+    when aggregating many hundreds of results.
+    """
+    import os
+
+    if not os.path.isdir("/proc/self/fd"):
+        pytest.skip("file-descriptor counting requires /proc")
+
+    before = len(os.listdir("/proc/self/fd"))
+    summary.extract_fits([FITSFit.ModelData, FITSFit.ResidualMap])
+    after = len(os.listdir("/proc/self/fd"))
+
+    assert after <= before + 1
