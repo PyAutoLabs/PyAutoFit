@@ -49,7 +49,11 @@ from autofit.graphical.declarative.abstract import PriorFactor
 from autofit.graphical.expectation_propagation import AbstractFactorOptimiser
 
 from autofit.non_linear.fitness import get_timeout_seconds
-from autofit.non_linear.test_mode import test_mode_level, skip_fit_output
+from autofit.non_linear.test_mode import (
+    test_mode_level,
+    test_mode_samples,
+    skip_fit_output,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -930,29 +934,64 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
     @staticmethod
     def _build_fake_samples(model, parameter_vector, log_likelihood):
         """
-        Build a minimal list of fake Sample objects for test mode bypass.
+        Build a list of fake Sample objects for test mode bypass.
 
-        Creates a small deterministic sample set: the "best" at the prior
-        median and additional slightly perturbed parameters with worse
-        likelihoods. Four samples keeps bypass mode cheap while allowing
+        Creates a deterministic sample set: the "best" at the prior median
+        and additional slightly perturbed parameters with worse likelihoods.
+        The default of four samples keeps bypass mode cheap while allowing
         downstream structural checks to exercise multi-batch sample handling.
+
+        ``PYAUTO_TEST_MODE_SAMPLES=N`` raises the sample count so the
+        bypass run's ``samples.csv`` row count and byte size match a
+        production sampler stage (N ~ 10k-100k), keeping resume/load
+        timings measured against the output honest. The N > 4 samples are
+        synthesized vectorized (numpy) then materialised through the same
+        ``Sample.from_lists`` path a real sampler run uses, so structure
+        and cost are representative by construction. The best (first)
+        sample is the unperturbed prior median in both branches.
         """
         from autofit.non_linear.samples.sample import Sample
 
-        parameter_lists = [parameter_vector]
-        for scale in (1.001, 0.999, 1.002):
-            parameter_lists.append(
-                [p * scale if p != 0.0 else scale - 1.0 for p in parameter_vector]
+        total_samples = test_mode_samples()
+
+        if total_samples == 4:
+            parameter_lists = [parameter_vector]
+            for scale in (1.001, 0.999, 1.002):
+                parameter_lists.append(
+                    [p * scale if p != 0.0 else scale - 1.0 for p in parameter_vector]
+                )
+
+            return Sample.from_lists(
+                model=model,
+                parameter_lists=parameter_lists,
+                log_likelihood_list=[
+                    log_likelihood - offset for offset in range(len(parameter_lists))
+                ],
+                log_prior_list=[0.0] * len(parameter_lists),
+                weight_list=[1.0, 0.5, 0.25, 0.125],
             )
+
+        rng = np.random.default_rng(0)
+        base = np.asarray(parameter_vector, dtype=float)
+        scatter = 1.0e-3 * rng.standard_normal((total_samples, base.shape[0]))
+        parameters = np.where(base == 0.0, scatter, base * (1.0 + scatter))
+        parameters[0] = base
+
+        # Weights decay over ~N/10 samples so the effective sample size stays
+        # a healthy fraction of N and the smallest weight, ~(10/N)e^-10, sits
+        # above the output.yaml samples_weight_threshold of 1e-10 for N <= 1e5.
+        weights = np.exp(
+            -np.arange(total_samples, dtype=float) / (total_samples / 10.0)
+        )
 
         return Sample.from_lists(
             model=model,
-            parameter_lists=parameter_lists,
-            log_likelihood_list=[
-                log_likelihood - offset for offset in range(len(parameter_lists))
-            ],
-            log_prior_list=[0.0] * len(parameter_lists),
-            weight_list=[1.0, 0.5, 0.25, 0.125],
+            parameter_lists=parameters.tolist(),
+            log_likelihood_list=(
+                log_likelihood - np.arange(total_samples, dtype=float)
+            ).tolist(),
+            log_prior_list=[0.0] * total_samples,
+            weight_list=(weights / weights.sum()).tolist(),
         )
 
     @abstractmethod

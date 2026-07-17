@@ -1,4 +1,6 @@
 import os
+
+import numpy as np
 import pytest
 
 import autofit as af
@@ -131,6 +133,202 @@ class TestSearchConfig:
             -13.0,
         ]
         assert all(sample.weight > 0.0 for sample in sample_list)
+
+
+class TestBypassFakeSamplesSizeRealistic:
+    """
+    PYAUTO_TEST_MODE_SAMPLES=N makes the bypass write N samples so
+    samples.csv row count / byte size match a production sampler stage
+    (PyAutoFit#1379; design locked on #1378).
+    """
+
+    def _samples_pdf(self, model, sample_list):
+        from autofit.non_linear.samples.pdf import SamplesPDF
+
+        return SamplesPDF(
+            model=model,
+            sample_list=sample_list,
+            samples_info={
+                "total_iterations": 1,
+                "time": 0.0,
+                "log_evidence": -10.0,
+            },
+        )
+
+    def test__env_unset__legacy_four_samples_byte_identical(self, monkeypatch):
+        monkeypatch.delenv("PYAUTO_TEST_MODE_SAMPLES", raising=False)
+
+        model = af.Model(af.m.MockClassx2)
+        parameter_vector = [1.0, 2.0]
+
+        sample_list = af.DynestyStatic._build_fake_samples(
+            model=model,
+            parameter_vector=parameter_vector,
+            log_likelihood=-10.0,
+        )
+
+        assert len(sample_list) == 4
+        assert sample_list[0].parameter_lists_for_model(model) == [1.0, 2.0]
+        assert sample_list[1].parameter_lists_for_model(model) == [1.001, 2.002]
+        assert sample_list[2].parameter_lists_for_model(model) == [0.999, 1.998]
+        assert sample_list[3].parameter_lists_for_model(model) == [1.002, 2.004]
+        assert [sample.weight for sample in sample_list] == [1.0, 0.5, 0.25, 0.125]
+
+    def test__env_below_four__raises(self, monkeypatch):
+        monkeypatch.setenv("PYAUTO_TEST_MODE_SAMPLES", "3")
+
+        with pytest.raises(ValueError):
+            af.DynestyStatic._build_fake_samples(
+                model=af.Model(af.m.MockClassx2),
+                parameter_vector=[1.0, 2.0],
+                log_likelihood=-10.0,
+            )
+
+    def test__large_n__structure_and_determinism(self, monkeypatch):
+        monkeypatch.setenv("PYAUTO_TEST_MODE_SAMPLES", "50")
+
+        model = af.Model(af.m.MockClassx2)
+        parameter_vector = [1.0, 2.0]
+
+        sample_list = af.DynestyStatic._build_fake_samples(
+            model=model,
+            parameter_vector=parameter_vector,
+            log_likelihood=-10.0,
+        )
+
+        assert len(sample_list) == 50
+
+        # Best sample is the unperturbed prior median, first, as in the
+        # 4-sample branch; likelihoods are monotone decreasing from it.
+        assert sample_list[0].parameter_lists_for_model(model) == [1.0, 2.0]
+        assert sample_list[0].log_likelihood == -10.0
+        assert sample_list[-1].log_likelihood == -10.0 - 49.0
+
+        weights = [sample.weight for sample in sample_list]
+        assert all(w > 0.0 for w in weights)
+        assert weights == sorted(weights, reverse=True)
+        assert sum(weights) == pytest.approx(1.0)
+
+        # Perturbed parameters stay within the 1e-3 scatter scale.
+        for sample in sample_list[1:]:
+            params = sample.parameter_lists_for_model(model)
+            assert params[0] == pytest.approx(1.0, abs=1e-2)
+            assert params[1] == pytest.approx(2.0, abs=2e-2)
+
+        # Fixed seed: a second call reproduces the set exactly.
+        sample_list_repeat = af.DynestyStatic._build_fake_samples(
+            model=model,
+            parameter_vector=parameter_vector,
+            log_likelihood=-10.0,
+        )
+        assert [
+            s.parameter_lists_for_model(model) for s in sample_list_repeat
+        ] == [s.parameter_lists_for_model(model) for s in sample_list]
+
+    def test__zero_valued_parameter__perturbed_like_legacy_branch(
+        self, monkeypatch
+    ):
+        monkeypatch.setenv("PYAUTO_TEST_MODE_SAMPLES", "20")
+
+        model = af.Model(af.m.MockClassx2)
+
+        sample_list = af.DynestyStatic._build_fake_samples(
+            model=model,
+            parameter_vector=[0.0, 2.0],
+            log_likelihood=-10.0,
+        )
+
+        for sample in sample_list[1:]:
+            params = sample.parameter_lists_for_model(model)
+            assert params[0] != 0.0
+            assert abs(params[0]) < 1e-2
+
+    def test__summary_and_median_pdf_on_synthetic_set(self, monkeypatch):
+        monkeypatch.setenv("PYAUTO_TEST_MODE_SAMPLES", "50")
+
+        model = af.Model(af.m.MockClassx2)
+
+        sample_list = af.DynestyStatic._build_fake_samples(
+            model=model,
+            parameter_vector=[1.0, 2.0],
+            log_likelihood=-10.0,
+        )
+        samples = self._samples_pdf(model=model, sample_list=sample_list)
+
+        # Max weight ~10/N < 0.99, so the real weighted-quantile path runs
+        # (the 4-sample branch's max weight 1.0 forces the unconverged
+        # fallback) — this is the production-representative code path.
+        assert samples.pdf_converged is True
+
+        median_pdf = samples.median_pdf(as_instance=False)
+        assert median_pdf[0] == pytest.approx(1.0, abs=1e-2)
+        assert median_pdf[1] == pytest.approx(2.0, abs=2e-2)
+
+        summary = samples.summary()
+        assert summary.max_log_likelihood_sample.log_likelihood == -10.0
+
+        lower, upper = samples.values_at_sigma(sigma=1.0, as_instance=False)
+        assert all(np.isfinite(lower)) and all(np.isfinite(upper))
+        lower, upper = samples.values_at_sigma(sigma=3.0, as_instance=False)
+        assert all(np.isfinite(lower)) and all(np.isfinite(upper))
+
+        instance = samples.max_log_likelihood()
+        assert instance.one == 1.0
+        assert instance.two == 2.0
+
+    def test__write_table_round_trip(self, monkeypatch, tmp_path):
+        import csv
+
+        monkeypatch.setenv("PYAUTO_TEST_MODE_SAMPLES", "100")
+
+        model = af.Model(af.m.MockClassx2)
+
+        sample_list = af.DynestyStatic._build_fake_samples(
+            model=model,
+            parameter_vector=[1.0, 2.0],
+            log_likelihood=-10.0,
+        )
+        samples = self._samples_pdf(model=model, sample_list=sample_list)
+
+        filename = tmp_path / "samples.csv"
+        samples.write_table(filename=filename)
+
+        with open(filename) as f:
+            rows = list(csv.reader(f))
+
+        assert len(rows) == 101
+        headers = [h.strip() for h in rows[0]]
+        assert headers == model.joined_paths + [
+            "log_likelihood",
+            "log_prior",
+            "log_posterior",
+            "weight",
+        ]
+
+        # Every written weight stays above the output.yaml
+        # samples_weight_threshold (1e-10), so threshold-applying loads
+        # keep the full set (cf. PyAutoFit#1375).
+        weight_index = headers.index("weight")
+        weights = [float(row[weight_index]) for row in rows[1:]]
+        assert min(weights) > 1.0e-10
+
+    def test__functional_at_fifty_thousand(self, monkeypatch):
+        monkeypatch.setenv("PYAUTO_TEST_MODE_SAMPLES", "50000")
+
+        model = af.Model(af.m.MockClassx2)
+
+        sample_list = af.DynestyStatic._build_fake_samples(
+            model=model,
+            parameter_vector=[1.0, 2.0],
+            log_likelihood=-10.0,
+        )
+
+        assert len(sample_list) == 50000
+        assert sample_list[0].parameter_lists_for_model(model) == [1.0, 2.0]
+
+        weights = np.array([sample.weight for sample in sample_list])
+        assert weights.sum() == pytest.approx(1.0)
+        assert weights.min() > 1.0e-10
 
 
 class TestUpdaterPathsRefresh:
