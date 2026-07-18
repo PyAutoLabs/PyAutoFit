@@ -158,7 +158,8 @@ check_version(__version__)
 # ``autoconf`` package directly, so the underlying configuration / serialization
 # layer stays an implementation detail of the library.
 # ---------------------------------------------------------------------------
-from autoconf import conf
+# ``conf`` is already exported above (``from . import conf``); the names below
+# complete the surface.
 from autoconf import jax_wrapper
 from autoconf import fitsable
 from autoconf import setup_colab
