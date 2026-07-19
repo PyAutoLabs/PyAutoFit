@@ -166,7 +166,7 @@ print(f"Gaussian centre interpolated at t = 1.5 {instance.gaussian.centre}")
 
 ## Serialisation
 
-The interpolator and model can be serialized to a .json file using **PyAutoConf**'s dedicated serialization methods.
+The interpolator and model can be serialized to a .json file using **PyAutoNerves**'s dedicated serialization methods.
 
 This means an interpolator can easily be loaded into other scripts.
 

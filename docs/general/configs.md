@@ -11,7 +11,7 @@ the [config directory of the workspace](https://github.com/PyAutoLabs/autofit_wo
 By default, **PyAutoFit** looks for the config files in a `config` folder in the current working directory, which is
 why we run autofit scripts from the `autofit_workspace` directory.
 
-The configuration path can also be set manually in a script using the project **PyAutoConf** and the following
+The configuration path can also be set manually in a script using the project **PyAutoNerves** and the following
 command (the path to the `output` folder where the results of a non-linear search are stored is also set below):
 
 ```bash
