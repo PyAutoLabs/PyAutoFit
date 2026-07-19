@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from autoconf.class_path import get_class_path
+from autonerves.class_path import get_class_path
 from autofit.aggregator import Aggregator
 from pathlib import Path
 import autofit as af

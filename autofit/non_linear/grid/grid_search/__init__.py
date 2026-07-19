@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from typing import List, Tuple, Union, Type, Optional, Dict
 
-from autoconf.dictable import to_dict
+from autonerves.dictable import to_dict
 from autofit import exc
 from autofit.mapper import prior as p
 from autofit.non_linear.parallel import Process

@@ -4,7 +4,7 @@ from copy import copy
 from pathlib import Path
 from typing import List, Tuple, Union
 
-from autoconf.class_path import get_class_path
+from autonerves.class_path import get_class_path
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.tools.util import split_paths
 

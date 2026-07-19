@@ -95,7 +95,7 @@ class AbstractModel(ModelObject):
         downstream JAX pytree flattening. See PyAutoFit#1300 for the
         diagnosed leak this defends against.
         """
-        from autoconf.tools.decorators import cached_property_names
+        from autonerves.tools.decorators import cached_property_names
 
         return cached_property_names(cls)
 

@@ -18,9 +18,9 @@ import psutil
 if TYPE_CHECKING:
     from autofit.non_linear.result import Result
 
-from autoconf import conf
+from autonerves import conf
 
-from autoconf.output import should_output
+from autonerves.output import should_output
 
 from autofit import exc
 from autofit.database.sqlalchemy_ import sa

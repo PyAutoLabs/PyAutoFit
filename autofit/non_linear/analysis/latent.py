@@ -174,7 +174,7 @@ def latent_samples_from(
             def batched_compute_latent(x):
                 return np.array([_safe_compute(xx) for xx in x])
 
-        from autoconf.test_mode import inject_latent_nans
+        from autonerves.test_mode import inject_latent_nans
 
         parameter_array = np.array(samples.parameter_lists)
 

@@ -8,10 +8,10 @@ from pathlib import Path
 from typing import Optional, Union, cast, Type
 import logging
 
-from autoconf import conf
-from autoconf.class_path import get_class
-from autoconf.dictable import to_dict, from_dict
-from autoconf.output import conditional_output, should_output
+from autonerves import conf
+from autonerves.class_path import get_class
+from autonerves.dictable import to_dict, from_dict
+from autonerves.output import conditional_output, should_output
 from autofit.text import formatter
 from autofit.tools.util import open_
 from autofit.non_linear.samples.samples import Samples

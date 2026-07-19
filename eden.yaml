@@ -1,6 +1,6 @@
 name: autofit
 eden_prefix: VIS_CTI
 eden_dependencies: 
-  - name: autoconf
+  - name: autonerves
 should_rename_modules: false
 should_remove_type_annotation: true

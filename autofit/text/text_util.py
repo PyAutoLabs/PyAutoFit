@@ -1,7 +1,7 @@
 import datetime as dt
 from typing import List
 
-from autoconf import conf
+from autonerves import conf
 from autofit.mapper.prior_model.representative import find_groups
 from autofit.text import formatter as frm, samples_text
 from autofit.tools.util import info_whitespace

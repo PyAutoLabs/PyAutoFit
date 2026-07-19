@@ -171,7 +171,7 @@ The interpolator and model can be serialized to a .json file using **PyAutoConf*
 This means an interpolator can easily be loaded into other scripts.
 
 ```python
-from autoconf.dictable import output_to_json, from_json
+from autonerves.dictable import output_to_json, from_json
 
 json_file = path.join(dataset_prefix_path, "interpolator.json")
 

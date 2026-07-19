@@ -1,7 +1,7 @@
 import pytest
 
 import autofit as af
-from autoconf.dictable import from_dict, to_dict
+from autonerves.dictable import from_dict, to_dict
 
 pytestmark = pytest.mark.filterwarnings("ignore::FutureWarning")
 

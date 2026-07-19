@@ -2,7 +2,7 @@ from typing import List, cast, Type
 
 import numpy as np
 
-from autoconf.class_path import get_class
+from autonerves.class_path import get_class
 from .sample import Sample
 from .samples import Samples
 from .pdf import SamplesPDF

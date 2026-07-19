@@ -1,6 +1,6 @@
 from typing import Dict, List
 
-from autoconf import cached_property
+from autonerves import cached_property
 
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.mapper.prior.uniform import UniformPrior

@@ -4,7 +4,7 @@ from typing import Union
 
 import numpy as np
 
-from autoconf import cached_property
+from autonerves import cached_property
 
 
 class MessageInterface(ABC):

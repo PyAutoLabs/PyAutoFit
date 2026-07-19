@@ -1,6 +1,6 @@
 from typing import Tuple, Dict, Optional, Union
 
-from autoconf.dictable import from_dict
+from autonerves.dictable import from_dict
 from .abstract import AbstractPriorModel
 from autofit.mapper.prior.abstract import Prior
 import numpy as np

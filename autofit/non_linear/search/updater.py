@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING, Callable, Optional, Tuple
 import numpy as np
 import psutil
 
-from autoconf import conf
-from autoconf.test_mode import skip_latents
+from autonerves import conf
+from autonerves.test_mode import skip_latents
 
 from autofit import exc
 from autofit.non_linear.paths.database import DatabasePaths

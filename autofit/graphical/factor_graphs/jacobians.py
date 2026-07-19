@@ -1,6 +1,6 @@
 import numpy as np
 
-from autoconf import cached_property
+from autonerves import cached_property
 from autofit.graphical.utils import (
     nested_filter,
     nested_update,

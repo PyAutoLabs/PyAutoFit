@@ -1,4 +1,4 @@
-from autoconf.exc import PriorException
+from autonerves.exc import PriorException
 
 
 class MessageException(PriorException):

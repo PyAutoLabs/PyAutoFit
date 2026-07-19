@@ -1,13 +1,13 @@
 import shutil
 from typing import Optional, Union
 
-from autoconf.output import conditional_output, should_output
+from autonerves.output import conditional_output, should_output
 from autofit.database.sqlalchemy_ import sa
 from .abstract import AbstractPaths
 import numpy as np
 
 from autofit.database.model import Fit
-from autoconf.dictable import to_dict, from_dict
+from autonerves.dictable import to_dict, from_dict
 from autofit.database.aggregator.info import Info
 from autofit.non_linear.samples.summary import SamplesSummary
 

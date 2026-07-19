@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 import autofit as af
-from autoconf.conf import output_path_for_test
+from autonerves.conf import output_path_for_test
 from autofit.non_linear.paths.null import NullPaths
 
 

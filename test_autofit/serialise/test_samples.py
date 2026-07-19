@@ -2,7 +2,7 @@ import autofit as af
 import pytest
 
 from autofit.non_linear.samples.summary import SamplesSummary
-from autoconf.dictable import from_dict, to_dict
+from autonerves.dictable import from_dict, to_dict
 
 
 @pytest.fixture(name="model")

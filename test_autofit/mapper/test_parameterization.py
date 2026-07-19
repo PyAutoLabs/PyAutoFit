@@ -179,7 +179,7 @@ def test_parameterization_cache_does_not_leak_into_instance():
 
 def test_cached_property_names_classmethod_walks_mro():
     """The ``_cached_property_names`` classmethod on AbstractModel exposes the
-    autoconf ``cached_property_names`` MRO walker. It must pick up
+    autonerves ``cached_property_names`` MRO walker. It must pick up
     descriptors declared on any ancestor and memoise the result on the class."""
 
     import functools

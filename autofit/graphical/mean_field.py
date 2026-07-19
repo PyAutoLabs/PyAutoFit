@@ -6,7 +6,7 @@ from operator import attrgetter
 
 import numpy as np
 
-from autoconf import cached_property
+from autonerves import cached_property
 from autofit import exc
 from autofit.graphical.factor_graphs.abstract import AbstractNode
 from autofit.graphical.factor_graphs.factor import Factor

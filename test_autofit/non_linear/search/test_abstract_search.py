@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 import autofit as af
-from autoconf import conf
+from autonerves import conf
 
 pytestmark = pytest.mark.filterwarnings("ignore::FutureWarning")
 

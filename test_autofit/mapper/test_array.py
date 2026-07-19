@@ -2,7 +2,7 @@ import pytest
 import numpy as np
 
 import autofit as af
-from autoconf.dictable import to_dict
+from autonerves.dictable import to_dict
 
 
 @pytest.fixture

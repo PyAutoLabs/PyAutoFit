@@ -13,7 +13,7 @@ from typing import (
 
 import numpy as np
 
-from autoconf import cached_property
+from autonerves import cached_property
 from autofit.graphical.utils import (
     FlattenArrays,
     nested_filter,

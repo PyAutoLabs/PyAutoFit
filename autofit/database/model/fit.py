@@ -6,7 +6,7 @@ from typing import List
 
 import numpy as np
 
-from autoconf.dictable import from_dict
+from autonerves.dictable import from_dict
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.samples import Samples
 from .model import Base, Object

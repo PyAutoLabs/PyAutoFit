@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 import autofit as af
-from autoconf.conf import with_config
+from autonerves.conf import with_config
 from autofit import DirectoryPaths, SamplesPDF
 
 # This test drives the `use_jax=True` path, which needs jax installed (it ships

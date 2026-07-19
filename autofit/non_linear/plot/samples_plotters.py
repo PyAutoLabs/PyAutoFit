@@ -2,7 +2,7 @@ import logging
 
 import numpy as np
 
-from autoconf import conf
+from autonerves import conf
 
 from autofit.non_linear.plot.plot_util import skip_in_test_mode, output_figure
 

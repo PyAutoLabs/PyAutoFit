@@ -5,7 +5,7 @@ from typing import Tuple, List
 import numpy as np
 
 
-from autoconf import cached_property
+from autonerves import cached_property
 
 
 class LinearOperator(ABC):

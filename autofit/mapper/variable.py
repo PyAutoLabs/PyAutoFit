@@ -6,7 +6,7 @@ from functools import wraps, reduce
 from math import sqrt
 
 import numpy as np
-from autoconf import cached_property
+from autonerves import cached_property
 
 from autofit.mapper.model_object import ModelObject
 
