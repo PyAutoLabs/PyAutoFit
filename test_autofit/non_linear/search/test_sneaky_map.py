@@ -7,7 +7,7 @@ from dynesty.dynesty import _function_wrapper
 from emcee.ensemble import _FunctionWrapper
 
 import autofit as af
-from autoconf.conf import output_path_for_test
+from autonerves.conf import output_path_for_test
 from autofit.non_linear import fitness as f
 from autofit.non_linear.mock.mock_analysis import MockAnalysis
 from autofit.non_linear.parallel import SneakyPool, SneakyJob

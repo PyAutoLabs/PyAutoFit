@@ -536,7 +536,7 @@ class Analysis(af.Analysis):
             The paths object which manages all paths, e.g. where the non-linear search outputs are stored,
             visualization, and the pickled objects used by the aggregator output by this function.
         """
-        from autoconf.dictable import to_dict
+        from autonerves.dictable import to_dict
 
         paths.save_json(name="data", object_dict=to_dict(self.data))
         paths.save_json(name="noise_map", object_dict=to_dict(self.noise_map))

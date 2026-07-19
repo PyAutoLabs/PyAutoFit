@@ -2,7 +2,7 @@ import pytest
 
 import autofit as af
 import autofit.graphical as g
-from autoconf.conf import output_path_for_test
+from autonerves.conf import output_path_for_test
 from autofit.graphical.utils import Status
 from test_autofit.graphical.gaussian.model import Analysis
 

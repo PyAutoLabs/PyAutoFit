@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from autoconf.conf import output_path_for_test
+from autonerves.conf import output_path_for_test
 
 import autofit as af
 from autofit import database as m

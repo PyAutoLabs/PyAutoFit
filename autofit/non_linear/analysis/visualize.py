@@ -1,6 +1,6 @@
 import os
 
-from autoconf import conf
+from autonerves import conf
 
 from autofit.non_linear.paths.abstract import AbstractPaths
 from autofit.mapper.prior_model.abstract import AbstractPriorModel

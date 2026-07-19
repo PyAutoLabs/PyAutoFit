@@ -1,6 +1,6 @@
 import numpy as np
 
-from autoconf.class_path import get_class_path, get_class
+from autonerves.class_path import get_class_path, get_class
 from .model import Object
 from ..sqlalchemy_ import sa
 

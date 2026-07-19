@@ -5,8 +5,8 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
-from autoconf import conf
-from autoconf.output import should_output
+from autonerves import conf
+from autonerves.output import should_output
 from autofit.mapper.model import ModelInstance
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.samples.sample import Sample, load_from_table

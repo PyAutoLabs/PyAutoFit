@@ -5,7 +5,7 @@ from typing import Tuple, Dict, Collection, List, Type
 
 import numpy as np
 
-from autoconf import cached_property
+from autonerves import cached_property
 from autofit.graphical.factor_graphs.abstract import FactorValue, AbstractNode
 from autofit.graphical.factor_graphs.factor import Factor
 from autofit.graphical.factor_graphs.jacobians import VectorJacobianProduct

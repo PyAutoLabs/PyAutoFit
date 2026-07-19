@@ -3,7 +3,7 @@ from collections.abc import Iterable
 from hashlib import md5
 from typing import Optional
 
-from autoconf.class_path import get_class_path
+from autonerves.class_path import get_class_path
 
 # floats are rounded to this increment so floating point errors
 # have no impact on identifier value

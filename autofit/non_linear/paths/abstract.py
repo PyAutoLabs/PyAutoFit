@@ -10,8 +10,8 @@ from typing import Optional
 
 import numpy as np
 
-from autoconf import conf
-from autoconf.test_mode import is_test_mode
+from autonerves import conf
+from autonerves.test_mode import is_test_mode
 from autofit.mapper.identifier import Identifier, IdentifierField
 from autofit.non_linear.samples.summary import SamplesSummary
 
@@ -55,7 +55,7 @@ class AbstractPaths(ABC):
         The output path within which the *Paths* objects path structure is contained is set via PyAutoConf, using the
         command:
 
-        from autoconf import conf
+        from autonerves import conf
         conf.instance = conf.Config(output_path="path/to/output")
 
         If we assume all the input strings above are used with the following example names:

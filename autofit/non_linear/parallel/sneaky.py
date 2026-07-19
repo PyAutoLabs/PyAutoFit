@@ -5,7 +5,7 @@ import multiprocessing as mp
 import os
 from typing import Iterable, Optional, Callable
 
-from autoconf import conf
+from autonerves import conf
 
 from autofit.non_linear.paths.abstract import AbstractPaths
 from .process import AbstractJob, Process, StopCommand

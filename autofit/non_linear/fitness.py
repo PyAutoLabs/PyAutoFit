@@ -7,8 +7,8 @@ import time
 from timeout_decorator import timeout
 from typing import Optional
 
-from autoconf import conf
-from autoconf import cached_property
+from autonerves import conf
+from autonerves import cached_property
 
 from autofit import exc
 

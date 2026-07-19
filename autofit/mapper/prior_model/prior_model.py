@@ -6,8 +6,8 @@ import numpy as np
 import typing
 from typing import *
 
-from autoconf.class_path import get_class_path
-from autoconf.exc import ConfigException
+from autonerves.class_path import get_class_path
+from autonerves.exc import ConfigException
 from autofit.mapper.model import assert_not_frozen
 from autofit.mapper.model_object import ModelObject
 from autofit.mapper.prior.abstract import Prior

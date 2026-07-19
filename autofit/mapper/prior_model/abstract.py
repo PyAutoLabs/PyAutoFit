@@ -9,8 +9,8 @@ from typing import Tuple, Optional, Dict, List, Iterable, Generator, Union, Type
 
 import numpy as np
 
-from autoconf import conf
-from autoconf.exc import ConfigException
+from autonerves import conf
+from autonerves.exc import ConfigException
 from autofit import exc
 from autofit.mapper import model
 from autofit.mapper.model import AbstractModel, frozen_cache

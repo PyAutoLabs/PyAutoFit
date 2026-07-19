@@ -3,7 +3,7 @@ from pathlib import Path
 
 from .sqlalchemy_ import sa
 
-from autoconf import conf
+from autonerves import conf
 from .aggregator import *
 from .migration.steps import migrator
 from .model import *

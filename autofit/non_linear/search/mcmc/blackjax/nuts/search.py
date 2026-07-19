@@ -6,7 +6,7 @@ from typing import Optional
 
 import numpy as np
 
-from autoconf import conf
+from autonerves import conf
 
 from autofit.database.sqlalchemy_ import sa
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
@@ -113,7 +113,7 @@ class BlackJAXNUTS(AbstractMCMC):
             after warmup.
         iterations_per_full_update
             Sample chunk size between ``perform_update`` calls. Inherited
-            from the autoconf config when ``None``.
+            from the autonerves config when ``None``.
         number_of_cores
             Currently unused — single chain runs on a single device. Kept
             for API parity with the other MCMC searches.

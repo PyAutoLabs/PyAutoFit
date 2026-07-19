@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 import autofit as af
-from autoconf.conf import output_path_for_test
+from autonerves.conf import output_path_for_test
 from autofit.database.aggregator.scrape import Scraper
 
 output_directory = Path(__file__).parent / "output"

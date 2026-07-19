@@ -3,7 +3,7 @@ import os
 import numpy as np
 import pytest
 
-from autoconf.conf import with_config
+from autonerves.conf import with_config
 
 import autofit as af
 

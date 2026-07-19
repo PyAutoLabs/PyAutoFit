@@ -9,8 +9,8 @@ from typing import Generator, Tuple, Optional, List, cast, Type
 import dill
 from PIL import Image
 
-from autoconf import cached_property
-from autoconf.class_path import get_class
+from autonerves import cached_property
+from autonerves.class_path import get_class
 from autofit.non_linear.samples import Samples
 
 from autofit.non_linear.samples.pdf import SamplesPDF
@@ -20,7 +20,7 @@ from autofit.aggregator.file_output import (
 )
 from autofit.mapper.identifier import Identifier
 from autofit.non_linear.samples.sample import samples_from_iterator
-from autoconf.dictable import from_dict
+from autonerves.dictable import from_dict
 from autofit.non_linear.samples.summary import SamplesSummary
 from autofit.non_linear.samples.util import simple_model_for_kwargs
 from . import fit_interface
@@ -164,7 +164,7 @@ class AbstractSearchOutput(ABC):
         This may be a pickle, json, csv or fits file.
 
         If the JSON has a specified type it is parsed as that type. See dictable.py
-        in autoconf.
+        in autonerves.
 
         Returns None if the file does not exist.
 

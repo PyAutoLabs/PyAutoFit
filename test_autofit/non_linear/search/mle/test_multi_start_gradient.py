@@ -3,7 +3,7 @@ import pytest
 
 import autofit as af
 from autofit import example
-from autoconf.dictable import from_dict, to_dict
+from autonerves.dictable import from_dict, to_dict
 
 # The MultiStart gradient searches are JAX-native at fit time, but their
 # plumbing (config knobs, dict round-trip, and the internal-results -> Samples

@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 import autofit as af
-from autoconf.conf import output_path_for_test
+from autonerves.conf import output_path_for_test
 from autofit.database import Fit
 from autofit.database.sqlalchemy_ import sa
 

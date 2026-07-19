@@ -2,7 +2,7 @@ from typing import Optional, Tuple
 
 import numpy as np
 
-from autoconf import cached_property
+from autonerves import cached_property
 from autofit.messages.abstract import AbstractMessage
 
 

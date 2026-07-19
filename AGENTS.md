@@ -10,9 +10,9 @@ model composition, non-linear search, and Bayesian inference: `af.Model` /
 `af.Collection`, the `af.Analysis` interface, MCMC / nested-sampling / MLE
 searches, samples, aggregator, and a SQLAlchemy results database.
 
-Dependency direction: autofit depends on **autoconf** only. It does **not**
+Dependency direction: autofit depends on **autonerves** only. It does **not**
 import `autoarray`, `autogalaxy`, or `autolens` — never add such an import.
-Shared utilities (e.g. `test_mode`, `jax_wrapper`) belong in autoconf.
+Shared utilities (e.g. `test_mode`, `jax_wrapper`) belong in autonerves.
 
 ## Related repos
 
@@ -47,7 +47,7 @@ is no black/ruff/flake8 gate — formatting is advisory. (`requires-python` in
 
 ## Configuration & defaults
 
-autoconf supplies the packaged defaults under `autofit/config/`. Workspaces
+autonerves supplies the packaged defaults under `autofit/config/`. Workspaces
 override them via their own `config/` directory; the test suite pushes a local
 config dir via `conf.instance.push(...)` in `test_autofit/conftest.py`. When a
 change adds a new config key, mirror it into the packaged defaults so
@@ -70,7 +70,7 @@ nautilus; MLE: LBFGS/BFGS/drawer), `mapper/` (model + priors),
 
 ## Key rules / footguns
 
-- Import direction: autoconf only — never `autoarray` / `autogalaxy` /
+- Import direction: autonerves only — never `autoarray` / `autogalaxy` /
   `autolens`.
 - **The EP seam rule**: `autofit/graphical` is two layers — the inner
   factor-graph/message engine and the `declarative/` user layer. A new

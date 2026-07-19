@@ -5,7 +5,7 @@ from typing import Dict, Optional
 
 import numpy as np
 
-from autoconf import conf
+from autonerves import conf
 
 from autofit.database.sqlalchemy_ import sa
 from autofit.mapper.model_mapper import ModelMapper

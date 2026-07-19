@@ -9,8 +9,8 @@ from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 from pathlib import Path
 
-from autoconf import conf
-from autoconf.class_path import get_class_path
+from autonerves import conf
+from autonerves.class_path import get_class_path
 from autofit import exc
 from autofit.mapper.model import ModelInstance
 from autofit.non_linear.test_mode import skip_checks

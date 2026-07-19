@@ -6,7 +6,7 @@ from typing import Union, Tuple, Optional, Dict
 
 import numpy as np
 
-from autoconf import conf
+from autonerves import conf
 
 from autofit.mapper.prior.arithmetic import ArithmeticMixin
 from autofit.mapper.prior.constant import Constant

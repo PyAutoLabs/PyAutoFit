@@ -3,7 +3,7 @@ from typing import List
 import pytest
 
 import autofit as af
-from autoconf.exc import ConfigException
+from autonerves.exc import ConfigException
 from autofit.example.model import PhysicalNFW
 from autofit.mapper.mock.mock_model import WithString
 from autofit.mapper.model_object import Identifier

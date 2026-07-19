@@ -7,7 +7,7 @@ import numpy as np
 
 import dill
 
-from autoconf.dictable import from_dict
+from autonerves.dictable import from_dict
 
 
 class FileOutput(ABC):

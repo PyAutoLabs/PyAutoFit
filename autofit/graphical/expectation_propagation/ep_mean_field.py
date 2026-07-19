@@ -3,7 +3,7 @@ from typing import Dict, Tuple, Optional, List
 
 import numpy as np
 
-from autoconf import cached_property
+from autonerves import cached_property
 from autofit.graphical.factor_graphs.factor import Factor
 from autofit.graphical.factor_graphs.graph import FactorGraph
 from autofit.graphical.mean_field import MeanField, FactorApproximation

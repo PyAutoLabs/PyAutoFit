@@ -4,7 +4,7 @@ from typing import Tuple, Union
 
 import numpy as np
 
-from autoconf import cached_property
+from autonerves import cached_property
 from ..messages.abstract import AbstractMessage
 
 

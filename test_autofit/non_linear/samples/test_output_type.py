@@ -1,7 +1,7 @@
 import pytest
 
 import autofit as af
-from autoconf.conf import with_config
+from autonerves.conf import with_config
 from autofit import SamplesNest, SearchOutput
 from autofit.non_linear.samples.efficient import EfficientSamples
 

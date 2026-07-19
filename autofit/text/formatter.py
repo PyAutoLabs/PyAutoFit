@@ -4,7 +4,7 @@ from typing import Tuple, Union
 
 from pathlib import Path
 
-from autoconf import conf
+from autonerves import conf
 from autofit.tools.util import open_
 
 logger = logging.getLogger(__name__)

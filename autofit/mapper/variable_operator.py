@@ -5,7 +5,7 @@ from collections import ChainMap
 
 import numpy as np
 
-from autoconf import cached_property
+from autonerves import cached_property
 
 from autofit.mapper.operator import (
     LinearOperator,

@@ -11,7 +11,7 @@ from typing import Optional, Union, Type, List
 
 import numpy as np
 
-from autoconf import cached_property
+from autonerves import cached_property
 from ..mapper.variable import Variable
 
 from .interface import MessageInterface

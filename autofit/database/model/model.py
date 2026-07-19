@@ -5,7 +5,7 @@ from typing import List, Tuple, Any, Iterable, Union, ItemsView, Type
 
 import numpy as np
 
-from autoconf.class_path import get_class, get_class_path
+from autonerves.class_path import get_class, get_class_path
 from ..sqlalchemy_ import sa
 from sqlalchemy.orm import declarative_base
 

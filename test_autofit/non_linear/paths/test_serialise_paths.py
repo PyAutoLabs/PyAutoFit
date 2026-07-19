@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import autofit as af
-from autoconf.dictable import to_dict, from_dict
+from autonerves.dictable import to_dict, from_dict
 
 
 def test_path_prefix():

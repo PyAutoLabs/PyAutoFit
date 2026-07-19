@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from matplotlib import pyplot
 
-from autoconf import conf
+from autonerves import conf
 from autofit import database as db
 from autofit import fixtures
 from autofit.database.model import sa

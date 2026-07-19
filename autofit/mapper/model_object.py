@@ -3,8 +3,8 @@ import itertools
 from typing import Type, Union, Tuple, Optional, Dict
 import logging
 
-from autoconf.class_path import get_class
-from autoconf.dictable import from_dict, to_dict
+from autonerves.class_path import get_class
+from autonerves.dictable import from_dict, to_dict
 from .identifier import Identifier
 
 logger = logging.getLogger(__name__)

@@ -1,7 +1,7 @@
 import logging
 from unittest.mock import MagicMock
 
-from autoconf import conf
+from autonerves import conf
 
 from autofit.non_linear.search.updater import SearchUpdater
 

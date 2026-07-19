@@ -3,8 +3,8 @@ import logging
 import sys
 from abc import ABC, abstractmethod
 
-from autoconf import conf
-from autoconf.exc import ConfigException
+from autonerves import conf
+from autonerves.exc import ConfigException
 
 logger = logging.getLogger(__name__)
 

@@ -3,7 +3,7 @@ from typing import Dict, Tuple, Optional, List
 
 import numpy as np
 
-from autoconf import cached_property
+from autonerves import cached_property
 from autofit.graphical.factor_graphs.abstract import AbstractNode, Value, FactorValue
 # from ...mapper.operator import
 from autofit.mapper.operator import (

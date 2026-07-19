@@ -5,8 +5,8 @@ import numpy as np
 from pathlib import Path
 from typing import List, Generator, Callable, ClassVar, Optional, Union, Tuple
 
-from autoconf import cached_property
-from autoconf.dictable import to_dict
+from autonerves import cached_property
+from autonerves.dictable import to_dict
 from autofit.mapper.model import ModelInstance
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.grid.grid_search import make_lists, Sequential

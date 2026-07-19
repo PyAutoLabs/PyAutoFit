@@ -10,7 +10,7 @@ from typing import Union
 
 import numpy as np
 
-from autoconf import conf
+from autonerves import conf
 
 
 def split_paths(func):

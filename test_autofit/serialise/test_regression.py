@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from autoconf.dictable import to_dict, from_dict
+from autonerves.dictable import to_dict, from_dict
 from autofit.mapper.mock.mock_model import MockClassx2Tuple
 import autofit as af
 

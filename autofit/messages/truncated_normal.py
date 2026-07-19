@@ -4,7 +4,7 @@ from typing import Optional, Tuple, Union
 
 import numpy as np
 
-from autoconf import cached_property
+from autonerves import cached_property
 from autofit.mapper.operator import LinearOperator
 from autofit.messages.abstract import AbstractMessage
 from .composed_transform import TransformedMessage

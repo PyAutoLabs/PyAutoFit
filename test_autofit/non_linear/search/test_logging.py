@@ -4,7 +4,7 @@ import shutil
 import pytest
 
 import autofit as af
-from autoconf.conf import with_config
+from autonerves.conf import with_config
 
 
 class Analysis(af.mock.MockAnalysis):

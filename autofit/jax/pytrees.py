@@ -2,12 +2,12 @@
 
 The classes themselves already carry the necessary ``tree_flatten`` /
 ``tree_unflatten`` methods. This module simply registers them with
-``jax.tree_util`` on demand, via the lazy autoconf wrapper, so callers can
+``jax.tree_util`` on demand, via the lazy autonerves wrapper, so callers can
 pass ``Model`` / ``Collection`` / ``ModelInstance`` / prior instances
 through ``jax.jit`` and ``jax.vmap`` directly.
 """
 
-from autoconf.jax_wrapper import register_pytree_node, register_pytree_node_class
+from autonerves.jax_wrapper import register_pytree_node, register_pytree_node_class
 
 _ENABLED = False
 _REGISTERED_INSTANCE_CLASSES: set = set()
