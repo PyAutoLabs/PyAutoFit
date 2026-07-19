@@ -24,7 +24,7 @@ There are currently no known issues with installing **PyAutoFit**.
 
 ## Dependencies
 
-**PyAutoConf** <https://github.com/PyAutoLabs/PyAutoConf>
+**PyAutoNerves** <https://github.com/PyAutoLabs/PyAutoNerves>
 
 **dynesty** <https://github.com/joshspeagle/dynesty>
 

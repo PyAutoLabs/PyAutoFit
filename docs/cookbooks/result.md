@@ -487,7 +487,7 @@ By extending an `Analysis` class with the methods `save_attributes` and `save_re
 custom files can be written to the `files` folder and become accessible via the database.
 
 To save the objects in a human readable and loaded .json format, the `data` and `noise_map`, which are natively stored
-as 1D numpy arrays, are converted to a suitable dictionary output format. This uses the **PyAutoConf** method
+as 1D numpy arrays, are converted to a suitable dictionary output format. This uses the **PyAutoNerves** method
 `to_dict`.
 
 ```python

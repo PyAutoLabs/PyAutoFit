@@ -17,4 +17,4 @@
 
 ## Ecosystem
 
-- Built on PyAutoConf (config); used by PyAutoGalaxy and PyAutoLens, which build `Analysis` subclasses on it.
+- Built on PyAutoNerves (config); used by PyAutoGalaxy and PyAutoLens, which build `Analysis` subclasses on it.

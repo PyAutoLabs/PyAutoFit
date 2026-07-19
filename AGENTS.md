@@ -16,7 +16,7 @@ Shared utilities (e.g. `test_mode`, `jax_wrapper`) belong in autonerves.
 
 ## Related repos
 
-- **Source siblings:** PyAutoConf (upstream). PyAutoGalaxy / PyAutoLens are
+- **Source siblings:** PyAutoNerves (upstream). PyAutoGalaxy / PyAutoLens are
   downstream consumers (they build `Analysis` subclasses on autofit).
 - **autofit_workspace** — runnable tutorials/examples (`../autofit_workspace`).
 - **autofit_workspace_test** — integration + JAX/likelihood parity scripts.
