@@ -47,6 +47,12 @@ def test__per_rule_defaults():
     assert af.MultiStartLion().optax_method == "lion"
     assert af.MultiStartLion().learning_rate == pytest.approx(1.0e-3)
 
+    # Prodigy is learning-rate-free: it resolves from optax.contrib and takes no
+    # learning rate (None -> built from the rule's own default at fit time).
+    assert af.MultiStartProdigy().optax_method == "prodigy"
+    assert af.MultiStartProdigy().learning_rate is None
+    assert af.MultiStartProdigy._default_learning_rate is None
+
     # defaults for the shared knobs
     default = af.MultiStartAdam()
     assert default.n_starts == 48
@@ -56,6 +62,21 @@ def test__per_rule_defaults():
     # batch_size defaults to None = evaluate all starts in one vmapped call
     # (the pre-batch_size behaviour, so no regression).
     assert default.batch_size is None
+    # apply_if_finite per-start rejected-step budget (the in-step NaN guard).
+    assert default.max_consecutive_nan == 8
+
+
+def test__max_consecutive_nan_is_a_carried_knob():
+    """The apply_if_finite budget is a shared base-class knob, dict-serialised
+    so a resumed search rebuilds the same guard."""
+    for cls in (
+        af.MultiStartAdam,
+        af.MultiStartADABelief,
+        af.MultiStartLion,
+        af.MultiStartProdigy,
+    ):
+        assert cls().max_consecutive_nan == 8
+        assert cls(max_consecutive_nan=3).max_consecutive_nan == 3
 
 
 def test__batch_size_is_carried_to_every_rule():
@@ -66,7 +87,12 @@ def test__batch_size_is_carried_to_every_rule():
     and is asserted in autofit_workspace_test, since the library suite is
     NumPy-only.
     """
-    for cls in (af.MultiStartAdam, af.MultiStartADABelief, af.MultiStartLion):
+    for cls in (
+        af.MultiStartAdam,
+        af.MultiStartADABelief,
+        af.MultiStartLion,
+        af.MultiStartProdigy,
+    ):
         assert cls().batch_size is None
         assert cls(batch_size=8).batch_size == 8
 
@@ -80,6 +106,20 @@ def test__dict_round_trip():
     assert restored.n_steps == 33
     assert restored.optax_method == "lion"
     assert restored.learning_rate == pytest.approx(1.0e-3)
+
+
+def test__dict_round_trip__prodigy_is_learning_rate_free():
+    # The learning-rate-free rule must survive serialisation with lr None so a
+    # resumed Prodigy search rebuilds from the rule's own default, not lr=None
+    # being coerced to a number.
+    dictionary = to_dict(af.MultiStartProdigy(n_starts=5, max_consecutive_nan=4))
+    restored = from_dict(dictionary)
+
+    assert isinstance(restored, af.MultiStartProdigy)
+    assert restored.n_starts == 5
+    assert restored.optax_method == "prodigy"
+    assert restored.learning_rate is None
+    assert restored.max_consecutive_nan == 4
 
 
 def test__samples_via_internal_from():
