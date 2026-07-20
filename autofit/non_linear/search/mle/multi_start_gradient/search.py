@@ -1,3 +1,4 @@
+import inspect
 from typing import Optional
 
 import numpy as np
@@ -15,10 +16,12 @@ from autofit.non_linear.samples.samples import Samples
 
 class AbstractMultiStartGradient(AbstractMLE):
 
-    # Name of the optax update rule, resolved lazily via ``getattr(optax, ...)``
-    # so that ``optax`` is only imported when a fit is actually run (it is a
-    # JAX-only optional dependency). Subclasses set this + a sensible default
-    # learning rate for the rule.
+    # Name of the optax update rule, resolved lazily at fit time from ``optax``
+    # then ``optax.contrib`` (so ``optax`` is only imported when a fit is
+    # actually run — it is a JAX-only optional dependency). Subclasses set this
+    # and a default learning rate for the rule; a ``_default_learning_rate`` of
+    # ``None`` means the rule is learning-rate-free (e.g. Prodigy) and is built
+    # from its own default with no learning rate supplied.
     optax_method = None
     _default_learning_rate = None
 
@@ -31,6 +34,7 @@ class AbstractMultiStartGradient(AbstractMLE):
         n_steps: int = 300,
         learning_rate: Optional[float] = None,
         batch_size: Optional[int] = None,
+        max_consecutive_nan: int = 8,
         start_lower_limit: float = 0.15,
         start_upper_limit: float = 0.85,
         initializer: Optional[AbstractInitializer] = None,
@@ -65,7 +69,16 @@ class AbstractMultiStartGradient(AbstractMLE):
             The number of gradient-update steps each start is run for.
         learning_rate
             The optax learning rate. If ``None``, the rule's default is used
-            (Adam / ADABelief ``1e-2``; the sign-based Lion ``1e-3``).
+            (Adam / ADABelief ``1e-2``; the sign-based Lion ``1e-3``). The
+            learning-rate-free rules (e.g. Prodigy) leave this ``None`` and are
+            built from their own default, estimating their own step scale.
+        max_consecutive_nan
+            The per-start rejected-step budget handed to ``optax.apply_if_finite``:
+            a non-finite gradient/update zeroes that start's step, and only after
+            this many *consecutive* non-finite steps does the guard error out.
+            This is the in-step guard for the measure-zero singularities (e.g.
+            ell_comps / shear at exactly 0); it does not rescue landscapes with
+            broad non-finite regions (that is the Phase-2 restart-on-death layer).
         batch_size
             The number of starts evaluated per vmapped ``value_and_grad`` call,
             via ``jax.lax.map``. ``None`` (default) evaluates all ``n_starts`` in
@@ -101,6 +114,7 @@ class AbstractMultiStartGradient(AbstractMLE):
         self.n_starts = n_starts
         self.n_steps = n_steps
         self.batch_size = batch_size
+        self.max_consecutive_nan = max_consecutive_nan
         self.learning_rate = (
             learning_rate if learning_rate is not None else self._default_learning_rate
         )
@@ -127,6 +141,7 @@ class AbstractMultiStartGradient(AbstractMLE):
             import jax
             import jax.numpy as jnp
             import optax
+            import optax.contrib  # noqa: F401  — makes optax.contrib rules resolvable
         except ImportError as e:
             raise ImportError(
                 f"{type(self).__name__} requires the optional `jax` and `optax` "
@@ -176,6 +191,12 @@ class AbstractMultiStartGradient(AbstractMLE):
             def batched_value_and_grad(params):
                 return jax.lax.map(_value_and_grad, params, batch_size=batch_size)
 
+        # The optax rule (resolved from optax / optax.contrib), guarded by
+        # apply_if_finite, with a jitted per-start (vmapped) update step. Built
+        # once, identically, on both the fresh and resume paths so a loaded
+        # opt_state (itself a vmapped pytree) round-trips.
+        optimizer, step_update = self._build_optimizer(optax=optax, jax=jax)
+
         try:
             search_internal = self.paths.load_search_internal()
 
@@ -190,8 +211,6 @@ class AbstractMultiStartGradient(AbstractMLE):
                 "Resuming MultiStartGradient search (previous samples found)."
             )
 
-            optimizer = getattr(optax, self.optax_method)(self.learning_rate)
-
         except (FileNotFoundError, TypeError, KeyError):
 
             params = self._broad_starts(
@@ -201,8 +220,9 @@ class AbstractMultiStartGradient(AbstractMLE):
                 jnp=jnp,
             )
 
-            optimizer = getattr(optax, self.optax_method)(self.learning_rate)
-            opt_state = optimizer.init(params)
+            # Per-start optimizer state: one independent state per start, so
+            # learning-rate-free rules never share a global scalar estimate.
+            opt_state = jax.vmap(optimizer.init)(params)
 
             best_params = np.asarray(params[0])
             best_fom = np.inf
@@ -234,7 +254,7 @@ class AbstractMultiStartGradient(AbstractMLE):
 
                 fom_history.append(best_fom)
 
-                updates, opt_state = optimizer.update(grads, opt_state, params)
+                updates, opt_state = step_update(grads, opt_state, params, foms)
                 params = optax.apply_updates(params, updates)
 
             total_steps += iterations
@@ -260,6 +280,69 @@ class AbstractMultiStartGradient(AbstractMLE):
         self.logger.info(f"{self.optax_method} MultiStartGradient sampling complete.")
 
         return search_internal, fitness
+
+    def _resolve_optax_rule(self, optax):
+        """
+        Resolve ``self.optax_method`` to an optax update-rule factory, looked up
+        first in ``optax`` (the built-in Adam family) and then in
+        ``optax.contrib`` (the learning-rate-free / experimental rules such as
+        ``prodigy``). Raises if neither module provides it.
+        """
+        rule = getattr(optax, self.optax_method, None)
+        if rule is None:
+            rule = getattr(optax.contrib, self.optax_method, None)
+        if rule is None:
+            raise ValueError(
+                f"{type(self).__name__}: optax update rule "
+                f"'{self.optax_method}' was not found in `optax` or "
+                "`optax.contrib`. Check the `optax_method` name and that the "
+                "installed optax version provides it."
+            )
+        return rule
+
+    def _build_optimizer(self, optax, jax):
+        """
+        Build the guarded optimizer and its jitted per-start update step.
+
+        Per-start ``jax.vmap`` over ``init`` / ``update`` is load-bearing: the
+        learning-rate-free rules estimate a *global scalar* step scale from
+        whole-tree norms (Prodigy / D-Adapt ``d``, DoG ``max_dist``, Mechanic's
+        scale, MoMo's Polyak step). The stacked-``(n_starts, ndim)`` state that
+        is safe for the elementwise Adam family would silently couple every
+        start into one shared estimate, so each start carries its own state.
+
+        ``optax.apply_if_finite`` is the per-start in-step guard: a non-finite
+        gradient/update zeroes that start's step rather than NaN-poisoning the
+        whole population. MoMo-family rules additionally consume the loss each
+        step via ``value=``; this is detected on the *unwrapped* rule, since
+        ``apply_if_finite`` hides ``value`` behind ``**extra_args`` (it does
+        forward it, for optax >= 0.2.5).
+        """
+        rule = self._resolve_optax_rule(optax)
+        base = rule() if self.learning_rate is None else rule(self.learning_rate)
+
+        needs_value = "value" in inspect.signature(base.update).parameters
+
+        optimizer = optax.apply_if_finite(
+            base, max_consecutive_errors=self.max_consecutive_nan
+        )
+
+        if needs_value:
+
+            @jax.jit
+            def step_update(grads, opt_state, params, values):
+                return jax.vmap(
+                    lambda g, s, p, v: optimizer.update(g, s, p, value=v)
+                )(grads, opt_state, params, values)
+
+        else:
+
+            @jax.jit
+            def step_update(grads, opt_state, params, values):
+                del values
+                return jax.vmap(optimizer.update)(grads, opt_state, params)
+
+        return optimizer, step_update
 
     def _broad_starts(self, model, fitness, batched_value_and_grad, jnp):
         """
@@ -345,6 +428,7 @@ class AbstractMultiStartGradient(AbstractMLE):
             "total_steps": total_steps,
             "optax_method": self.optax_method,
             "learning_rate": self.learning_rate,
+            "max_consecutive_nan": self.max_consecutive_nan,
             "time": self.timer.time if self.timer else None,
         }
 
@@ -397,3 +481,22 @@ class MultiStartLion(AbstractMultiStartGradient):
 
     optax_method = "lion"
     _default_learning_rate = 1.0e-3
+
+
+class MultiStartProdigy(AbstractMultiStartGradient):
+    """
+    Multi-start gradient MAP search using the learning-rate-free Prodigy update
+    rule (``optax.contrib.prodigy``).
+
+    Prodigy estimates its own step scale, so it takes **no** learning rate
+    (``_default_learning_rate = None``, resolved from ``optax.contrib``). On the
+    parametric MGE cell it is bit-identical to hand-tuned Adam (best log
+    posterior +31787.84, same winning start) with the ``learning_rate``
+    hyperparameter deleted at zero cost — the headline learning-rate-free result
+    from the #101 experiment. Its global distance estimate ``d`` is per-start
+    (the base class vmaps optimizer state over starts), so starts do not share
+    one estimate.
+    """
+
+    optax_method = "prodigy"
+    _default_learning_rate = None

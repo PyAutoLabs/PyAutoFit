@@ -66,7 +66,7 @@ local_scheme = "no-local-version"
 
 
 [project.optional-dependencies]
-jax = ["autonerves[jax]", "optax"]
+jax = ["autonerves[jax]", "optax>=0.2.5"]
 optional = [
     "autofit[jax]",
     "astropy>=5.0",
