@@ -37,6 +37,7 @@ class AbstractMultiStartGradient(AbstractMLE):
         max_consecutive_nan: int = 8,
         start_lower_limit: float = 0.15,
         start_upper_limit: float = 0.85,
+        resurrect: bool = False,
         initializer: Optional[AbstractInitializer] = None,
         iterations_per_full_update: int = None,
         iterations_per_quick_update: int = None,
@@ -97,6 +98,20 @@ class AbstractMultiStartGradient(AbstractMLE):
             The unit-cube bounds broad starts are drawn uniformly from. The
             interior default ``(0.15, 0.85)`` avoids the prior edges where many
             transforms (e.g. ``arctan2`` / ``sqrt`` at exactly 0) are singular.
+        resurrect
+            Restart-on-death. When ``True``, any start whose objective goes
+            non-finite is redrawn each step (fresh params from the start band +
+            its per-start optimizer state reinitialised), leaving alive starts
+            untouched. Default ``False`` — the parametric (MGE-class) cell has
+            only the measure-zero singularity, so the ``apply_if_finite`` guard
+            suffices and behaviour/results are unchanged. Turn it on for
+            likelihoods with broad non-finite regions (pixelized sources), where
+            every trajectory otherwise walks into a wall within ~25–50 steps and
+            ``apply_if_finite`` alone latches the start *at* the cliff edge;
+            resurrection keeps the population alive and makes the landscape
+            searchable at all. (Even so, on such landscapes a nested sampler
+            still wins decisively — resurrection makes gradient MAP *viable*
+            there, not competitive.)
         """
 
         super().__init__(
@@ -120,6 +135,7 @@ class AbstractMultiStartGradient(AbstractMLE):
         )
         self.start_lower_limit = start_lower_limit
         self.start_upper_limit = start_upper_limit
+        self.resurrect = resurrect
 
         self.logger.debug(f"Creating {self.optax_method} MultiStartGradient Search")
 
@@ -206,6 +222,7 @@ class AbstractMultiStartGradient(AbstractMLE):
             best_fom = float(search_internal["best_fom"])
             fom_history = list(search_internal["fom_history"])
             total_steps = int(search_internal["total_steps"])
+            n_resurrections = int(search_internal.get("n_resurrections", 0))
 
             self.logger.info(
                 "Resuming MultiStartGradient search (previous samples found)."
@@ -228,11 +245,16 @@ class AbstractMultiStartGradient(AbstractMLE):
             best_fom = np.inf
             fom_history = []
             total_steps = 0
+            n_resurrections = 0
 
             self.logger.info(
                 f"Starting new {self.optax_method} MultiStartGradient search "
                 f"({self.n_starts} starts, no previous samples found)."
             )
+
+        # Deterministic RNG for redrawing dead starts (only used when
+        # ``resurrect`` is on); seeded independently of the broad-start draw.
+        resurrect_rng = np.random.default_rng(1)
 
         while total_steps < self.n_steps:
 
@@ -244,15 +266,35 @@ class AbstractMultiStartGradient(AbstractMLE):
             for _ in range(iterations):
                 foms, grads = batched_value_and_grad(params)
 
-                foms_np = np.where(
-                    np.isfinite(np.asarray(foms)), np.asarray(foms), np.inf
-                )
+                alive = np.isfinite(np.asarray(foms))
+                foms_np = np.where(alive, np.asarray(foms), np.inf)
                 best_index = int(np.argmin(foms_np))
                 if foms_np[best_index] < best_fom:
                     best_fom = float(foms_np[best_index])
                     best_params = np.asarray(params[best_index])
 
                 fom_history.append(best_fom)
+
+                # Restart-on-death: redraw any start whose objective went
+                # non-finite (fresh params + reinitialised per-start optimizer
+                # state), leaving alive starts untouched. best_* is captured
+                # above, from the pre-redraw alive population. The (old,
+                # non-finite) grads of a dead start are zeroed for one step by
+                # apply_if_finite on its fresh state, so a redrawn start simply
+                # waits a step before descending.
+                if self.resurrect and not alive.all():
+                    dead_idx = np.flatnonzero(~alive)
+                    n_resurrections += int(dead_idx.size)
+                    params, opt_state = self._reinit_dead_starts(
+                        params=params,
+                        opt_state=opt_state,
+                        dead_idx=dead_idx,
+                        model=model,
+                        optimizer=optimizer,
+                        jax=jax,
+                        jnp=jnp,
+                        rng=resurrect_rng,
+                    )
 
                 updates, opt_state = step_update(grads, opt_state, params, foms)
                 params = optax.apply_updates(params, updates)
@@ -266,6 +308,7 @@ class AbstractMultiStartGradient(AbstractMLE):
                 "best_fom": best_fom,
                 "fom_history": np.asarray(fom_history),
                 "total_steps": total_steps,
+                "n_resurrections": n_resurrections,
             }
             self.paths.save_search_internal(obj=search_internal)
 
@@ -343,6 +386,46 @@ class AbstractMultiStartGradient(AbstractMLE):
                 return jax.vmap(optimizer.update)(grads, opt_state, params)
 
         return optimizer, step_update
+
+    def _reinit_dead_starts(
+        self, params, opt_state, dead_idx, model, optimizer, jax, jnp, rng
+    ):
+        """
+        Redraw the dead starts (``dead_idx``) and reinitialise their per-start
+        optimizer state, leaving the alive starts untouched — the restart-on-
+        death recovery step.
+
+        Each dead row's params are redrawn uniformly from the start band and
+        mapped to physical parameters; a fresh vmapped optimizer state is built
+        and merged into the live state pytree with a boolean mask (``jnp.where``
+        per leaf). ``np.asarray`` of a JAX array is read-only, so the redraw
+        happens in an ``np.array`` copy.
+        """
+        n = params.shape[0]
+
+        params_np = np.array(params)  # writable copy (jax arrays are read-only)
+        for k in dead_idx:
+            unit_vector = rng.uniform(
+                self.start_lower_limit, self.start_upper_limit, size=model.prior_count
+            )
+            params_np[k] = np.asarray(
+                model.vector_from_unit_vector(unit_vector=list(unit_vector), xp=jnp)
+            )
+        params = jnp.asarray(params_np)
+
+        fresh_state = jax.vmap(optimizer.init)(params)
+
+        mask = np.zeros(n, dtype=bool)
+        mask[dead_idx] = True
+        mask_j = jnp.asarray(mask)
+
+        def merge(old, fresh):
+            m = mask_j.reshape((n,) + (1,) * (fresh.ndim - 1))
+            return jnp.where(m, fresh, old)
+
+        opt_state = jax.tree.map(merge, opt_state, fresh_state)
+
+        return params, opt_state
 
     def _broad_starts(self, model, fitness, batched_value_and_grad, jnp):
         """
@@ -429,6 +512,8 @@ class AbstractMultiStartGradient(AbstractMLE):
             "optax_method": self.optax_method,
             "learning_rate": self.learning_rate,
             "max_consecutive_nan": self.max_consecutive_nan,
+            "resurrect": self.resurrect,
+            "n_resurrections": int(search_internal.get("n_resurrections", 0)),
             "time": self.timer.time if self.timer else None,
         }
 
