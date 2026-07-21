@@ -64,6 +64,23 @@ def test__per_rule_defaults():
     assert default.batch_size is None
     # apply_if_finite per-start rejected-step budget (the in-step NaN guard).
     assert default.max_consecutive_nan == 8
+    # restart-on-death is opt-in — default off keeps the MGE-cell behaviour.
+    assert default.resurrect is False
+
+
+def test__resurrect_defaults_off_and_is_a_carried_knob():
+    """``resurrect`` (restart-on-death) is a shared base-class knob, off by
+    default and dict-serialised so a resumed search keeps it. The redraw /
+    per-start state reinit itself is JAX and is validated in
+    autofit_workspace_test (the library suite is NumPy-only)."""
+    for cls in (
+        af.MultiStartAdam,
+        af.MultiStartADABelief,
+        af.MultiStartLion,
+        af.MultiStartProdigy,
+    ):
+        assert cls().resurrect is False
+        assert cls(resurrect=True).resurrect is True
 
 
 def test__max_consecutive_nan_is_a_carried_knob():
@@ -119,7 +136,16 @@ def test__dict_round_trip__prodigy_is_learning_rate_free():
     assert restored.n_starts == 5
     assert restored.optax_method == "prodigy"
     assert restored.learning_rate is None
-    assert restored.max_consecutive_nan == 4
+
+
+def test__dict_round_trip__resurrect():
+    # The restart-on-death flag must survive serialisation so a resumed search
+    # keeps redrawing dead starts.
+    restored = from_dict(to_dict(af.MultiStartAdam(resurrect=True, n_starts=6)))
+
+    assert isinstance(restored, af.MultiStartAdam)
+    assert restored.resurrect is True
+    assert restored.n_starts == 6
 
 
 def test__samples_via_internal_from():
@@ -141,9 +167,10 @@ def test__samples_via_internal_from():
         "best_fom": best_fom,
         "fom_history": np.asarray([-4.0, -8.0, best_fom]),
         "total_steps": 42,
+        "n_resurrections": 7,
     }
 
-    search = af.MultiStartAdam(n_starts=2, n_steps=42)
+    search = af.MultiStartAdam(n_starts=2, n_steps=42, resurrect=True)
     samples = search.samples_via_internal_from(
         model=model, search_internal=search_internal
     )
@@ -169,3 +196,6 @@ def test__samples_via_internal_from():
     assert samples.samples_info["optax_method"] == "adam"
     assert samples.samples_info["n_starts"] == 2
     assert samples.samples_info["total_steps"] == 42
+    # restart-on-death diagnostics flow through to samples_info.
+    assert samples.samples_info["resurrect"] is True
+    assert samples.samples_info["n_resurrections"] == 7
