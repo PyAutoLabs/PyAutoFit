@@ -92,3 +92,47 @@ def log_likelihood_vs_iteration(
         actual_filename += "_last_50_percent"
 
     output_figure(path=path, filename=actual_filename, format=format)
+
+
+@skip_in_test_mode
+def figure_of_merit_vs_iteration(
+    samples,
+    path=None,
+    filename="figure_of_merit_vs_iteration",
+    format="show",
+    **kwargs,
+):
+    """
+    Plot the global-best figure-of-merit trace of an auto-convergence gradient
+    search versus step, so the plateau the search stopped on can be inspected.
+
+    The trace is read from ``samples.samples_info["fom_history"]`` (the per-step
+    global best figure-of-merit, ``-2 * log_posterior``, that the multi-start
+    gradient searches record). Searches that do not record it (e.g. ``LBFGS`` /
+    ``Drawer``) leave it absent and this plot is skipped.
+    """
+    fom_history = samples.samples_info.get("fom_history")
+
+    if not fom_history:
+        return
+
+    import matplotlib.pyplot as plt
+
+    iteration_list = range(len(fom_history))
+
+    plt.figure(figsize=(12, 12))
+    plt.plot(iteration_list, fom_history, c="k")
+
+    plt.xlabel("Step", fontsize=16)
+    plt.ylabel("Global-Best Figure of Merit (-2 ln posterior)", fontsize=16)
+    plt.xticks(fontsize=16)
+    plt.yticks(fontsize=16)
+
+    stop_reason = samples.samples_info.get("stop_reason")
+    title = "Global-Best Figure of Merit vs Step (auto-convergence trace)"
+    if stop_reason is not None:
+        title += f"\nstopped: {stop_reason}"
+
+    plt.title(title, fontsize=20)
+
+    output_figure(path=path, filename=filename, format=format)

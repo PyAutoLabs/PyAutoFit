@@ -309,8 +309,18 @@ class Samples(SamplesInterface, ABC):
     def max_log_likelihood_index(self) -> int:
         """
         The index of the sample with the highest log likelihood.
+
+        ``np.nanargmax`` (not ``np.argmax``) so ``NaN`` samples are never
+        selected: searches such as the multi-start gradient MAP optimizers record
+        their non-best starts as zero-weight diagnostic rows with a ``NaN`` log
+        likelihood, and plain ``argmax`` treats ``NaN`` as the maximum. This keeps
+        the index consistent with ``max_log_likelihood_sample``. If every sample
+        is ``NaN`` (a fully failed fit) the first index is returned.
         """
-        return int(np.argmax(self.log_likelihood_list))
+        log_likelihood_list = np.asarray(self.log_likelihood_list, dtype=float)
+        if np.all(np.isnan(log_likelihood_list)):
+            return 0
+        return int(np.nanargmax(log_likelihood_list))
 
     @to_instance
     def max_log_likelihood(self) -> List[float]:
@@ -333,8 +343,16 @@ class Samples(SamplesInterface, ABC):
     def max_log_posterior_index(self) -> int:
         """
         The index of the sample with the highest log posterior.
+
+        ``np.nanargmax`` (not ``np.argmax``) so ``NaN`` samples are never
+        selected — see ``max_log_likelihood_index``; the zero-weight diagnostic
+        rows written by the multi-start gradient searches carry a ``NaN`` log
+        posterior. If every sample is ``NaN`` the first index is returned.
         """
-        return int(np.argmax(self.log_posterior_list))
+        log_posterior_list = np.asarray(self.log_posterior_list, dtype=float)
+        if np.all(np.isnan(log_posterior_list)):
+            return 0
+        return int(np.nanargmax(log_posterior_list))
 
     @to_instance
     def max_log_posterior(self) -> ModelInstance:
