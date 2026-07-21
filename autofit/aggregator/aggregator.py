@@ -19,6 +19,8 @@ from pathlib import Path
 from shutil import rmtree
 from typing import List, Union, Iterator, Optional
 
+from autonerves.test_mode import is_test_mode
+
 from .predicate import AttributePredicate
 from .search_output import SearchOutput, GridSearchOutput, GridSearch
 
@@ -168,42 +170,59 @@ class Aggregator:
         """
         print("Aggregator loading search_outputs... could take some time.")
 
-        search_outputs = []
-        grid_search_outputs = []
+        def scan(scan_directory):
+            search_outputs = []
+            grid_search_outputs = []
 
-        for root, dirs, filenames in os.walk(directory, topdown=True):
-            for filename in filenames:
-                if filename.endswith(".zip"):
-                    extracted = Path(root) / filename[:-4]
-                    if extracted.exists():
-                        continue
-                    try:
-                        with zipfile.ZipFile(Path(root) / filename, "r") as f:
-                            f.extractall(extracted)
-                    except zipfile.BadZipFile:
-                        raise zipfile.BadZipFile(
-                            f"File is not a zip file: \n " f"{root} \n" f"{filename}"
-                        )
-                    dirs.append(filename[:-4])
+            for root, dirs, filenames in os.walk(scan_directory, topdown=True):
+                for filename in filenames:
+                    if filename.endswith(".zip"):
+                        extracted = Path(root) / filename[:-4]
+                        if extracted.exists():
+                            continue
+                        try:
+                            with zipfile.ZipFile(Path(root) / filename, "r") as f:
+                                f.extractall(extracted)
+                        except zipfile.BadZipFile:
+                            raise zipfile.BadZipFile(
+                                f"File is not a zip file: \n " f"{root} \n" f"{filename}"
+                            )
+                        dirs.append(filename[:-4])
 
-            def should_add():
-                return not completed_only or ".completed" in filenames
+                def should_add():
+                    return not completed_only or ".completed" in filenames
 
-            if "metadata" in filenames:
-                if should_add():
-                    search_outputs.append(
-                        SearchOutput(
-                            Path(root),
-                            reference=reference,
+                if "metadata" in filenames:
+                    if should_add():
+                        search_outputs.append(
+                            SearchOutput(
+                                Path(root),
+                                reference=reference,
+                            )
                         )
-                    )
-            if ".is_grid_search" in filenames:
-                if should_add():
-                    grid_search_outputs.append(
-                        GridSearchOutput(
-                            Path(root),
+                if ".is_grid_search" in filenames:
+                    if should_add():
+                        grid_search_outputs.append(
+                            GridSearchOutput(
+                                Path(root),
+                            )
                         )
-                    )
+
+            return search_outputs, grid_search_outputs
+
+        search_outputs, grid_search_outputs = scan(directory)
+
+        # Under test mode the searches wrote their results beneath an inserted
+        # ``test_mode`` segment (``output/test_mode/<prefix>``) rather than the
+        # real-run location the caller points at (``output/<prefix>``); see
+        # ``_test_mode_segment`` in ``non_linear/paths/abstract.py``. If nothing
+        # was found there, retry once against that sibling so aggregator-based
+        # tutorials (e.g. features/interpolate) run cleanly under test mode.
+        if len(search_outputs) == 0 and is_test_mode():
+            directory = Path(directory)
+            test_mode_directory = directory.parent / "test_mode" / directory.name
+            if test_mode_directory.exists():
+                search_outputs, grid_search_outputs = scan(test_mode_directory)
 
         if len(search_outputs) == 0:
             print(f"\nNo search_outputs found in {directory}\n")

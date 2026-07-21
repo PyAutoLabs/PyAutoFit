@@ -68,3 +68,34 @@ def test_samples_summary_cached():
     search_output = SearchOutput(directory)
 
     assert search_output.samples_summary is search_output.samples_summary
+
+
+@pytest.fixture(name="test_mode_directory")
+def make_test_mode_directory(tmp_path):
+    """
+    Mirrors the on-disk layout a search produces under test mode: the results
+    live beneath an inserted ``test_mode`` segment (``output/test_mode/prefix``)
+    while the caller points ``from_directory`` at the real-run location
+    (``output/prefix``), which holds no metadata.
+    """
+    source = Path(__file__).parent / "search_output"
+    real_directory = tmp_path / "output" / "prefix"
+    real_directory.mkdir(parents=True)
+    shutil.copytree(source, real_directory.parent / "test_mode" / "prefix" / "search_output")
+    return real_directory
+
+
+def test_from_directory_test_mode_fallback(test_mode_directory, monkeypatch):
+    monkeypatch.setattr(
+        "autofit.aggregator.aggregator.is_test_mode", lambda: True
+    )
+    aggregator = Aggregator.from_directory(test_mode_directory)
+    assert len(aggregator) == 1
+
+
+def test_from_directory_no_fallback_when_not_test_mode(test_mode_directory, monkeypatch):
+    monkeypatch.setattr(
+        "autofit.aggregator.aggregator.is_test_mode", lambda: False
+    )
+    aggregator = Aggregator.from_directory(test_mode_directory)
+    assert len(aggregator) == 0
