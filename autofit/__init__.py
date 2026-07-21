@@ -92,6 +92,9 @@ from .non_linear.search.mle.multi_start_gradient.search import MultiStartAdam
 from .non_linear.search.mle.multi_start_gradient.search import MultiStartADABelief
 from .non_linear.search.mle.multi_start_gradient.search import MultiStartLion
 from .non_linear.search.mle.multi_start_gradient.search import MultiStartProdigy
+from .non_linear.search.mle.multi_start_gradient.convergence import (
+    MultiStartGradientConvergence,
+)
 from .non_linear.paths.abstract import AbstractPaths
 from .non_linear.paths import DirectoryPaths
 from .non_linear.paths import DatabasePaths
