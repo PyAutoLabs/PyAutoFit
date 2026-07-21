@@ -12,6 +12,9 @@ from autofit.non_linear.fitness import Fitness
 from autofit.non_linear.initializer import AbstractInitializer
 from autofit.non_linear.samples.sample import Sample
 from autofit.non_linear.samples.samples import Samples
+from autofit.non_linear.search.mle.multi_start_gradient.convergence import (
+    MultiStartGradientConvergence,
+)
 
 
 class AbstractMultiStartGradient(AbstractMLE):
@@ -38,6 +41,7 @@ class AbstractMultiStartGradient(AbstractMLE):
         start_lower_limit: float = 0.15,
         start_upper_limit: float = 0.85,
         resurrect: bool = False,
+        convergence: Optional[MultiStartGradientConvergence] = None,
         initializer: Optional[AbstractInitializer] = None,
         iterations_per_full_update: int = None,
         iterations_per_quick_update: int = None,
@@ -112,6 +116,16 @@ class AbstractMultiStartGradient(AbstractMLE):
             searchable at all. (Even so, on such landscapes a nested sampler
             still wins decisively — resurrection makes gradient MAP *viable*
             there, not competitive.)
+        convergence
+            Auto-convergence (early-stopping) settings. When
+            ``check_for_convergence`` is ``True`` (the default) the search stops
+            early once the global-best figure-of-merit has plateaued, so users do
+            not have to hand-tune ``n_steps`` — which remains a hard ceiling / max
+            budget (the search never runs forever). ``None`` builds the default
+            ``MultiStartGradientConvergence()``. The check is deliberately skipped
+            when ``resurrect=True`` (the pixelized regime, whose best-fom climbs in
+            breakthrough jumps that a plateau check would false-stop on); there the
+            search leans on the ``n_steps`` ceiling.
         """
 
         super().__init__(
@@ -136,6 +150,9 @@ class AbstractMultiStartGradient(AbstractMLE):
         self.start_lower_limit = start_lower_limit
         self.start_upper_limit = start_upper_limit
         self.resurrect = resurrect
+        self.convergence = (
+            convergence if convergence is not None else MultiStartGradientConvergence()
+        )
 
         self.logger.debug(f"Creating {self.optax_method} MultiStartGradient Search")
 
@@ -223,6 +240,7 @@ class AbstractMultiStartGradient(AbstractMLE):
             fom_history = list(search_internal["fom_history"])
             total_steps = int(search_internal["total_steps"])
             n_resurrections = int(search_internal.get("n_resurrections", 0))
+            stop_reason = search_internal.get("stop_reason", None)
 
             self.logger.info(
                 "Resuming MultiStartGradient search (previous samples found)."
@@ -246,6 +264,7 @@ class AbstractMultiStartGradient(AbstractMLE):
             fom_history = []
             total_steps = 0
             n_resurrections = 0
+            stop_reason = None
 
             self.logger.info(
                 f"Starting new {self.optax_method} MultiStartGradient search "
@@ -256,12 +275,25 @@ class AbstractMultiStartGradient(AbstractMLE):
         # ``resurrect`` is on); seeded independently of the broad-start draw.
         resurrect_rng = np.random.default_rng(1)
 
-        while total_steps < self.n_steps:
+        # ``n_steps`` is the hard ceiling / max budget; ``stop_reason`` becomes
+        # ``"converged"`` if the auto-convergence check stops the search early
+        # (this also short-circuits the loop on a resumed, already-converged run).
+        while total_steps < self.n_steps and stop_reason != "converged":
 
             steps_remaining = self.n_steps - total_steps
             iterations = min(
                 self.iterations_per_full_update or self.n_steps, steps_remaining
             )
+
+            # Convergence is assessed every step (``fom_history`` updates every
+            # step) rather than only at the ``iterations_per_full_update`` boundary,
+            # so early-stopping works even with the default single-chunk update
+            # cadence (``iterations_per_full_update=None``). Checkpointing and the
+            # expensive ``perform_update`` still happen only at the boundary (or on
+            # convergence), so the extra work per step is a cheap NumPy plateau
+            # check. The check is skipped when ``resurrect`` is on (pixelized
+            # regime), where a plateau does not mean converged.
+            converged = False
 
             for _ in range(iterations):
                 foms, grads = batched_value_and_grad(params)
@@ -299,7 +331,18 @@ class AbstractMultiStartGradient(AbstractMLE):
                 updates, opt_state = step_update(grads, opt_state, params, foms)
                 params = optax.apply_updates(params, updates)
 
-            total_steps += iterations
+                total_steps += 1
+
+                if not self.resurrect and self.convergence.check_if_converged(
+                    fom_history
+                ):
+                    converged = True
+                    break
+
+            if converged:
+                stop_reason = "converged"
+            elif total_steps >= self.n_steps:
+                stop_reason = "max_steps"
 
             search_internal = {
                 "params": np.asarray(params),
@@ -309,16 +352,26 @@ class AbstractMultiStartGradient(AbstractMLE):
                 "fom_history": np.asarray(fom_history),
                 "total_steps": total_steps,
                 "n_resurrections": n_resurrections,
+                "stop_reason": stop_reason,
             }
             self.paths.save_search_internal(obj=search_internal)
 
+            # A converged (or ceiling-reached) boundary is the final update, so it
+            # runs with ``during_analysis=False``; intermediate boundaries do not.
+            is_final = converged or total_steps >= self.n_steps
             self.perform_update(
                 model=model,
                 analysis=analysis,
-                during_analysis=total_steps < self.n_steps,
+                during_analysis=not is_final,
                 fitness=fitness,
                 search_internal=search_internal,
             )
+
+            if converged:
+                self.logger.info(
+                    f"{self.optax_method} MultiStartGradient converged early at "
+                    f"step {total_steps} (best figure-of-merit plateaued)."
+                )
 
         self.logger.info(f"{self.optax_method} MultiStartGradient sampling complete.")
 
@@ -374,9 +427,9 @@ class AbstractMultiStartGradient(AbstractMLE):
 
             @jax.jit
             def step_update(grads, opt_state, params, values):
-                return jax.vmap(
-                    lambda g, s, p, v: optimizer.update(g, s, p, value=v)
-                )(grads, opt_state, params, values)
+                return jax.vmap(lambda g, s, p, v: optimizer.update(g, s, p, value=v))(
+                    grads, opt_state, params, values
+                )
 
         else:
 
@@ -490,9 +543,7 @@ class AbstractMultiStartGradient(AbstractMLE):
         # Fitness.call returns -2 * log_posterior, so log_posterior = -0.5 * fom.
         best_log_posterior = -0.5 * float(search_internal["best_fom"])
         log_likelihood_list = [best_log_posterior - log_prior_list[0]]
-        log_likelihood_list += [
-            np.nan for _ in range(len(parameter_lists) - 1)
-        ]
+        log_likelihood_list += [np.nan for _ in range(len(parameter_lists) - 1)]
 
         weight_list = [1.0] + [0.0] * (len(parameter_lists) - 1)
 

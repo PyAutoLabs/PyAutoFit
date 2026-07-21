@@ -114,6 +114,96 @@ def test__batch_size_is_carried_to_every_rule():
         assert cls(batch_size=8).batch_size == 8
 
 
+def test__convergence_default_is_on_and_carried():
+    """Auto-convergence is a shared base-class setting, on by default (so users do
+    not hand-tune ``n_steps``), and a custom settings object is carried through."""
+    for cls in (
+        af.MultiStartAdam,
+        af.MultiStartADABelief,
+        af.MultiStartLion,
+        af.MultiStartProdigy,
+    ):
+        default = cls().convergence
+        assert isinstance(default, af.MultiStartGradientConvergence)
+        assert default.check_for_convergence is True
+        # documented defaults for the plateau check.
+        assert default.window == 50
+        assert default.min_steps == 100
+        assert default.rtol == pytest.approx(1.0e-4)
+        assert default.atol == pytest.approx(1.0e-3)
+
+        custom = af.MultiStartGradientConvergence(check_for_convergence=False)
+        assert cls(convergence=custom).convergence is custom
+
+
+def test__check_if_converged__plateau_stops_climbing_does_not():
+    # rtol/atol both zero: converges only on an exactly-flat window.
+    convergence = af.MultiStartGradientConvergence(
+        window=3, min_steps=3, rtol=0.0, atol=0.5
+    )
+
+    # Flat global-best over the window -> converged.
+    assert convergence.check_if_converged([10.0, 10.0, 10.0]) is True
+
+    # Still descending over the window -> not converged.
+    assert convergence.check_if_converged([10.0, 5.0, 1.0]) is False
+
+
+def test__check_if_converged__respects_min_steps_and_window_length():
+    convergence = af.MultiStartGradientConvergence(
+        window=3, min_steps=5, rtol=0.0, atol=1.0
+    )
+
+    # Fewer than max(min_steps, window) entries -> never terminates early.
+    assert convergence.check_if_converged([10.0, 10.0, 10.0]) is False
+    assert convergence.check_if_converged([10.0, 10.0, 10.0, 10.0]) is False
+
+    # Once min_steps entries exist and the window is flat -> converged.
+    assert convergence.check_if_converged([10.0] * 5) is True
+
+
+def test__check_if_converged__relative_tolerance():
+    convergence = af.MultiStartGradientConvergence(
+        window=3, min_steps=3, rtol=1.0e-4, atol=0.0
+    )
+
+    # Improvement 0.1 over a best-fom ~1000 is within rtol * 1000 = 0.1 -> converged.
+    assert convergence.check_if_converged([1000.1, 1000.05, 1000.0]) is True
+
+    # A large improvement over the same window is not within tolerance.
+    assert convergence.check_if_converged([1002.0, 1001.0, 1000.0]) is False
+
+
+def test__check_if_converged__disabled_and_non_finite():
+    # check_for_convergence=False never terminates, even on a flat window.
+    disabled = af.MultiStartGradientConvergence(
+        check_for_convergence=False, window=3, min_steps=3
+    )
+    assert disabled.check_if_converged([10.0, 10.0, 10.0]) is False
+
+    # A non-finite window (no finite basin found yet) is not a real plateau.
+    convergence = af.MultiStartGradientConvergence(window=3, min_steps=3, atol=1.0)
+    assert convergence.check_if_converged([np.inf, np.inf, np.inf]) is False
+
+
+def test__dict_round_trip__convergence():
+    # The convergence settings must survive serialisation so a resumed search
+    # keeps the same early-stopping behaviour.
+    search = af.MultiStartAdam(
+        n_starts=4,
+        convergence=af.MultiStartGradientConvergence(
+            check_for_convergence=False, window=7, min_steps=9
+        ),
+    )
+    restored = from_dict(to_dict(search))
+
+    assert isinstance(restored, af.MultiStartAdam)
+    assert isinstance(restored.convergence, af.MultiStartGradientConvergence)
+    assert restored.convergence.check_for_convergence is False
+    assert restored.convergence.window == 7
+    assert restored.convergence.min_steps == 9
+
+
 def test__dict_round_trip():
     dictionary = to_dict(af.MultiStartLion(n_starts=7, n_steps=33))
     restored = from_dict(dictionary)
