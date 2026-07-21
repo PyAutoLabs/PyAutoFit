@@ -258,6 +258,7 @@ def test__samples_via_internal_from():
         "fom_history": np.asarray([-4.0, -8.0, best_fom]),
         "total_steps": 42,
         "n_resurrections": 7,
+        "stop_reason": "converged",
     }
 
     search = af.MultiStartAdam(n_starts=2, n_steps=42, resurrect=True)
@@ -289,3 +290,95 @@ def test__samples_via_internal_from():
     # restart-on-death diagnostics flow through to samples_info.
     assert samples.samples_info["resurrect"] is True
     assert samples.samples_info["n_resurrections"] == 7
+
+    # Auto-convergence outcome (phase-2 results contract) flows through to
+    # samples_info: the stop reason, the converged flag, the settings, and the
+    # global-best figure-of-merit trace (plain floats, JSON-round-trippable).
+    assert samples.samples_info["stop_reason"] == "converged"
+    assert samples.samples_info["converged"] is True
+    assert samples.samples_info["convergence"]["check_for_convergence"] is True
+    assert samples.samples_info["convergence"]["window"] == search.convergence.window
+    assert (
+        samples.samples_info["convergence"]["min_steps"] == search.convergence.min_steps
+    )
+    assert samples.samples_info["fom_history"] == pytest.approx([-4.0, -8.0, best_fom])
+    assert all(isinstance(x, float) for x in samples.samples_info["fom_history"])
+
+
+def test__samples_info__stop_reason_max_steps_and_legacy_search_internal():
+    model = af.Model(example.Gaussian)
+
+    best_params = np.asarray(model.vector_from_unit_vector([0.5] * model.prior_count))
+    per_start_params = np.stack([best_params])
+
+    base_internal = {
+        "params": per_start_params,
+        "best_params": best_params,
+        "best_fom": -2.0,
+        "total_steps": 300,
+        "n_resurrections": 0,
+    }
+
+    search = af.MultiStartAdam(n_starts=1, n_steps=300)
+
+    # Ceiling reached: converged is False, stop_reason is "max_steps".
+    samples = search.samples_via_internal_from(
+        model=model,
+        search_internal={
+            **base_internal,
+            "fom_history": np.asarray([-2.0]),
+            "stop_reason": "max_steps",
+        },
+    )
+    assert samples.samples_info["stop_reason"] == "max_steps"
+    assert samples.samples_info["converged"] is False
+
+    # Legacy search_internal (pre-auto-convergence: no stop_reason / fom_history)
+    # degrades gracefully rather than KeyError-ing.
+    legacy = search.samples_via_internal_from(
+        model=model, search_internal=base_internal
+    )
+    assert legacy.samples_info["stop_reason"] is None
+    assert legacy.samples_info["converged"] is False
+    assert legacy.samples_info["fom_history"] is None
+
+
+def test__variable_length_zero_weight_nan_rows_are_robust():
+    """The multi-start searches write zero-weight, NaN-log-likelihood diagnostic
+    rows for the non-best starts, and auto-convergence makes runs variable-length.
+    The max-likelihood/posterior accessors must never pick a NaN diagnostic row
+    (plain ``np.argmax`` would), and the aggregator summary must not raise for
+    runs of differing length."""
+    model = af.Model(example.Gaussian)
+    best_params = np.asarray(model.vector_from_unit_vector([0.5] * model.prior_count))
+
+    def samples_for(n_starts, total_steps):
+        per_start = np.stack(
+            [np.asarray(model.vector_from_unit_vector([0.4] * model.prior_count))]
+            * n_starts
+        )
+        search_internal = {
+            "params": per_start,
+            "best_params": best_params,
+            "best_fom": -10.0,
+            "fom_history": np.asarray([-4.0] * total_steps),
+            "total_steps": total_steps,
+            "n_resurrections": 0,
+            "stop_reason": "converged",
+        }
+        return af.MultiStartAdam(
+            n_starts=n_starts, n_steps=300
+        ).samples_via_internal_from(model=model, search_internal=search_internal)
+
+    for n_starts, total_steps in [(2, 40), (16, 175)]:
+        samples = samples_for(n_starts, total_steps)
+
+        # The NaN diagnostic rows are never selected as the best (argmax would).
+        assert samples.max_log_likelihood_index == 0
+        assert samples.max_log_posterior_index == 0
+        assert samples.max_log_likelihood(as_instance=False) == pytest.approx(
+            list(best_params)
+        )
+
+        # The aggregator summary is computed without an IndexError.
+        assert samples.summary() is not None

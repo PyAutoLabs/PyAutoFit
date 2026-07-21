@@ -535,6 +535,11 @@ class AbstractMultiStartGradient(AbstractMLE):
         best_params = np.asarray(search_internal["best_params"])
         per_start_params = np.asarray(search_internal["params"])
         total_steps = int(search_internal["total_steps"])
+        # ``stop_reason`` is persisted by the fit loop ("converged" | "max_steps");
+        # older search_internal files (pre-auto-convergence) have neither it nor a
+        # ``fom_history``, so both are read defensively.
+        stop_reason = search_internal.get("stop_reason")
+        fom_history = search_internal.get("fom_history")
 
         parameter_lists = [list(best_params)] + [list(p) for p in per_start_params]
 
@@ -565,6 +570,24 @@ class AbstractMultiStartGradient(AbstractMLE):
             "max_consecutive_nan": self.max_consecutive_nan,
             "resurrect": self.resurrect,
             "n_resurrections": int(search_internal.get("n_resurrections", 0)),
+            # Auto-convergence outcome: whether the run stopped on the plateau
+            # check ("converged") or exhausted the ``n_steps`` ceiling
+            # ("max_steps"), the settings that produced it, and the global-best
+            # figure-of-merit trace so the plateau can be inspected downstream.
+            "stop_reason": stop_reason,
+            "converged": stop_reason == "converged",
+            "convergence": {
+                "check_for_convergence": self.convergence.check_for_convergence,
+                "window": self.convergence.window,
+                "rtol": self.convergence.rtol,
+                "atol": self.convergence.atol,
+                "min_steps": self.convergence.min_steps,
+            },
+            "fom_history": (
+                [float(x) for x in np.asarray(fom_history)]
+                if fom_history is not None
+                else None
+            ),
             "time": self.timer.time if self.timer else None,
         }
 

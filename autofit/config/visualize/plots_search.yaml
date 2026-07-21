@@ -5,3 +5,4 @@ mcmc:
 mle:
   subplot_parameters: true   # Output a subplot of the best-fit parameters of the model?
   log_likelihood_vs_iteration: true  # Output a plot of the log likelihood versus iteration number?
+  figure_of_merit_vs_iteration: true  # Output the global-best figure-of-merit trace (auto-convergence gradient searches)?
