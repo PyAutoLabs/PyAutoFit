@@ -872,9 +872,24 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         log_likelihood = -1.0e99
         if call_likelihood:
             instance = model.instance_from_vector(vector=parameter_vector)
-            log_likelihood = float(
-                analysis.log_likelihood_function(instance)
-            )
+            try:
+                log_likelihood = float(
+                    analysis.log_likelihood_function(instance)
+                )
+            except exc.FitException as e:
+                # A `FitException` means this particular instance is pathological
+                # (e.g. a non-positive-definite inversion, or a degenerate mesh
+                # that yields NaN vertices). In a real search the sampler absorbs
+                # this by resampling; test mode has no sampler, so a single
+                # unlucky verification eval must not hard-fail the run. Keep the
+                # `-1.0e99` sentinel — the same effect a resample-to-reject has —
+                # and log the cause so a genuinely broken likelihood stays visible.
+                # Only `FitException` is caught: real code errors still propagate.
+                logger.warning(
+                    "TEST MODE 2: likelihood verification raised FitException "
+                    f"({e.__cause__ or e!r}); treating as a resample-rejected "
+                    "instance and continuing with the sentinel log likelihood."
+                )
 
         sample_list = self._build_fake_samples(
             model=model,

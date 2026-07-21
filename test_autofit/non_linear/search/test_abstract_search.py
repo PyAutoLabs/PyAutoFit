@@ -420,3 +420,56 @@ class TestBypassWritesCompleted:
         )
 
         assert result is not None
+
+
+class _FitExceptionAnalysis(af.m.MockAnalysis):
+    """Analysis whose likelihood always raises `FitException`, mimicking a
+    pathological instance (non-PD inversion / NaN Delaunay mesh) that a real
+    sampler would resample away."""
+
+    def log_likelihood_function(self, instance):
+        raise af.exc.FitException("pathological instance (test)")
+
+
+class TestBypassToleratesFitException:
+    """
+    In test mode 2 the bypass calls the likelihood once to verify it works. A
+    single unlucky instance raising `FitException` (a resample signal a real
+    sampler absorbs) must NOT hard-fail the run — otherwise flaky pixelization
+    scripts intermittently break CI smoke (autolens_workspace#307, PyAutoLens#640).
+    Only `FitException` is tolerated; genuine errors still propagate.
+    """
+
+    def test__test_mode_2__fitexception_tolerated__fit_completes_with_sentinel(
+        self, monkeypatch
+    ):
+        monkeypatch.setenv("PYAUTO_TEST_MODE", "2")
+
+        search = af.DynestyStatic(
+            name="bypass_fitexception", unique_tag="bypass_fitexception_test"
+        )
+
+        result = search.fit(
+            model=af.Model(af.m.MockClassx2), analysis=_FitExceptionAnalysis()
+        )
+
+        assert result is not None
+        # The failed verification eval falls back to the -1.0e99 sentinel, the
+        # same effect as a resample-to-reject.
+        assert float(result.samples.max_log_likelihood_sample.log_likelihood) == pytest.approx(
+            -1.0e99
+        )
+
+    def test__test_mode_2__non_fitexception_still_propagates(self, monkeypatch):
+        monkeypatch.setenv("PYAUTO_TEST_MODE", "2")
+
+        class _BrokenAnalysis(af.m.MockAnalysis):
+            def log_likelihood_function(self, instance):
+                raise ValueError("a genuine bug, not a resample signal")
+
+        search = af.DynestyStatic(
+            name="bypass_broken", unique_tag="bypass_broken_test"
+        )
+
+        with pytest.raises(ValueError):
+            search.fit(model=af.Model(af.m.MockClassx2), analysis=_BrokenAnalysis())
