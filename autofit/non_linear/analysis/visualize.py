@@ -27,8 +27,8 @@ class Visualizer:
 
         4) If the analysis is running a database session visualization is switched off.
 
-        5) If PyAutoFit test mode is on visualization is disabled, irrespective of the `force_visualization_overwite`
-        config input.
+        5) If test mode is on (the `PYAUTO_TEST_MODE` environment variable) visualization is disabled, irrespective
+        of the `force_visualization_overwite` config input.
 
         Parameters
         ----------
