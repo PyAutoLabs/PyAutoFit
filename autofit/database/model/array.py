@@ -170,13 +170,21 @@ class HDU(Array):
         self._header = header.tostring()
 
     @property
+    def has_data(self):
+        """
+        Whether this HDU carries an array payload. A data-less HDU stores no
+        shape, which is how it is distinguished from one holding an array.
+        """
+        return self._shape is not None
+
+    @property
     def hdu(self):
         from astropy.io import fits
 
         type_ = fits.PrimaryHDU if self.is_primary else fits.ImageHDU
 
         return type_(
-            self.array,
+            self.array if self.has_data else None,
             self.header,
         )
 
@@ -185,7 +193,18 @@ class HDU(Array):
         from astropy.io import fits
 
         self.is_primary = isinstance(hdu, fits.PrimaryHDU)
-        self.array = hdu.data
+
+        # A data-less HDU is legitimate and routine: the first HDU of a
+        # multi-extension FITS is conventionally an empty PrimaryHDU, and
+        # `AggregateFITS` emits exactly that. Leave the array columns null
+        # rather than dereferencing `hdu.data.dtype` on None.
+        if hdu.data is None:
+            self._dtype = None
+            self._shape = None
+            self.bytes = None
+        else:
+            self.array = hdu.data
+
         self.header = hdu.header
 
     @property
