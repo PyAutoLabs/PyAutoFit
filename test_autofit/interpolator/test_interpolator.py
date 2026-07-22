@@ -13,6 +13,14 @@ def test_trivial():
     assert result is instance
 
 
+def test_no_instances():
+    interpolator = af.LinearInterpolator([])
+
+    with pytest.raises(IndexError, match="no instances"):
+        # noinspection PyStatementEffect
+        interpolator[interpolator.t == 1.5]
+
+
 @pytest.fixture(name="linear_interpolator")
 def make_linear_interpolator(instances):
     return af.LinearInterpolator(instances)
