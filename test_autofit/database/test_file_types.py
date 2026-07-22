@@ -54,3 +54,34 @@ def test_hdu(hdu, hdu_array):
     loaded = db_hdu.hdu
     assert (loaded.data == hdu_array).all()
     assert loaded.header == hdu.header
+
+
+def test_hdu_without_data():
+    """
+    A data-less HDU must round-trip. The first HDU of a multi-extension FITS is
+    conventionally an empty `PrimaryHDU` — `AggregateFITS` emits exactly that —
+    so dereferencing `hdu.data.dtype` here broke every such scrape.
+    """
+    db_hdu = db.HDU(name="test", hdu=fits.PrimaryHDU())
+
+    assert not db_hdu.has_data
+
+    loaded = db_hdu.hdu
+    assert isinstance(loaded, fits.PrimaryHDU)
+    assert loaded.data is None
+
+
+def test_set_fits_with_empty_primary_hdu(fit, hdu_array):
+    """
+    The shape the database scrape actually meets: an empty `PrimaryHDU`
+    followed by named image extensions.
+    """
+    image_hdu = fits.ImageHDU(hdu_array)
+    image_hdu.header["EXTNAME"] = "MODEL_IMAGE"
+
+    fit.set_fits("test", fits.HDUList([fits.PrimaryHDU(), image_hdu]))
+
+    loaded = fit.get_fits("test")
+    assert len(loaded) == 2
+    assert loaded[0].data is None
+    assert (loaded[1].data == hdu_array).all()
