@@ -16,8 +16,14 @@ The latest version of **PyAutoFit** is installed via pip as follows (specifying 
 the installation has clean dependencies):
 
 ```bash
-pip install autofit
+pip install autofit[jax]
 ```
+
+The `[jax]` extra installs \[**JAX**\](<https://docs.jax.dev/en/latest/notebooks/thinking_in_jax.html>) (and
+`optax`), which **PyAutoFit** uses for gradient-based searches and GPU acceleration. **JAX is not installed by
+default** — a plain `pip install autofit` gives a fully working install that runs on NumPy, without JAX
+acceleration. The extra installs CPU-only JAX; for GPU support, follow the official
+\[JAX installation guide\](<https://jax.readthedocs.io/en/latest/installation.html>) **before** installing.
 
 If this raises no errors **PyAutoFit** is installed! If there is an error check out
 the [troubleshooting section](https://pyautofit.readthedocs.io/en/latest/installation/troubleshooting.html).
