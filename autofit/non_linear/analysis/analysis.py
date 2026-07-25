@@ -140,6 +140,11 @@ class Analysis(ABC):
         reads which latents to compute (and how) from ``self.Latent`` (see
         :class:`Latent`). Kept as a method for backwards compatibility — it is
         the entry point called by ``SearchUpdater._compute_latent_samples``.
+
+        Raises ``exc.SamplesException`` if ``samples`` is ``None``, which is
+        what ``result.samples`` yields for a resumed fit whose ``samples.csv``
+        was never written (samples output disabled). See
+        :func:`~autofit.non_linear.analysis.latent.latent_samples_from`.
         """
         return latent_samples_from(self, samples, batch_size=batch_size)
 

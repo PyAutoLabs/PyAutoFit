@@ -199,3 +199,39 @@ def test_new_path_single_survivor_summary_does_not_crash():
     _ = latent.summary()
     instance = latent.median_pdf()
     assert instance.fwhm == pytest.approx(FWHM_SIGMA_3)
+
+
+class NoLatentAnalysis(af.Analysis):
+    """An analysis declaring no latent variables at all."""
+
+    def log_likelihood_function(self, instance):
+        return 1.0
+
+
+def test_none_samples_raises_samples_exception():
+    """
+    A resumed fit whose `samples.csv` was never written (samples output
+    disabled) hands `result.samples is None` to `compute_latent_samples`.
+    That must be an intentional, explanatory `SamplesException` -- never an
+    `AttributeError` raised from inside `latent_samples_from` when it
+    dereferences `samples.model`.
+    """
+    with pytest.raises(af.exc.SamplesException) as exc_info:
+        FwhmAnalysis().compute_latent_samples(None)
+
+    message = str(exc_info.value)
+    assert "samples.csv" in message
+    assert "resumed" in message
+
+
+def test_none_samples_raises_via_engine_directly_and_before_latent_lookup():
+    """
+    The guard lives in the engine (so the free-function entry point is covered
+    too) and fires before any latent configuration is consulted -- a `None`
+    samples object is a broken input regardless of whether latents are defined.
+    """
+    with pytest.raises(af.exc.SamplesException):
+        latent_samples_from(FwhmAnalysis(), None)
+
+    with pytest.raises(af.exc.SamplesException):
+        latent_samples_from(NoLatentAnalysis(), None)

@@ -27,6 +27,7 @@ from typing import Optional
 
 import numpy as np
 
+from autofit import exc
 from autofit.non_linear.samples.sample import Sample
 from autofit.non_linear.samples.samples import Samples
 from autofit.non_linear.samples.util import simple_model_for_kwargs
@@ -91,7 +92,34 @@ def latent_samples_from(
 
     Returns ``None`` when no finite latent samples remain (or no latents are
     defined).
+
+    Raises
+    ------
+    exc.SamplesException
+        If ``samples`` is ``None``. This is the resumed-fit case: a search whose
+        fit already completed short-circuits to
+        ``NonLinearSearch.result_via_completed_fit``, which loads the samples
+        back off disk from ``samples.csv``. If that file was never written --
+        because ``output.yaml``'s ``samples: false`` (or ``general.yaml``'s
+        ``samples_to_csv: false``) disabled it -- ``result.samples`` is ``None``
+        and there is nothing to compute latents from. Latent computation needs
+        the full sample list; ``samples_summary.json`` is not a substitute.
     """
+    if samples is None:
+        raise exc.SamplesException(
+            "Cannot compute latent samples: `samples` is None.\n\n"
+            "This usually means the fit was resumed rather than run: a completed "
+            "fit reloads its samples from `samples.csv`, and that file was not "
+            "written because samples output is disabled (`samples: false` in "
+            "`config/output.yaml`, or `samples_to_csv: false` in "
+            "`config/general.yaml`).\n\n"
+            "Latent variables are computed per posterior sample, so the full "
+            "sample list is required -- `samples_summary.json` is not enough. "
+            "Either enable samples output and re-run the fit (deleting the "
+            "existing output so it is not resumed), or pass a `Samples` object "
+            "explicitly."
+        )
+
     batch_size = batch_size or 10
 
     latent = analysis.Latent
