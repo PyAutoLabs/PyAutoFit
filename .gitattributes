@@ -1,2 +1,5 @@
-# Shebang'd, directly-runnable module — keep LF so execution works on HPC/Linux.
-autofit/aggregator/aggregator.py eol=lf
+# All files use Unix line endings (LF) — see AGENTS.md. text=auto lets git
+# detect binaries; eol=lf normalises every text file on checkout and checkin,
+# subsuming the earlier targeted shebang/script rules. Tree-wide CRLF
+# normalisation landed alongside this file (2026-07-25).
+* text=auto eol=lf
