@@ -1,3 +1,5 @@
+import inspect
+
 import numpy as np
 import pytest
 
@@ -181,16 +183,48 @@ def test__steps_in_chunk__default_cadence_is_a_single_chunk():
     assert isinstance(iterations, int)
 
 
-def test__steps_in_chunk__fractional_cadence_never_yields_a_zero_length_chunk():
-    """``int`` truncates towards zero, so a cadence below 1 would give
-    ``range(0)``: no steps run, ``total_steps`` never advances, and the step
-    loop's enclosing ``while`` spins forever. The chunk is floored at 1."""
-    search = af.MultiStartAdam(n_steps=300, iterations_per_full_update=0.5)
+def test__fit_step_loop_takes_its_chunk_size_from_the_helper():
+    """Wiring guard: every other test here exercises ``_steps_in_chunk``
+    directly, so all of them would still pass if ``_fit`` went back to computing
+    the chunk inline — which is the exact regression this fix is about.
 
-    iterations = search._steps_in_chunk(steps_remaining=300)
+    ``_fit`` cannot be executed from this suite (it needs jax, optax and a
+    JAX-traceable ``Analysis``, and the library suite is NumPy-only), so the
+    call site is asserted at the source level instead.
+    """
+    source = inspect.getsource(af.MultiStartAdam._fit)
 
-    assert iterations == 1
-    assert isinstance(iterations, int)
+    assert "self._steps_in_chunk(" in source
+    # the un-cast inline form the crash came from must not come back
+    assert "self.iterations_per_full_update or self.n_steps" not in source
+
+
+@pytest.mark.parametrize("cadence", [0.5, 50.9, -5])
+def test__steps_in_chunk__unusable_cadence_raises_rather_than_being_clamped(cadence):
+    """A cadence below 1 (or a fractional one) truncates to ``range(0)``: no
+    step runs, ``total_steps`` never advances, and the step loop's enclosing
+    ``while`` spins forever re-running ``perform_update``.
+
+    Clamping such a value to 1 would hide the mistake and silently run a
+    cadence the user did not ask for, so it is rejected instead — a hang on a
+    cluster is far more expensive than an error at the first chunk boundary.
+    """
+    search = af.MultiStartAdam(n_steps=300, iterations_per_full_update=cadence)
+
+    with pytest.raises(ValueError, match="iterations_per_full_update"):
+        search._steps_in_chunk(steps_remaining=300)
+
+
+@pytest.mark.parametrize("n_steps", [2.5, 0, -10])
+def test__steps_in_chunk__unusable_n_steps_raises(n_steps):
+    """``steps_remaining`` is only guaranteed to be an ``int`` of at least 1
+    because ``n_steps`` is one. A fractional ``n_steps`` leaves a fractional
+    remainder (e.g. 0.5) that truncates to a zero-length chunk, so the budget
+    is validated too rather than assumed from its type annotation."""
+    search = af.MultiStartAdam(n_steps=n_steps)
+
+    with pytest.raises(ValueError, match="n_steps"):
+        search._steps_in_chunk(steps_remaining=1)
 
 
 def test__steps_in_chunk__falsy_cadence_falls_back_to_n_steps():

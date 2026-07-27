@@ -174,22 +174,60 @@ class AbstractMultiStartGradient(AbstractMLE):
         reach it, and raises ``TypeError: 'float' object cannot be interpreted
         as an integer``.
 
-        The chunk is floored at 1 step because ``int`` truncates towards zero: a
-        fractional cadence below 1 would otherwise give ``range(0)``, so
-        ``total_steps`` would never advance and the enclosing ``while`` loop
-        would spin forever re-running ``perform_update``. One step per chunk is
-        the slowest *progressing* cadence, and it can never overshoot
-        ``steps_remaining``, which is at least 1 whenever the loop is entered.
+        Both the cadence and ``n_steps`` are validated as whole numbers of at
+        least one step, rather than being coerced into something plausible. A
+        value below 1 (or a fractional one) truncates to ``range(0)``: no step
+        runs, ``total_steps`` never advances, and the enclosing ``while`` loop
+        spins forever re-running ``perform_update`` — a silent hang that on a
+        cluster burns the whole allocation. Clamping such a value to 1 would
+        hide the mistake instead of reporting it, so it raises here. Once both
+        are validated, ``steps_remaining`` is an ``int`` of at least 1 whenever
+        the loop is entered, so the returned chunk is at least 1 and never
+        overshoots the remaining budget.
 
         Parameters
         ----------
         steps_remaining
             The number of steps left in the ``n_steps`` budget.
+
+        Raises
+        ------
+        ValueError
+            If ``n_steps``, or an explicitly supplied
+            ``iterations_per_full_update``, is not a whole number of at least 1.
         """
-        return max(
-            1,
-            int(min(self.iterations_per_full_update or self.n_steps, steps_remaining)),
-        )
+        self._check_step_count(self.n_steps, "n_steps")
+
+        # A falsy cadence means "no intermediate checkpoint": one chunk covering
+        # the whole budget. Only a value the user actually supplied is validated.
+        if self.iterations_per_full_update:
+            self._check_step_count(
+                self.iterations_per_full_update, "iterations_per_full_update"
+            )
+            cadence = self.iterations_per_full_update
+        else:
+            cadence = self.n_steps
+
+        return int(min(cadence, steps_remaining))
+
+    def _check_step_count(self, value, name: str):
+        """
+        Reject a step count that cannot describe a whole number of gradient
+        steps. ``float`` values are allowed — the packaged config default
+        ``1e99`` is one — provided they are integral.
+        """
+        try:
+            is_whole = value == int(value)
+        except (TypeError, ValueError, OverflowError):
+            is_whole = False
+
+        if not is_whole or value < 1:
+            raise ValueError(
+                f"{type(self).__name__}: `{name}` must be a whole number of "
+                f"gradient steps and at least 1, but was {value!r}. A fractional "
+                "or sub-1 value gives a zero-length step chunk, which never "
+                "advances the search and would hang it rather than fail."
+            )
 
     def _fit(
         self,
