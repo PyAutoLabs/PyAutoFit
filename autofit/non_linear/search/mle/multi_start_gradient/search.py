@@ -174,12 +174,22 @@ class AbstractMultiStartGradient(AbstractMLE):
         reach it, and raises ``TypeError: 'float' object cannot be interpreted
         as an integer``.
 
+        The chunk is floored at 1 step because ``int`` truncates towards zero: a
+        fractional cadence below 1 would otherwise give ``range(0)``, so
+        ``total_steps`` would never advance and the enclosing ``while`` loop
+        would spin forever re-running ``perform_update``. One step per chunk is
+        the slowest *progressing* cadence, and it can never overshoot
+        ``steps_remaining``, which is at least 1 whenever the loop is entered.
+
         Parameters
         ----------
         steps_remaining
             The number of steps left in the ``n_steps`` budget.
         """
-        return int(min(self.iterations_per_full_update or self.n_steps, steps_remaining))
+        return max(
+            1,
+            int(min(self.iterations_per_full_update or self.n_steps, steps_remaining)),
+        )
 
     def _fit(
         self,

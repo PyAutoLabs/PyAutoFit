@@ -181,6 +181,18 @@ def test__steps_in_chunk__default_cadence_is_a_single_chunk():
     assert isinstance(iterations, int)
 
 
+def test__steps_in_chunk__fractional_cadence_never_yields_a_zero_length_chunk():
+    """``int`` truncates towards zero, so a cadence below 1 would give
+    ``range(0)``: no steps run, ``total_steps`` never advances, and the step
+    loop's enclosing ``while`` spins forever. The chunk is floored at 1."""
+    search = af.MultiStartAdam(n_steps=300, iterations_per_full_update=0.5)
+
+    iterations = search._steps_in_chunk(steps_remaining=300)
+
+    assert iterations == 1
+    assert isinstance(iterations, int)
+
+
 def test__steps_in_chunk__falsy_cadence_falls_back_to_n_steps():
     # A falsy cadence means "no checkpoint boundary": fall back to the full
     # ``n_steps`` budget rather than a zero-length chunk that would spin the
