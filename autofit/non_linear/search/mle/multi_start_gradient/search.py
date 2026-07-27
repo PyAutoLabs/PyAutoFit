@@ -156,6 +156,40 @@ class AbstractMultiStartGradient(AbstractMLE):
 
         self.logger.debug(f"Creating {self.optax_method} MultiStartGradient Search")
 
+    def _is_final_boundary(self, converged: bool, total_steps: int) -> bool:
+        """
+        Whether the chunk boundary just reached ends the search — either the
+        auto-convergence check fired, or the ``n_steps`` ceiling was hit.
+
+        ``_fit`` must not emit a ``perform_update`` at a terminal boundary:
+        ``start_resume_fit`` performs the final update unconditionally the
+        moment ``_fit`` returns, so one here is duplicated work. Flipping
+        ``during_analysis`` does not avoid that — ``SearchUpdater.update``
+        rebuilds the samples, recomputes the summary and re-runs likelihood
+        profiling on every call regardless of the flag.
+
+        A named predicate rather than an inline expression so the rule can be
+        tested directly; ``_fit`` itself needs jax + optax + a JAX-traceable
+        ``Analysis`` and cannot be driven from the NumPy-only library suite.
+        """
+        return bool(converged) or total_steps >= self.n_steps
+
+    @staticmethod
+    def _stop_reason_on_resume(stop_reason):
+        """
+        The ``stop_reason`` a resumed run should start from, given the one
+        restored from its previous ``search_internal``.
+
+        ``"converged"`` survives: the step loop's guard uses it to refuse
+        resuming a converged search into further steps. Every other reason
+        describes a run that is now over — keeping it would stamp a stale
+        ``"max_steps"`` on every intermediate checkpoint of a search that is in
+        fact still running, which is exactly what raising ``n_steps`` (the
+        documented way to extend a budget) does. It is re-derived at each chunk
+        boundary, so it starts clear.
+        """
+        return stop_reason if stop_reason == "converged" else None
+
     def _fit(
         self,
         model: AbstractPriorModel,
@@ -275,15 +309,7 @@ class AbstractMultiStartGradient(AbstractMLE):
         # ``resurrect`` is on); seeded independently of the broad-start draw.
         resurrect_rng = np.random.default_rng(1)
 
-        # A resumed run inherits the previous run's ``stop_reason``. ``"converged"``
-        # must survive — it short-circuits the loop below so a converged search is
-        # never resumed into more steps. Any other reason describes a run that is
-        # now over: keeping it would report a stale ``"max_steps"`` in every
-        # intermediate checkpoint of a search that is, in fact, still running
-        # (raising ``n_steps`` is the documented way to extend a budget). It is
-        # re-derived at each chunk boundary below, so clear it here.
-        if stop_reason != "converged":
-            stop_reason = None
+        stop_reason = self._stop_reason_on_resume(stop_reason)
 
         # ``n_steps`` is the hard ceiling / max budget; ``stop_reason`` becomes
         # ``"converged"`` if the auto-convergence check stops the search early
@@ -379,8 +405,7 @@ class AbstractMultiStartGradient(AbstractMLE):
             # this loop just built (carrying ``stop_reason``, ``converged`` and
             # ``fom_history``) is what ``_fit`` returns and what that final
             # update is computed from.
-            is_final = converged or total_steps >= self.n_steps
-            if not is_final:
+            if not self._is_final_boundary(converged=converged, total_steps=total_steps):
                 self.perform_update(
                     model=model,
                     analysis=analysis,

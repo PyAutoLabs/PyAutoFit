@@ -387,56 +387,80 @@ def test__variable_length_zero_weight_nan_rows_are_robust():
         assert samples.summary() is not None
 
 
-def test__fit_skips_its_update_at_a_terminal_boundary():
-    """``start_resume_fit`` performs the final update unconditionally the moment
-    ``_fit`` returns, so any update ``_fit`` emits at a terminal boundary is
-    duplicated work.
-
-    Flipping ``during_analysis`` is *not* enough to avoid it: ``SearchUpdater``
+@pytest.mark.parametrize(
+    "converged, total_steps, is_final",
+    [
+        (False, 50, False),   # ordinary intermediate boundary -> update here
+        (False, 299, False),  # still short of the ceiling
+        (False, 300, True),   # ceiling reached
+        (False, 301, True),   # overshoot is still terminal
+        (True, 50, True),     # early convergence, well short of the ceiling
+        (True, 300, True),
+    ],
+)
+def test__is_final_boundary(converged, total_steps, is_final):
+    """``_fit`` must not emit a ``perform_update`` at a terminal boundary:
+    ``start_resume_fit`` performs the final update unconditionally the moment
+    ``_fit`` returns, so one here is duplicated work — and flipping
+    ``during_analysis`` does not avoid it, because ``SearchUpdater.update``
     rebuilds the samples, recomputes the summary and re-runs likelihood
-    profiling on every call regardless of the flag. The update has to be skipped
-    outright, which is what the ``if not is_final`` guard does.
+    profiling on every call regardless of the flag.
 
-    ``_fit`` needs jax + optax + a JAX-traceable ``Analysis`` and cannot run
-    from this NumPy-only suite, so the guard is asserted at the source level.
-    Whitespace is normalised so reformatting does not cause a false failure.
+    The rule is tested directly; ``_fit`` needs jax + optax + a JAX-traceable
+    ``Analysis`` and cannot be driven from this NumPy-only suite.
+    """
+    search = af.MultiStartAdam(n_steps=300)
+
+    assert (
+        search._is_final_boundary(converged=converged, total_steps=total_steps)
+        is is_final
+    )
+
+
+@pytest.mark.parametrize(
+    "restored, expected",
+    [
+        ("converged", "converged"),  # must survive: the loop guard reads it
+        ("max_steps", None),         # stale — the run it described is over
+        (None, None),
+        ("some_future_reason", None),
+    ],
+)
+def test__stop_reason_on_resume(restored, expected):
+    """A resumed run inherits the previous run's ``stop_reason``. Keeping a
+    ``"max_steps"`` stamps every intermediate checkpoint of a search that is
+    still running as finished — which is what raising ``n_steps`` (the
+    documented way to extend a budget) produces. ``"converged"`` must survive,
+    because the step loop's guard uses it to refuse resuming a converged search
+    into further steps."""
+    assert af.MultiStartAdam._stop_reason_on_resume(restored) == expected
+
+
+def test__fit_uses_both_seams_and_keeps_the_converged_loop_guard():
+    """Wiring guard for the two seams above, which are otherwise tested in
+    isolation and would keep passing if ``_fit`` stopped calling them.
+
+    Necessarily a source-level check — ``_fit`` cannot run from this suite. It
+    pins the call sites and the loop condition; the *behaviour* of each seam is
+    pinned by the parametrised tests above, so a semantically-equivalent rewrite
+    of a seam is caught there rather than here.
     """
     source = " ".join(inspect.getsource(af.MultiStartAdam._fit).split())
 
-    # the update is guarded, and is intermediate-flavoured when it does run
-    assert "if not is_final: self.perform_update(" in source
-    assert "during_analysis=True" in source
+    assert "if not self._is_final_boundary(" in source
+    assert "stop_reason = self._stop_reason_on_resume(stop_reason)" in source
+    assert 'while total_steps < self.n_steps and stop_reason != "converged":' in source
     # the form that ran the whole final pass twice must not come back
     assert "during_analysis=not is_final" not in source
 
     # The framework's single final update is still there and unconditional —
     # without it this change would remove the final update rather than
     # de-duplicate it. ``start_resume_fit`` is decorated without
-    # ``functools.wraps``, so its body is sliced out of the module source rather
-    # than reached through the bound method.
+    # ``functools.wraps``, so its body is sliced out of the module source.
     module = inspect.getsource(abstract_search)
     body = module[module.index("    def start_resume_fit(") :]
     body = body[: body.index("\n    def ", 1)]
     assert "during_analysis=False" in body
-
-
-def test__fit_clears_a_stale_stop_reason_but_keeps_converged():
-    """A resumed run inherits the previous run's ``stop_reason``.
-
-    Resuming a search that finished with ``"max_steps"`` under a raised
-    ``n_steps`` (the documented way to extend a budget) used to leave that stale
-    reason in every intermediate checkpoint, so a search that was still running
-    reported itself finished to the aggregator and any results inspector.
-
-    ``"converged"`` must survive the clear, because the ``while`` guard uses it
-    to refuse resuming a converged search into more steps — so that guard is
-    asserted on the ``while`` line specifically. Asserting the bare substring
-    would be satisfied by the clearing ``if`` itself and would pin nothing.
-    """
-    source = " ".join(inspect.getsource(af.MultiStartAdam._fit).split())
-
-    assert 'if stop_reason != "converged": stop_reason = None' in source
-    assert 'while total_steps < self.n_steps and stop_reason != "converged":' in source
 
 
 def test__samples_info__reports_a_cleared_stop_reason_as_unfinished():
