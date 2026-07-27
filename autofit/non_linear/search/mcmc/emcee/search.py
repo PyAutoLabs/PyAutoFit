@@ -200,10 +200,9 @@ class Emcee(AbstractMCMC):
             iterations_remaining = self.nsteps
 
         while iterations_remaining > 0:
-            if self.iterations_per_full_update > iterations_remaining:
-                iterations = iterations_remaining
-            else:
-                iterations = self.iterations_per_full_update
+            # ``emcee``'s ``sample`` does ``range(iterations)`` internally and
+            # never casts, so this must be an ``int`` (PyAutoFit#1422).
+            iterations = self._steps_until_full_update(iterations_remaining)
 
             for sample in search_internal.sample(
                 initial_state=state,

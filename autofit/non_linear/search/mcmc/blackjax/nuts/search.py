@@ -288,7 +288,9 @@ class BlackJAXNUTS(AbstractMCMC):
         iterations_remaining = self.num_samples
 
         while iterations_remaining > 0:
-            chunk_n = min(self.iterations_per_full_update, iterations_remaining)
+            # ``run_chunk`` scans ``chunk_n`` steps and the key split below sizes
+            # itself from it, so this must be an ``int`` (PyAutoFit#1422).
+            chunk_n = self._steps_until_full_update(iterations_remaining)
 
             rng_key, sample_key = jax.random.split(rng_key)
             states, infos = run_chunk(sample_key, state, chunk_n)

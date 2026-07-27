@@ -236,10 +236,12 @@ class Zeus(AbstractMCMC):
             iterations_remaining = self.nsteps
 
         while iterations_remaining > 0:
-            if self.iterations_per_full_update > iterations_remaining:
-                iterations = iterations_remaining
-            else:
-                iterations = self.iterations_per_full_update
+            # zeus casts internally (``self.nsteps = int(iterations)``), so a
+            # float never crashes it — but ``total_iterations`` below is
+            # incremented by this value, so an uncast float would drift the
+            # bookkeeping away from the samples zeus actually drew
+            # (PyAutoFit#1422).
+            iterations = self._steps_until_full_update(iterations_remaining)
 
             for sample in search_internal.sample(
                 start=state,
