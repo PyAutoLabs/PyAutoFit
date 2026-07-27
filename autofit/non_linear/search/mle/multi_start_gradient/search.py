@@ -156,79 +156,6 @@ class AbstractMultiStartGradient(AbstractMLE):
 
         self.logger.debug(f"Creating {self.optax_method} MultiStartGradient Search")
 
-    def _steps_in_chunk(self, steps_remaining: int) -> int:
-        """
-        The number of gradient steps to run before the next ``perform_update``
-        checkpoint boundary, given how much of the ``n_steps`` budget is left.
-
-        ``AbstractSearch.__init__`` stores ``iterations_per_full_update`` as a
-        **float**, because the packaged default is the inf-like ``1e99`` (a
-        single chunk, i.e. checkpoint only at the end). ``range`` requires an
-        ``int``, so the chunk size is cast here at the consumer rather than in
-        the shared float coercion, which every other search relies on.
-
-        Without the cast the loop only survives on the default: ``min(1e99,
-        steps_remaining)`` returns the ``int`` operand, so the float never
-        reaches ``range``. A user-supplied cadence *below* the remaining budget
-        (e.g. ``iterations_per_full_update=50`` with ``n_steps=3000``) does
-        reach it, and raises ``TypeError: 'float' object cannot be interpreted
-        as an integer``.
-
-        Both the cadence and ``n_steps`` are validated as whole numbers of at
-        least one step, rather than being coerced into something plausible. A
-        value below 1 (or a fractional one) truncates to ``range(0)``: no step
-        runs, ``total_steps`` never advances, and the enclosing ``while`` loop
-        spins forever re-running ``perform_update`` — a silent hang that on a
-        cluster burns the whole allocation. Clamping such a value to 1 would
-        hide the mistake instead of reporting it, so it raises here. Once both
-        are validated, ``steps_remaining`` is an ``int`` of at least 1 whenever
-        the loop is entered, so the returned chunk is at least 1 and never
-        overshoots the remaining budget.
-
-        Parameters
-        ----------
-        steps_remaining
-            The number of steps left in the ``n_steps`` budget.
-
-        Raises
-        ------
-        ValueError
-            If ``n_steps``, or an explicitly supplied
-            ``iterations_per_full_update``, is not a whole number of at least 1.
-        """
-        self._check_step_count(self.n_steps, "n_steps")
-
-        # A falsy cadence means "no intermediate checkpoint": one chunk covering
-        # the whole budget. Only a value the user actually supplied is validated.
-        if self.iterations_per_full_update:
-            self._check_step_count(
-                self.iterations_per_full_update, "iterations_per_full_update"
-            )
-            cadence = self.iterations_per_full_update
-        else:
-            cadence = self.n_steps
-
-        return int(min(cadence, steps_remaining))
-
-    def _check_step_count(self, value, name: str):
-        """
-        Reject a step count that cannot describe a whole number of gradient
-        steps. ``float`` values are allowed — the packaged config default
-        ``1e99`` is one — provided they are integral.
-        """
-        try:
-            is_whole = value == int(value)
-        except (TypeError, ValueError, OverflowError):
-            is_whole = False
-
-        if not is_whole or value < 1:
-            raise ValueError(
-                f"{type(self).__name__}: `{name}` must be a whole number of "
-                f"gradient steps and at least 1, but was {value!r}. A fractional "
-                "or sub-1 value gives a zero-length step chunk, which never "
-                "advances the search and would hang it rather than fail."
-            )
-
     def _fit(
         self,
         model: AbstractPriorModel,
@@ -348,13 +275,23 @@ class AbstractMultiStartGradient(AbstractMLE):
         # ``resurrect`` is on); seeded independently of the broad-start draw.
         resurrect_rng = np.random.default_rng(1)
 
+        # A resumed run inherits the previous run's ``stop_reason``. ``"converged"``
+        # must survive — it short-circuits the loop below so a converged search is
+        # never resumed into more steps. Any other reason describes a run that is
+        # now over: keeping it would report a stale ``"max_steps"`` in every
+        # intermediate checkpoint of a search that is, in fact, still running
+        # (raising ``n_steps`` is the documented way to extend a budget). It is
+        # re-derived at each chunk boundary below, so clear it here.
+        if stop_reason != "converged":
+            stop_reason = None
+
         # ``n_steps`` is the hard ceiling / max budget; ``stop_reason`` becomes
         # ``"converged"`` if the auto-convergence check stops the search early
         # (this also short-circuits the loop on a resumed, already-converged run).
         while total_steps < self.n_steps and stop_reason != "converged":
 
             steps_remaining = self.n_steps - total_steps
-            iterations = self._steps_in_chunk(steps_remaining)
+            iterations = self._steps_until_full_update(steps_remaining)
 
             # Convergence is assessed every step (``fom_history`` updates every
             # step) rather than only at the ``iterations_per_full_update`` boundary,
@@ -427,13 +364,20 @@ class AbstractMultiStartGradient(AbstractMLE):
             }
             self.paths.save_search_internal(obj=search_internal)
 
-            # A converged (or ceiling-reached) boundary is the final update, so it
-            # runs with ``during_analysis=False``; intermediate boundaries do not.
-            is_final = converged or total_steps >= self.n_steps
+            # Always an *intermediate* update, even on the last chunk. The final
+            # ``during_analysis=False`` update is ``start_resume_fit``'s job, and
+            # it runs unconditionally once ``_fit`` returns — emitting one here
+            # too made the whole final pass (sample output, latents,
+            # visualization, profiling) run twice on every search. Every other
+            # search passes ``during_analysis=True`` unconditionally here for
+            # exactly this reason (Emcee, BFGS, Nautilus); MultiStart was the
+            # outlier. The ``stop_reason``/``converged`` outcome still reaches the
+            # final samples, because that update is built from the
+            # ``search_internal`` dict returned below.
             self.perform_update(
                 model=model,
                 analysis=analysis,
-                during_analysis=not is_final,
+                during_analysis=True,
                 fitness=fitness,
                 search_internal=search_internal,
             )

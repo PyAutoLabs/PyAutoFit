@@ -1037,6 +1037,83 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             obj=search_internal,
         )
 
+    def _steps_until_full_update(self, iterations_remaining: int) -> int:
+        """
+        How many iterations to run before the next ``perform_update``
+        checkpoint, given how much of the budget is left.
+
+        Searches that chunk their run around ``iterations_per_full_update`` all
+        need this same number, and they all need it as an ``int`` — most feed it
+        to something that ultimately does ``range(...)``. But
+        ``iterations_per_full_update`` is stored as a **float** by
+        ``__init__``, because the packaged default is the inf-like ``1e99``
+        meaning "one chunk, checkpoint only at the end". That float is kept
+        deliberately: ``int(1e99)`` is a 99-digit integer, and writing *that*
+        into every saved ``search.json`` in place of a readable ``1e99``
+        sentinel would be a poor trade for a conversion each caller can do at
+        the point of use.
+
+        So the conversion lives here, once, instead of being re-derived (and
+        occasionally forgotten) per search. Forgetting it is not hypothetical:
+        it crashed the MultiStart gradient search for every user who set a real
+        cadence (PyAutoFit#1420), and left the same latent crash in Emcee and
+        BlackJAX NUTS (PyAutoFit#1422).
+
+        A falsy ``iterations_per_full_update`` means "no intermediate
+        checkpoint" and yields the whole remaining budget in one chunk.
+
+        Parameters
+        ----------
+        iterations_remaining
+            Iterations left in this search's budget. Validated, because the
+            returned chunk can only be a usable positive whole number if this
+            is one — searches store their budget under different names
+            (``n_steps``, ``nsteps``, ``num_samples``, ``maxiter``) and none of
+            them validates it.
+
+        Raises
+        ------
+        ValueError
+            If ``iterations_remaining``, or an explicitly supplied
+            ``iterations_per_full_update``, is not a whole number of at
+            least 1.
+        """
+        self._check_step_count(iterations_remaining, "iterations_remaining")
+
+        if not self.iterations_per_full_update:
+            return int(iterations_remaining)
+
+        self._check_step_count(
+            self.iterations_per_full_update, "iterations_per_full_update"
+        )
+        return int(min(self.iterations_per_full_update, iterations_remaining))
+
+    def _check_step_count(self, value, name: str):
+        """
+        Reject an iteration count that cannot describe a whole number of
+        iterations. ``float`` values are allowed — the packaged config default
+        ``1e99`` is one — provided they are integral.
+
+        Rejecting rather than clamping is deliberate: a value below 1 truncates
+        to a zero-length chunk, so the enclosing ``while`` loop makes no
+        progress and spins forever re-running ``perform_update``. Clamping it to
+        1 would hide the mistake and silently run a schedule the user never
+        asked for, and a silent hang on a cluster is far more expensive than an
+        error at the first chunk boundary.
+        """
+        try:
+            is_whole = value == int(value)
+        except (TypeError, ValueError, OverflowError):
+            is_whole = False
+
+        if not is_whole or value < 1:
+            raise ValueError(
+                f"{type(self).__name__}: `{name}` must be a whole number of "
+                f"iterations and at least 1, but was {value!r}. A fractional "
+                "or sub-1 value gives a zero-length chunk, which never advances "
+                "the search and would hang it rather than fail."
+            )
+
     @property
     def _updater(self):
         # The cached ``SearchUpdater`` must be invalidated whenever

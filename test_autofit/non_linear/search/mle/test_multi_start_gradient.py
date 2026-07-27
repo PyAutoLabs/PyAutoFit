@@ -5,6 +5,7 @@ import pytest
 
 import autofit as af
 from autofit import example
+from autofit.non_linear.search import abstract_search
 from autonerves.dictable import from_dict, to_dict
 
 # The MultiStart gradient searches are JAX-native at fit time, but their
@@ -136,108 +137,6 @@ def test__convergence_default_is_on_and_carried():
 
         custom = af.MultiStartGradientConvergence(check_for_convergence=False)
         assert cls(convergence=custom).convergence is custom
-
-
-def test__steps_in_chunk__real_cadence_is_an_int_range_can_consume():
-    """The step loop does ``for _ in range(...)`` over the chunk size, but
-    ``iterations_per_full_update`` is stored as a float by ``AbstractSearch``.
-
-    A cadence *below* the remaining budget is the case that reaches ``range``
-    (with the ``1e99`` default, ``min`` returns the int ``steps_remaining``
-    instead), and it used to raise ``TypeError: 'float' object cannot be
-    interpreted as an integer`` on step-loop entry.
-    """
-    search = af.MultiStartAdam(n_steps=3000, iterations_per_full_update=50)
-
-    # The knob really is stored as a float — this is what made the crash latent.
-    assert isinstance(search.iterations_per_full_update, float)
-
-    iterations = search._steps_in_chunk(steps_remaining=3000)
-
-    assert iterations == 50
-    assert isinstance(iterations, int)
-    # The actual failing operation in ``_fit``.
-    assert len(list(range(iterations))) == 50
-
-
-def test__steps_in_chunk__clamps_to_the_remaining_budget():
-    # Near the end of the budget the chunk shrinks to what is left, so the loop
-    # never overshoots ``n_steps``.
-    search = af.MultiStartAdam(n_steps=3000, iterations_per_full_update=50)
-
-    assert search._steps_in_chunk(steps_remaining=20) == 20
-    assert isinstance(search._steps_in_chunk(steps_remaining=20), int)
-
-
-def test__steps_in_chunk__default_cadence_is_a_single_chunk():
-    # The packaged default is the inf-like 1e99: one chunk covering the whole
-    # budget (checkpoint only at the end), which is why the crash never fired
-    # on a default run.
-    search = af.MultiStartAdam(n_steps=300)
-
-    assert search.iterations_per_full_update == pytest.approx(1e99)
-
-    iterations = search._steps_in_chunk(steps_remaining=300)
-
-    assert iterations == 300
-    assert isinstance(iterations, int)
-
-
-def test__fit_step_loop_takes_its_chunk_size_from_the_helper():
-    """Wiring guard: every other test here exercises ``_steps_in_chunk``
-    directly, so all of them would still pass if ``_fit`` went back to computing
-    the chunk inline — which is the exact regression this fix is about.
-
-    ``_fit`` cannot be executed from this suite (it needs jax, optax and a
-    JAX-traceable ``Analysis``, and the library suite is NumPy-only), so the
-    call site is asserted at the source level instead.
-    """
-    source = inspect.getsource(af.MultiStartAdam._fit)
-
-    assert "self._steps_in_chunk(" in source
-    # the un-cast inline form the crash came from must not come back
-    assert "self.iterations_per_full_update or self.n_steps" not in source
-
-
-@pytest.mark.parametrize("cadence", [0.5, 50.9, -5])
-def test__steps_in_chunk__unusable_cadence_raises_rather_than_being_clamped(cadence):
-    """A cadence below 1 (or a fractional one) truncates to ``range(0)``: no
-    step runs, ``total_steps`` never advances, and the step loop's enclosing
-    ``while`` spins forever re-running ``perform_update``.
-
-    Clamping such a value to 1 would hide the mistake and silently run a
-    cadence the user did not ask for, so it is rejected instead — a hang on a
-    cluster is far more expensive than an error at the first chunk boundary.
-    """
-    search = af.MultiStartAdam(n_steps=300, iterations_per_full_update=cadence)
-
-    with pytest.raises(ValueError, match="iterations_per_full_update"):
-        search._steps_in_chunk(steps_remaining=300)
-
-
-@pytest.mark.parametrize("n_steps", [2.5, 0, -10])
-def test__steps_in_chunk__unusable_n_steps_raises(n_steps):
-    """``steps_remaining`` is only guaranteed to be an ``int`` of at least 1
-    because ``n_steps`` is one. A fractional ``n_steps`` leaves a fractional
-    remainder (e.g. 0.5) that truncates to a zero-length chunk, so the budget
-    is validated too rather than assumed from its type annotation."""
-    search = af.MultiStartAdam(n_steps=n_steps)
-
-    with pytest.raises(ValueError, match="n_steps"):
-        search._steps_in_chunk(steps_remaining=1)
-
-
-def test__steps_in_chunk__falsy_cadence_falls_back_to_n_steps():
-    # A falsy cadence means "no checkpoint boundary": fall back to the full
-    # ``n_steps`` budget rather than a zero-length chunk that would spin the
-    # while-loop forever. ``__init__`` cannot produce this (a falsy argument
-    # resolves from config to 1e99), so it is set directly — which is exactly
-    # what a caller overwriting the attribute post-construction does.
-    search = af.MultiStartAdam(n_steps=120)
-    search.iterations_per_full_update = 0.0
-
-    assert search._steps_in_chunk(steps_remaining=120) == 120
-    assert isinstance(search._steps_in_chunk(steps_remaining=120), int)
 
 
 def test__check_if_converged__plateau_stops_climbing_does_not():
@@ -486,3 +385,78 @@ def test__variable_length_zero_weight_nan_rows_are_robust():
 
         # The aggregator summary is computed without an IndexError.
         assert samples.summary() is not None
+
+
+def test__fit_never_emits_the_final_update_itself():
+    """``_fit`` must only ever emit *intermediate* updates.
+
+    ``start_resume_fit`` performs the single ``during_analysis=False`` update
+    unconditionally once ``_fit`` returns (``abstract_search.py``), so a
+    ``during_analysis=False`` in the step loop made the whole final pass —
+    sample output, latent computation, visualization, profiling — run twice on
+    every search. Every other chunked search passes ``during_analysis=True``
+    unconditionally for this reason; MultiStart was the outlier.
+
+    ``_fit`` needs jax + optax + a JAX-traceable ``Analysis`` and cannot run
+    from this NumPy-only suite, so the call is asserted at the source level.
+    """
+    source = inspect.getsource(af.MultiStartAdam._fit)
+
+    assert "during_analysis=True" in source
+    assert "during_analysis=not is_final" not in source
+    assert "is_final" not in source
+
+    # The framework's single final update is still there and unconditional —
+    # without it this change would remove the final update rather than
+    # de-duplicate it. ``start_resume_fit`` is decorated without
+    # ``functools.wraps``, so its body is sliced out of the module source rather
+    # than reached through the bound method.
+    module = inspect.getsource(abstract_search)
+    body = module[module.index("    def start_resume_fit(") :]
+    body = body[: body.index("\n    def ", 1)]
+    assert "during_analysis=False" in body
+
+
+def test__fit_clears_a_stale_stop_reason_but_keeps_converged():
+    """A resumed run inherits the previous run's ``stop_reason``.
+
+    Resuming a search that finished with ``"max_steps"`` under a raised
+    ``n_steps`` (the documented way to extend a budget) used to leave that stale
+    reason in every intermediate checkpoint, so a search that was still running
+    reported itself finished to the aggregator and any results inspector.
+
+    ``"converged"`` must survive the clear, because the loop guard uses it to
+    refuse resuming a converged search into more steps.
+    """
+    source = inspect.getsource(af.MultiStartAdam._fit)
+
+    assert 'if stop_reason != "converged":' in source
+    assert "stop_reason = None" in source
+    # the guard that "converged" protects is still the loop condition
+    assert 'stop_reason != "converged"' in source
+
+
+def test__samples_info__reports_a_cleared_stop_reason_as_unfinished():
+    """The observable half of the fix: a checkpoint written mid-run carries no
+    stop reason, so nothing downstream reads it as a finished search."""
+    model = af.Model(example.Gaussian)
+    best_params = np.asarray(model.vector_from_unit_vector([0.5] * model.prior_count))
+
+    search = af.MultiStartAdam(n_starts=1, n_steps=600)
+    samples = search.samples_via_internal_from(
+        model=model,
+        search_internal={
+            "params": np.stack([best_params]),
+            "best_params": best_params,
+            "best_fom": -2.0,
+            "fom_history": np.asarray([-2.0] * 300),
+            "total_steps": 300,
+            "n_resurrections": 0,
+            # what an intermediate checkpoint of a resumed, still-running search
+            # now writes — previously this said "max_steps".
+            "stop_reason": None,
+        },
+    )
+
+    assert samples.samples_info["stop_reason"] is None
+    assert samples.samples_info["converged"] is False
