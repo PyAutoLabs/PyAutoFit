@@ -136,6 +136,64 @@ def test__convergence_default_is_on_and_carried():
         assert cls(convergence=custom).convergence is custom
 
 
+def test__steps_in_chunk__real_cadence_is_an_int_range_can_consume():
+    """The step loop does ``for _ in range(...)`` over the chunk size, but
+    ``iterations_per_full_update`` is stored as a float by ``AbstractSearch``.
+
+    A cadence *below* the remaining budget is the case that reaches ``range``
+    (with the ``1e99`` default, ``min`` returns the int ``steps_remaining``
+    instead), and it used to raise ``TypeError: 'float' object cannot be
+    interpreted as an integer`` on step-loop entry.
+    """
+    search = af.MultiStartAdam(n_steps=3000, iterations_per_full_update=50)
+
+    # The knob really is stored as a float — this is what made the crash latent.
+    assert isinstance(search.iterations_per_full_update, float)
+
+    iterations = search._steps_in_chunk(steps_remaining=3000)
+
+    assert iterations == 50
+    assert isinstance(iterations, int)
+    # The actual failing operation in ``_fit``.
+    assert len(list(range(iterations))) == 50
+
+
+def test__steps_in_chunk__clamps_to_the_remaining_budget():
+    # Near the end of the budget the chunk shrinks to what is left, so the loop
+    # never overshoots ``n_steps``.
+    search = af.MultiStartAdam(n_steps=3000, iterations_per_full_update=50)
+
+    assert search._steps_in_chunk(steps_remaining=20) == 20
+    assert isinstance(search._steps_in_chunk(steps_remaining=20), int)
+
+
+def test__steps_in_chunk__default_cadence_is_a_single_chunk():
+    # The packaged default is the inf-like 1e99: one chunk covering the whole
+    # budget (checkpoint only at the end), which is why the crash never fired
+    # on a default run.
+    search = af.MultiStartAdam(n_steps=300)
+
+    assert search.iterations_per_full_update == pytest.approx(1e99)
+
+    iterations = search._steps_in_chunk(steps_remaining=300)
+
+    assert iterations == 300
+    assert isinstance(iterations, int)
+
+
+def test__steps_in_chunk__falsy_cadence_falls_back_to_n_steps():
+    # A falsy cadence means "no checkpoint boundary": fall back to the full
+    # ``n_steps`` budget rather than a zero-length chunk that would spin the
+    # while-loop forever. ``__init__`` cannot produce this (a falsy argument
+    # resolves from config to 1e99), so it is set directly — which is exactly
+    # what a caller overwriting the attribute post-construction does.
+    search = af.MultiStartAdam(n_steps=120)
+    search.iterations_per_full_update = 0.0
+
+    assert search._steps_in_chunk(steps_remaining=120) == 120
+    assert isinstance(search._steps_in_chunk(steps_remaining=120), int)
+
+
 def test__check_if_converged__plateau_stops_climbing_does_not():
     # rtol/atol both zero: converges only on an exactly-flat window.
     convergence = af.MultiStartGradientConvergence(

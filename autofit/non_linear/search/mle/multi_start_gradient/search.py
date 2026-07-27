@@ -156,6 +156,31 @@ class AbstractMultiStartGradient(AbstractMLE):
 
         self.logger.debug(f"Creating {self.optax_method} MultiStartGradient Search")
 
+    def _steps_in_chunk(self, steps_remaining: int) -> int:
+        """
+        The number of gradient steps to run before the next ``perform_update``
+        checkpoint boundary, given how much of the ``n_steps`` budget is left.
+
+        ``AbstractSearch.__init__`` stores ``iterations_per_full_update`` as a
+        **float**, because the packaged default is the inf-like ``1e99`` (a
+        single chunk, i.e. checkpoint only at the end). ``range`` requires an
+        ``int``, so the chunk size is cast here at the consumer rather than in
+        the shared float coercion, which every other search relies on.
+
+        Without the cast the loop only survives on the default: ``min(1e99,
+        steps_remaining)`` returns the ``int`` operand, so the float never
+        reaches ``range``. A user-supplied cadence *below* the remaining budget
+        (e.g. ``iterations_per_full_update=50`` with ``n_steps=3000``) does
+        reach it, and raises ``TypeError: 'float' object cannot be interpreted
+        as an integer``.
+
+        Parameters
+        ----------
+        steps_remaining
+            The number of steps left in the ``n_steps`` budget.
+        """
+        return int(min(self.iterations_per_full_update or self.n_steps, steps_remaining))
+
     def _fit(
         self,
         model: AbstractPriorModel,
@@ -281,9 +306,7 @@ class AbstractMultiStartGradient(AbstractMLE):
         while total_steps < self.n_steps and stop_reason != "converged":
 
             steps_remaining = self.n_steps - total_steps
-            iterations = min(
-                self.iterations_per_full_update or self.n_steps, steps_remaining
-            )
+            iterations = self._steps_in_chunk(steps_remaining)
 
             # Convergence is assessed every step (``fom_history`` updates every
             # step) rather than only at the ``iterations_per_full_update`` boundary,
