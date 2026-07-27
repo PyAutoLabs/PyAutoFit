@@ -1059,8 +1059,11 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         cadence (PyAutoFit#1420), and left the same latent crash in Emcee and
         BlackJAX NUTS (PyAutoFit#1422).
 
-        A falsy ``iterations_per_full_update`` means "no intermediate
-        checkpoint" and yields the whole remaining budget in one chunk.
+        There is no second "no intermediate checkpoint" sentinel: the config
+        default ``1e99`` already means that, and it flows through the ``min``
+        below without a special case. A stored ``0`` is therefore a
+        misconfiguration — most plausibly an HPC override — and is rejected
+        rather than silently reinterpreted as "checkpoint never".
 
         Parameters
         ----------
@@ -1079,10 +1082,6 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             least 1.
         """
         self._check_step_count(iterations_remaining, "iterations_remaining")
-
-        if not self.iterations_per_full_update:
-            return int(iterations_remaining)
-
         self._check_step_count(
             self.iterations_per_full_update, "iterations_per_full_update"
         )

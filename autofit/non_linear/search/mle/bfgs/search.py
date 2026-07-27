@@ -168,7 +168,10 @@ class AbstractBFGS(AbstractMLE):
         while total_iterations < self.maxiter:
 
             iterations_remaining = self.maxiter - total_iterations
-            iterations = min(self.iterations_per_full_update, iterations_remaining)
+            # SciPy tolerates an integral float ``maxiter``, but a fractional one
+            # would quietly acquire ceiling semantics instead of being rejected
+            # (PyAutoFit#1422).
+            iterations = self._steps_until_full_update(iterations_remaining)
 
             if iterations > 0:
                 options = dict(self.options)

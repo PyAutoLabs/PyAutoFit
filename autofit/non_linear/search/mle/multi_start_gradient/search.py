@@ -364,23 +364,30 @@ class AbstractMultiStartGradient(AbstractMLE):
             }
             self.paths.save_search_internal(obj=search_internal)
 
-            # Always an *intermediate* update, even on the last chunk. The final
-            # ``during_analysis=False`` update is ``start_resume_fit``'s job, and
-            # it runs unconditionally once ``_fit`` returns — emitting one here
-            # too made the whole final pass (sample output, latents,
-            # visualization, profiling) run twice on every search. Every other
-            # search passes ``during_analysis=True`` unconditionally here for
-            # exactly this reason (Emcee, BFGS, Nautilus); MultiStart was the
-            # outlier. The ``stop_reason``/``converged`` outcome still reaches the
-            # final samples, because that update is built from the
-            # ``search_internal`` dict returned below.
-            self.perform_update(
-                model=model,
-                analysis=analysis,
-                during_analysis=True,
-                fitness=fitness,
-                search_internal=search_internal,
-            )
+            # Update only at *intermediate* boundaries. ``start_resume_fit``
+            # performs the final update unconditionally the moment ``_fit``
+            # returns, so any update emitted here at a terminal boundary is pure
+            # duplicated work — and flipping ``during_analysis`` does not avoid
+            # it: ``SearchUpdater.update`` rebuilds the samples, recomputes the
+            # summary and re-runs likelihood profiling on *every* call,
+            # regardless of the flag. The previous ``during_analysis=not
+            # is_final`` was worse still, running the whole final pass twice
+            # including final visualization and latents.
+            #
+            # Nothing is lost by skipping: the checkpoint is
+            # ``save_search_internal`` above, and the ``search_internal`` dict
+            # this loop just built (carrying ``stop_reason``, ``converged`` and
+            # ``fom_history``) is what ``_fit`` returns and what that final
+            # update is computed from.
+            is_final = converged or total_steps >= self.n_steps
+            if not is_final:
+                self.perform_update(
+                    model=model,
+                    analysis=analysis,
+                    during_analysis=True,
+                    fitness=fitness,
+                    search_internal=search_internal,
+                )
 
             if converged:
                 self.logger.info(

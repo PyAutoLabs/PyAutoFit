@@ -58,14 +58,21 @@ def test__default_cadence_is_a_single_chunk():
     assert isinstance(iterations, int)
 
 
-def test__falsy_cadence_means_no_intermediate_checkpoint():
-    # A falsy cadence is "no boundary": run the remaining budget in one chunk,
-    # rather than a zero-length chunk that would never advance.
+def test__zero_cadence_raises_rather_than_meaning_never_checkpoint():
+    """``1e99`` is already the "no intermediate checkpoint" sentinel and flows
+    through the ``min`` without a special case, so a stored ``0`` is a
+    misconfiguration, not a second sentinel.
+
+    ``__init__`` cannot produce it from a public argument (``x or config``
+    replaces a falsy one), but the HPC branch assigns the config value with no
+    such fallback — so an HPC cadence of ``0`` would otherwise silently disable
+    checkpointing for the whole run instead of failing.
+    """
     search = af.MultiStartAdam(n_steps=120)
     search.iterations_per_full_update = 0.0
 
-    assert search._steps_until_full_update(iterations_remaining=120) == 120
-    assert isinstance(search._steps_until_full_update(iterations_remaining=120), int)
+    with pytest.raises(ValueError, match="iterations_per_full_update"):
+        search._steps_until_full_update(iterations_remaining=120)
 
 
 @pytest.mark.parametrize("cadence", [0.5, 50.9, -5])
@@ -98,15 +105,10 @@ def test__unusable_remaining_budget_raises(remaining):
 
 
 @pytest.mark.parametrize(
-    "search_cls, method_name",
-    [
-        (af.MultiStartAdam, "_fit"),
-        (af.Emcee, "_fit"),
-    ],
+    "search_cls",
+    [af.MultiStartAdam, af.Emcee, af.Zeus, af.BFGS, af.BlackJAXNUTS],
 )
-def test__chunked_searches_take_their_chunk_size_from_the_helper(
-    search_cls, method_name
-):
+def test__chunked_searches_take_their_chunk_size_from_the_helper(search_cls):
     """Wiring guard. Every test above drives ``_steps_until_full_update``
     directly, so all of them would still pass if a search went back to computing
     its chunk inline — which is precisely the regression this helper exists to
@@ -115,7 +117,7 @@ def test__chunked_searches_take_their_chunk_size_from_the_helper(
     These ``_fit`` bodies cannot be executed from this suite (jax/optax/emcee
     plus a real ``Analysis``), so the call site is asserted at the source level.
     """
-    source = inspect.getsource(getattr(search_cls, method_name))
+    source = inspect.getsource(search_cls._fit)
 
     assert "self._steps_until_full_update(" in source
     # the un-cast inline forms the crashes came from must not come back

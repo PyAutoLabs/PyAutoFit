@@ -387,24 +387,27 @@ def test__variable_length_zero_weight_nan_rows_are_robust():
         assert samples.summary() is not None
 
 
-def test__fit_never_emits_the_final_update_itself():
-    """``_fit`` must only ever emit *intermediate* updates.
+def test__fit_skips_its_update_at_a_terminal_boundary():
+    """``start_resume_fit`` performs the final update unconditionally the moment
+    ``_fit`` returns, so any update ``_fit`` emits at a terminal boundary is
+    duplicated work.
 
-    ``start_resume_fit`` performs the single ``during_analysis=False`` update
-    unconditionally once ``_fit`` returns (``abstract_search.py``), so a
-    ``during_analysis=False`` in the step loop made the whole final pass —
-    sample output, latent computation, visualization, profiling — run twice on
-    every search. Every other chunked search passes ``during_analysis=True``
-    unconditionally for this reason; MultiStart was the outlier.
+    Flipping ``during_analysis`` is *not* enough to avoid it: ``SearchUpdater``
+    rebuilds the samples, recomputes the summary and re-runs likelihood
+    profiling on every call regardless of the flag. The update has to be skipped
+    outright, which is what the ``if not is_final`` guard does.
 
     ``_fit`` needs jax + optax + a JAX-traceable ``Analysis`` and cannot run
-    from this NumPy-only suite, so the call is asserted at the source level.
+    from this NumPy-only suite, so the guard is asserted at the source level.
+    Whitespace is normalised so reformatting does not cause a false failure.
     """
-    source = inspect.getsource(af.MultiStartAdam._fit)
+    source = " ".join(inspect.getsource(af.MultiStartAdam._fit).split())
 
+    # the update is guarded, and is intermediate-flavoured when it does run
+    assert "if not is_final: self.perform_update(" in source
     assert "during_analysis=True" in source
+    # the form that ran the whole final pass twice must not come back
     assert "during_analysis=not is_final" not in source
-    assert "is_final" not in source
 
     # The framework's single final update is still there and unconditional —
     # without it this change would remove the final update rather than
@@ -425,15 +428,15 @@ def test__fit_clears_a_stale_stop_reason_but_keeps_converged():
     reason in every intermediate checkpoint, so a search that was still running
     reported itself finished to the aggregator and any results inspector.
 
-    ``"converged"`` must survive the clear, because the loop guard uses it to
-    refuse resuming a converged search into more steps.
+    ``"converged"`` must survive the clear, because the ``while`` guard uses it
+    to refuse resuming a converged search into more steps — so that guard is
+    asserted on the ``while`` line specifically. Asserting the bare substring
+    would be satisfied by the clearing ``if`` itself and would pin nothing.
     """
-    source = inspect.getsource(af.MultiStartAdam._fit)
+    source = " ".join(inspect.getsource(af.MultiStartAdam._fit).split())
 
-    assert 'if stop_reason != "converged":' in source
-    assert "stop_reason = None" in source
-    # the guard that "converged" protects is still the loop condition
-    assert 'stop_reason != "converged"' in source
+    assert 'if stop_reason != "converged": stop_reason = None' in source
+    assert 'while total_steps < self.n_steps and stop_reason != "converged":' in source
 
 
 def test__samples_info__reports_a_cleared_stop_reason_as_unfinished():
