@@ -66,7 +66,13 @@ local_scheme = "no-local-version"
 
 
 [project.optional-dependencies]
-jax = ["autonerves[jax]", "optax>=0.2.5"]
+# optax carries the same `python_version >= '3.11'` marker every entry in
+# autonerves[jax] does. Without it, resolving this extra on 3.9/3.10 sends pip
+# backtracking through the whole optax/jax release history looking for a version
+# with wheels for that interpreter — which ends in `resolution-too-deep`, taking
+# every 3.9 leg of python_matrix red. optax is only useful where jax is
+# installed, and jax is gated to 3.11+, so gating optax to match loses nothing.
+jax = ["autonerves[jax]", "optax>=0.2.5; python_version >= '3.11'"]
 mcp = ["mcp"]
 optional = [
     "autofit[jax]",
