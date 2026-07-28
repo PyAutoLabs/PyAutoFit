@@ -3,6 +3,7 @@ import os
 import re
 import shutil
 import zipfile
+import zlib
 from abc import ABC, abstractmethod
 from configparser import NoSectionError
 from pathlib import Path
@@ -34,6 +35,72 @@ def _test_mode_segment() -> Optional[str]:
     a later real run at the same paths ("Fit Already Completed").
     """
     return "test_mode" if is_test_mode() else None
+
+
+def _matches_archived(info: zipfile.ZipInfo, file_path) -> bool:
+    """
+    Returns whether the archived member described by ``info`` has the same
+    content as the file at ``file_path``.
+
+    Compared via the size and CRC already held in the zip's central directory,
+    so the archived bytes are never decompressed and the file on disk is read
+    once in chunks — a cache artifact can be a large ``.fits`` image.
+    """
+    if info.file_size != os.path.getsize(file_path):
+        return False
+
+    crc = 0
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            crc = zlib.crc32(chunk, crc)
+
+    return crc == info.CRC
+
+
+def _replace_zip_member(zip_path, arcname: str, file_path):
+    """
+    Replace the member ``arcname`` of the zip at ``zip_path`` with the file at
+    ``file_path``.
+
+    ``zipfile`` cannot overwrite a member in place, so every other member is
+    streamed into a new archive alongside the replacement. The new archive is
+    written next to the original (same directory, so the final ``os.replace``
+    is atomic on one filesystem) and only swapped in once complete: an error
+    part-way leaves the original archive untouched.
+
+    Rebuilding the archive from the output directory instead (as the search
+    itself does at completion) is not an option here, because with
+    ``remove_files`` the directory holds only the file just written.
+    """
+    zip_path = Path(zip_path)
+    temporary_path = zip_path.with_name(f"{zip_path.name}.replace.tmp")
+
+    try:
+        with zipfile.ZipFile(zip_path, "r") as source:
+            replaced = source.getinfo(arcname)
+
+            with zipfile.ZipFile(temporary_path, "w") as destination:
+                for info in source.infolist():
+                    if info.filename == arcname:
+                        continue
+
+                    with source.open(info) as member:
+                        with destination.open(info, "w") as target:
+                            shutil.copyfileobj(member, target)
+
+                destination.write(
+                    file_path,
+                    arcname,
+                    compress_type=replaced.compress_type,
+                )
+
+        os.replace(temporary_path, zip_path)
+    except BaseException:
+        try:
+            os.remove(temporary_path)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 class AbstractPaths(ABC):
@@ -325,7 +392,10 @@ class AbstractPaths(ABC):
 
         No-op when the zip does not exist (e.g. the search is still running,
         so the file will be zipped with everything else at completion) and
-        when the member is already present.
+        when the archived member is already byte-identical to the file on
+        disk. When the member exists but its content has changed — a cache
+        that was invalidated and recomputed — it is replaced, otherwise the
+        stale copy would come back at the next ``restore()``.
 
         Parameters
         ----------
@@ -339,8 +409,20 @@ class AbstractPaths(ABC):
         arcname = str(Path(file_path).relative_to(self.output_path))
 
         with zipfile.ZipFile(self._zip_path, "a") as f:
-            if arcname not in f.namelist():
+            try:
+                info = f.getinfo(arcname)
+            except KeyError:
                 f.write(file_path, arcname)
+                return
+
+            if _matches_archived(info, file_path):
+                return
+
+        _replace_zip_member(
+            zip_path=self._zip_path,
+            arcname=arcname,
+            file_path=file_path,
+        )
 
     def restore(self):
         """

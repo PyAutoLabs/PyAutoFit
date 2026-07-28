@@ -149,6 +149,59 @@ def test__preserve_in_zip__file_survives_restore(tmp_path):
     assert cache_file.exists()
 
 
+def test__preserve_in_zip__replaces_stale_member(tmp_path):
+    import zipfile
+
+    paths = af.DirectoryPaths(name="preserve_replace_test", path_prefix=str(tmp_path))
+
+    files_path = Path(paths._files_path)
+    files_path.mkdir(parents=True, exist_ok=True)
+    (files_path / "samples_summary.json").write_text("{}")
+
+    cache_file = files_path / "cache_artifact.json"
+    cache_file.write_text('{"cached": "stale"}')
+
+    paths.zip_remove()
+    assert Path(paths._zip_path).exists()
+
+    # The cache was invalidated and recomputed: the member is already in the
+    # zip, but its content has changed.
+    files_path.mkdir(parents=True, exist_ok=True)
+    cache_file.write_text('{"cached": "recomputed"}')
+    paths.preserve_in_zip(cache_file)
+
+    with zipfile.ZipFile(paths._zip_path) as f:
+        assert f.namelist().count("files/cache_artifact.json") == 1
+        assert f.read("files/cache_artifact.json") == b'{"cached": "recomputed"}'
+        # The rewrite must not lose the members it copied across.
+        assert f.read("files/samples_summary.json") == b"{}"
+
+    # The restore cycle yields the recomputed bytes, not the stale ones.
+    paths.restore()
+    assert cache_file.read_text() == '{"cached": "recomputed"}'
+
+
+def test__preserve_in_zip__identical_content_does_not_rewrite(tmp_path):
+    paths = af.DirectoryPaths(name="preserve_identical_test", path_prefix=str(tmp_path))
+
+    files_path = Path(paths._files_path)
+    files_path.mkdir(parents=True, exist_ok=True)
+    cache_file = files_path / "cache_artifact.json"
+    cache_file.write_text('{"cached": true}')
+
+    paths.zip_remove()
+    before = Path(paths._zip_path).read_bytes()
+
+    # Re-preserving a file whose content is unchanged leaves the archive
+    # untouched, so the common resume path never pays for a rewrite.
+    files_path.mkdir(parents=True, exist_ok=True)
+    cache_file.write_text('{"cached": true}')
+
+    paths.preserve_in_zip(cache_file)
+
+    assert Path(paths._zip_path).read_bytes() == before
+
+
 def test__preserve_in_zip__no_zip_is_a_no_op(tmp_path):
     paths = af.DirectoryPaths(name="preserve_noop_test", path_prefix=str(tmp_path))
 
