@@ -8,6 +8,7 @@ from typing import (
     Optional,
     Collection,
     Any,
+    Protocol,
     TYPE_CHECKING, 
 )
 
@@ -35,8 +36,6 @@ from autofit.mapper.variable import (
 if TYPE_CHECKING:
     from autofit.graphical.mean_field import MeanField
     from autofit.graphical.expectation_propagation import EPMeanField
-
-Protocol = ABC  # for python 3.7 compat
 
 Value = Dict[Variable, np.ndarray]
 

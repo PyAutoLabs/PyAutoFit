@@ -16,15 +16,13 @@ from autofit.mapper.variable import (
 from autofit.mapper.variable_operator import (
     RectVariableOperator,
 )
-from abc import ABC
 from typing import (
     Tuple,
     Dict,
     Union,
     Callable,
+    Protocol,
 )
-
-Protocol = ABC  # for python 3.7 compat
 
 Value = Dict[Variable, np.ndarray]
 GradientValue = VariableData
