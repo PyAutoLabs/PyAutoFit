@@ -469,6 +469,177 @@ def test__stop_reason_on_resume(restored, expected):
     assert af.MultiStartAdam._stop_reason_on_resume(restored) == expected
 
 
+@pytest.mark.parametrize(
+    "total_steps, converged, silence, should_log",
+    [
+        (1, False, False, True),  # first step: the compile is over, we are moving
+        (2, False, False, False),  # off-cadence
+        (10, False, False, True),  # on-cadence
+        (20, False, False, True),
+        (23, False, False, False),
+        (23, True, False, True),  # converged off-cadence still reports
+        (10, False, True, False),  # silence suppresses a cadence hit
+        (1, False, True, False),  # ...and the first step
+        (23, True, True, False),  # ...and convergence
+    ],
+)
+def test__should_log_progress(total_steps, converged, silence, should_log):
+    """The cadence rule. The first step always logs because that line is what
+    tells a user the XLA compile finished and stepping has begun — the longest
+    unexplained wait in a real run. The converged step always logs because it
+    lands off-cadence more often than not."""
+    search = af.MultiStartAdam(n_steps=300, iterations_per_log=10, silence=silence)
+
+    assert (
+        search._should_log_progress(total_steps=total_steps, converged=converged)
+        is should_log
+    )
+
+
+@pytest.mark.parametrize("bad", [0, -1, 2.5])
+def test__iterations_per_log__rejects_a_cadence_that_cannot_schedule(bad):
+    """Rejected at construction, not clamped: ``total_steps % 0`` raises and a
+    negative cadence is never 0, so it would log every step. A user who mistyped
+    the knob is better served by an error than by a schedule they never asked
+    for."""
+    with pytest.raises(ValueError, match="iterations_per_log"):
+        af.MultiStartAdam(iterations_per_log=bad)
+
+
+def test__progress_message__reports_log_posterior_not_the_raw_fom():
+    """``best_fom`` is ``-2 * log_posterior`` (what the search minimises), so the
+    line must apply the same sign-and-halve conversion as
+    ``samples_via_internal_from`` — otherwise the number in the log cannot be
+    compared with the number in the results."""
+    search = af.MultiStartAdam(n_starts=48, n_steps=300)
+
+    message = search._progress_message(
+        total_steps=30,
+        best_fom=-63575.6876,
+        previous_fom=-63571.4676,
+        n_alive=46,
+    )
+
+    assert "adam step 30/300" in message
+    assert "best log_post 31787.8438" in message
+    # a fom drop of 4.22 is a log-posterior gain of 2.11
+    assert "gained 2.1100" in message
+    assert "alive 46/48" in message
+    # no learning-rate-free state was supplied, so the field is omitted entirely
+    assert " d " not in message
+
+
+def test__progress_message__includes_the_prodigy_step_scale_when_present():
+    """Prodigy's per-start ``estim_lr`` (its ``d``) is the one genuinely
+    learning-rate-free diagnostic, and is otherwise invisible: min/median/max
+    across starts says whether it has finished ramping or is still climbing."""
+    search = af.MultiStartProdigy(n_starts=4, n_steps=300)
+
+    message = search._progress_message(
+        total_steps=10,
+        best_fom=-100.0,
+        previous_fom=-90.0,
+        n_alive=4,
+        estim_lr=np.array([1.0e-2, 2.0e-2, 4.0e-2, 8.0e-2]),
+    )
+
+    assert "prodigy step 10/300" in message
+    assert "d 1.00e-02 / 3.00e-02 / 8.00e-02" in message
+
+
+@pytest.mark.parametrize(
+    "best_fom, previous_fom, expect_gain",
+    [
+        (np.inf, None, False),  # nothing has found a finite basin yet
+        (-100.0, None, False),  # first line: no previous to compare against
+        (-100.0, np.inf, False),  # arrival at a first basin is not a "gain"
+        (-100.0, -90.0, True),
+    ],
+)
+def test__progress_message__non_finite_and_first_line_edges(
+    best_fom, previous_fom, expect_gain
+):
+    """``inf - x`` would print as ``inf`` and a bare ``inf`` best-fom would print
+    as a figure of merit the user cannot act on, so both are reported plainly
+    instead."""
+    search = af.MultiStartAdam(n_starts=8, n_steps=300)
+
+    message = search._progress_message(
+        total_steps=10,
+        best_fom=best_fom,
+        previous_fom=previous_fom,
+        n_alive=8,
+    )
+
+    assert ("gained" in message) is expect_gain
+    assert "inf" not in message
+
+    if not np.isfinite(best_fom):
+        assert "no finite basin yet" in message
+
+
+@pytest.mark.parametrize(
+    "batch_size, expected",
+    [
+        (None, "all 16 starts at once"),
+        (4, "batches of 4 starts"),
+    ],
+)
+def test__compile_message__names_what_is_being_compiled(batch_size, expected):
+    """Two distinct compiles block a fresh run — the single-point objective
+    ``_broad_starts`` calls per draw, and the vmapped/chunked one the step loop
+    calls. Neither is reachable by the ``Fitness._jit`` / ``_vmap`` / ``_grad``
+    notices, because this search builds its transforms straight off
+    ``fitness.call``."""
+    search = af.MultiStartProdigy(n_starts=16, batch_size=batch_size)
+
+    single = search._compile_message(batched=False)
+    assert "single-point objective" in single
+    assert "16 broad starts" in single
+    assert "could take seconds or minutes" in single
+
+    batched = search._compile_message(batched=True)
+    assert "vmapped objective" in batched
+    assert expected in batched
+    assert "could take seconds or minutes" in batched
+
+
+def test__dict_round_trip__iterations_per_log():
+    """The cadence must survive serialisation so a resumed search keeps
+    reporting at the rate the user chose."""
+    restored = from_dict(to_dict(af.MultiStartProdigy(iterations_per_log=25)))
+
+    assert isinstance(restored, af.MultiStartProdigy)
+    assert restored.iterations_per_log == 25
+
+
+def test__fit_wires_the_progress_and_compile_seams():
+    """Wiring guard for the three progress seams, which are otherwise tested in
+    isolation and would keep passing if ``_fit`` stopped calling them.
+
+    Necessarily a source-level check — ``_fit`` cannot run from this suite.
+    """
+    source = " ".join(inspect.getsource(af.MultiStartAdam._fit).split())
+
+    # the cadence gate and the line it guards
+    assert (
+        "if self._should_log_progress( total_steps=total_steps, converged=converged )"
+        in source
+    )
+    assert "self._progress_message(" in source
+
+    # both compile notices, each emitted before the call that triggers its compile
+    assert "self._compile_message(batched=False)" in source
+    assert "self._compile_message(batched=True)" in source
+
+    # the step scale is read from the optimizer state, not recomputed
+    assert 'optax.tree_utils.tree_get(opt_state, "estim_lr")' in source
+
+    # the converged step must still be able to report before the loop breaks:
+    # setting `converged` and breaking must not be fused back together.
+    assert "converged = True break" not in source
+
+
 def test__fit_uses_both_seams_and_keeps_the_converged_loop_guard():
     """Wiring guard for the two seams above, which are otherwise tested in
     isolation and would keep passing if ``_fit`` stopped calling them.
