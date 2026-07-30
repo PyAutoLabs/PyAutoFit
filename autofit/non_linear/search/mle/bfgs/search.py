@@ -124,7 +124,10 @@ class AbstractBFGS(AbstractMLE):
             fom_is_log_likelihood=False,
             resample_figure_of_merit=-np.inf,
             convert_to_chi_squared=True,
-            store_history=self.should_plot_start_point
+            store_history=self.should_plot_start_point,
+            iterations_per_quick_update=self.iterations_per_quick_update,
+            background_quick_update=self.quick_update_background,
+            live_visual_update=self.live_visual_update,
         )
 
         try:
