@@ -6,6 +6,7 @@ import pytest
 import autofit as af
 from autofit import example
 from autofit.non_linear.search import abstract_search
+from autofit.non_linear.search.mle.multi_start_gradient.search import _chunk_slices
 from autonerves.dictable import from_dict, to_dict
 
 # The MultiStart gradient searches are JAX-native at fit time, but their
@@ -103,9 +104,9 @@ def test__batch_size_is_carried_to_every_rule():
     """``batch_size`` is a shared knob on the abstract base, not per-rule.
 
     The numerical guarantee it must honour — chunked evaluation is identical to
-    the unchunked vmap — is a JAX property of ``jax.lax.map(..., batch_size=)``
-    and is asserted in autofit_workspace_test, since the library suite is
-    NumPy-only.
+    the unchunked vmap — is asserted in autofit_workspace_test, since the
+    library suite is NumPy-only. The chunk bookkeeping the sweep is built on
+    (``_chunk_slices``) is pure Python and tested below.
     """
     for cls in (
         af.MultiStartAdam,
@@ -115,6 +116,38 @@ def test__batch_size_is_carried_to_every_rule():
     ):
         assert cls().batch_size is None
         assert cls(batch_size=8).batch_size == 8
+
+
+@pytest.mark.parametrize(
+    "n_rows, batch_size, expected",
+    [
+        (8, 4, [(0, 4, 0), (4, 8, 0)]),  # exact division
+        (10, 4, [(0, 4, 0), (4, 8, 0), (8, 10, 2)]),  # ragged final chunk
+        (3, 8, [(0, 3, 5)]),  # fewer rows than one chunk (short broad-start draw)
+        (3, 1, [(0, 1, 0), (1, 2, 0), (2, 3, 0)]),  # batch_size=1
+        (4, 4, [(0, 4, 0)]),  # single exact chunk
+    ],
+)
+def test__chunk_slices(n_rows, batch_size, expected):
+    assert _chunk_slices(n_rows, batch_size) == expected
+
+
+@pytest.mark.parametrize("n_rows", [1, 3, 4, 7, 16, 47, 48])
+@pytest.mark.parametrize("batch_size", [1, 3, 4, 16])
+def test__chunk_slices__covers_every_row_at_constant_shape(n_rows, batch_size):
+    """Every chunk presents the same ``batch_size`` shape to the compiled
+    function (rows + pad), chunks tile ``0..n_rows`` in order, and only the
+    final chunk may be padded — the invariants the one-compile sweep rests on.
+    """
+    slices = _chunk_slices(n_rows, batch_size)
+
+    assert slices[0][0] == 0
+    assert slices[-1][1] == n_rows
+    for i, (lo, hi, pad) in enumerate(slices):
+        assert (hi - lo) + pad == batch_size
+        assert pad == 0 or i == len(slices) - 1
+        if i:
+            assert lo == slices[i - 1][1]
 
 
 def test__convergence_default_is_on_and_carried():
