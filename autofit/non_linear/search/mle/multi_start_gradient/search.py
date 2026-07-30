@@ -42,6 +42,7 @@ class AbstractMultiStartGradient(AbstractMLE):
         start_upper_limit: float = 0.85,
         resurrect: bool = False,
         convergence: Optional[MultiStartGradientConvergence] = None,
+        iterations_per_log: int = 10,
         initializer: Optional[AbstractInitializer] = None,
         iterations_per_full_update: int = None,
         iterations_per_quick_update: int = None,
@@ -134,6 +135,29 @@ class AbstractMultiStartGradient(AbstractMLE):
             when ``resurrect=True`` (the pixelized regime, whose best-fom climbs in
             breakthrough jumps that a plateau check would false-stop on); there the
             search leans on the ``n_steps`` ceiling.
+        iterations_per_log
+            How many steps pass between progress lines on the search log. The
+            step loop is otherwise entirely silent between "Starting new ..." and
+            "... sampling complete", which on a long fit leaves a user unable to
+            tell a live search from a hung one.
+
+            Neither of the framework's usual progress channels reaches this
+            search, which is why it needs its own: ``iterations_per_full_update``
+            defaults to the never-sentinel, so the whole run is a single chunk
+            whose lone ``perform_update`` is (correctly) suppressed as duplicated
+            work; and ``Fitness``'s quick-update counter is Python state mutated
+            inside ``fitness.call``, which is traced under ``jax.jit(jax.vmap(…))``
+            here — it runs once at trace time and never again. The samplers dodge
+            the problem entirely by delegating to their own library's progress bar
+            (emcee ``progress=True``, dynesty ``print_progress``); a search that
+            owns its step loop has to report for itself.
+
+            The first step always logs regardless of this cadence, because that
+            line is what tells the user the XLA compile finished and stepping has
+            begun — the longest unexplained wait in a real run. A log line rather
+            than a progress bar: ``n_steps`` is a ceiling that auto-convergence
+            routinely stops short of, so a bar's ETA would mislead, and lines
+            survive SLURM/HPC log capture where bars do not.
         """
 
         super().__init__(
@@ -161,6 +185,15 @@ class AbstractMultiStartGradient(AbstractMLE):
         self.convergence = (
             convergence if convergence is not None else MultiStartGradientConvergence()
         )
+
+        # Rejected here rather than clamped, and at construction rather than at
+        # the first step: a sub-1 cadence makes ``total_steps % cadence`` either
+        # raise (0) or log every step (negative, since the modulo is never 0),
+        # and a user who mistyped the knob is better served by an immediate error
+        # than by a schedule they never asked for. Mirrors the reasoning on
+        # ``AbstractSearch._check_step_count``, which it reuses.
+        self._check_step_count(iterations_per_log, "iterations_per_log")
+        self.iterations_per_log = int(iterations_per_log)
 
         self.logger.debug(f"Creating {self.optax_method} MultiStartGradient Search")
 
@@ -197,6 +230,128 @@ class AbstractMultiStartGradient(AbstractMLE):
         boundary, so it starts clear.
         """
         return stop_reason if stop_reason == "converged" else None
+
+    def _should_log_progress(self, total_steps: int, converged: bool) -> bool:
+        """
+        Whether the step just completed should emit a progress line.
+
+        Three ways to qualify: the first step (the compile is over and the search
+        is genuinely moving — the single most useful line in the run), every
+        ``iterations_per_log``-th step thereafter, and the step that converged
+        (which lands off-cadence far more often than not, and is the one step a
+        user most wants to see).
+
+        ``silence`` suppresses all of them, matching how the samplers gate their
+        own progress output (e.g. Dynesty's ``print_progress=not self.silence``).
+
+        A named predicate rather than an inline condition so the cadence rule can
+        be tested directly; ``_fit`` needs jax + optax + a JAX-traceable
+        ``Analysis`` and cannot be driven from the NumPy-only library suite.
+        """
+        if self.silence:
+            return False
+
+        return (
+            bool(converged)
+            or total_steps <= 1
+            or total_steps % self.iterations_per_log == 0
+        )
+
+    def _compile_message(self, batched: bool) -> str:
+        """
+        The notice logged immediately before a step that will trigger an XLA
+        compile, so the ensuing wait is explained rather than silent.
+
+        Two distinct compiles block a fresh run, hence the ``batched`` switch:
+        the single-point ``value_and_grad`` that ``_broad_starts`` calls per draw,
+        and the vmapped (or ``batch_size``-chunked) one the step loop calls. Both
+        can run to minutes on a multi-band objective, and neither is reachable by
+        the ``Fitness._jit`` / ``_vmap`` / ``_grad`` compile notices — this search
+        builds its transforms straight off ``fitness.call``.
+
+        Phrased to match the sampler-wide compile message rather than inventing a
+        second dialect for the same event.
+        """
+        if not batched:
+            return (
+                "JAX: jit compiling the single-point objective used to draw "
+                f"{self.n_starts} broad starts, could take seconds or minutes..."
+            )
+
+        over = (
+            f"batches of {self.batch_size} starts"
+            if self.batch_size is not None
+            else f"all {self.n_starts} starts at once"
+        )
+
+        return (
+            f"JAX: jit compiling the vmapped objective over {over}, "
+            "could take seconds or minutes..."
+        )
+
+    def _progress_message(
+        self,
+        total_steps: int,
+        best_fom: float,
+        previous_fom: Optional[float],
+        n_alive: int,
+        estim_lr=None,
+    ) -> str:
+        """
+        The one-line progress report for a single step.
+
+        Compact and pipe-delimited rather than prose: unlike the one-shot notices
+        this line repeats tens of times per run, and sentences would bury the
+        numbers that carry the signal.
+
+        Reports the log posterior, not the raw figure of merit. ``best_fom`` is
+        ``-2 * log_posterior`` (what the search minimises), so the sign-and-halve
+        conversion here is the same one ``samples_via_internal_from`` applies —
+        a user comparing the log to their results should not have to do it in
+        their head.
+
+        Parameters
+        ----------
+        total_steps
+            Steps completed, reported against the ``n_steps`` ceiling.
+        best_fom
+            The global best figure-of-merit. Non-finite until some start finds a
+            finite basin, which is reported plainly rather than as ``inf``.
+        previous_fom
+            The global best at the previous progress line, used for the gain
+            since. ``None`` on the first line, and skipped while either end of
+            the comparison is non-finite (a first finite basin is an arrival, not
+            an improvement, and ``inf - x`` would print as ``inf``).
+        n_alive
+            Starts whose objective is currently finite, against ``n_starts`` —
+            the population-health signal that a falling best-fom alone hides.
+        estim_lr
+            Per-start self-estimated step scale, for the learning-rate-free rules
+            that carry one (Prodigy's ``d``). ``None`` for the fixed-rate Adam
+            family, whose optimizer state has no such field; the field is then
+            omitted rather than rendered empty.
+        """
+        parts = [f"{self.optax_method} step {total_steps}/{self.n_steps}"]
+
+        if np.isfinite(best_fom):
+            parts.append(f"best log_post {-0.5 * best_fom:.4f}")
+
+            if previous_fom is not None and np.isfinite(previous_fom):
+                # fom is -2*log_posterior, so a fom drop of d is a log-posterior
+                # gain of d/2.
+                parts.append(f"gained {0.5 * (previous_fom - best_fom):.4f}")
+        else:
+            parts.append("best log_post — (no finite basin yet)")
+
+        parts.append(f"alive {n_alive}/{self.n_starts}")
+
+        if estim_lr is not None:
+            lr = np.asarray(estim_lr, dtype=float)
+            parts.append(
+                f"d {np.nanmin(lr):.2e} / {np.nanmedian(lr):.2e} / {np.nanmax(lr):.2e}"
+            )
+
+        return " | ".join(parts)
 
     def _fit(
         self,
@@ -309,6 +464,9 @@ class AbstractMultiStartGradient(AbstractMLE):
 
         except (FileNotFoundError, TypeError, KeyError):
 
+            if not self.silence:
+                self.logger.info(self._compile_message(batched=False))
+
             params = self._broad_starts(
                 model=model,
                 value_and_grad_single=jax.jit(_value_and_grad),
@@ -337,6 +495,18 @@ class AbstractMultiStartGradient(AbstractMLE):
 
         stop_reason = self._stop_reason_on_resume(stop_reason)
 
+        # The vmapped objective compiles on its first call below, not here, so
+        # the notice is emitted at the call site the first time round. Resumed
+        # runs pay it too (a fresh process has no live trace cache), which is why
+        # the flag is set here rather than only on the fresh path.
+        awaiting_compile = True
+
+        # The global best at the previous progress line, so each line can report
+        # the gain since the last one rather than since the previous *step* —
+        # over a cadence of ``iterations_per_log`` steps that is the number a
+        # user can actually act on.
+        previous_logged_fom = None
+
         # ``n_steps`` is the hard ceiling / max budget; ``stop_reason`` becomes
         # ``"converged"`` if the auto-convergence check stops the search early
         # (this also short-circuits the loop on a resumed, already-converged run).
@@ -356,6 +526,11 @@ class AbstractMultiStartGradient(AbstractMLE):
             converged = False
 
             for _ in range(iterations):
+                if awaiting_compile:
+                    if not self.silence:
+                        self.logger.info(self._compile_message(batched=True))
+                    awaiting_compile = False
+
                 foms, grads = batched_value_and_grad(params)
 
                 alive = np.isfinite(np.asarray(foms))
@@ -397,6 +572,33 @@ class AbstractMultiStartGradient(AbstractMLE):
                     fom_history
                 ):
                     converged = True
+
+                # Logged before the ``converged`` break so the terminating step
+                # reports itself; it is the one step a user most wants to see and
+                # it lands off-cadence more often than not.
+                if self._should_log_progress(
+                    total_steps=total_steps, converged=converged
+                ):
+                    # Prodigy et al. carry a self-estimated step scale; the Adam
+                    # family's state has no such field and ``tree_get`` returns
+                    # None, which the message renders by omission. Read only on a
+                    # logging step: it is an (n_starts,) device->host copy, which
+                    # merely pulls forward the sync the next iteration's
+                    # ``np.asarray(foms)`` would force anyway.
+                    estim_lr = optax.tree_utils.tree_get(opt_state, "estim_lr")
+
+                    self.logger.info(
+                        self._progress_message(
+                            total_steps=total_steps,
+                            best_fom=best_fom,
+                            previous_fom=previous_logged_fom,
+                            n_alive=int(alive.sum()),
+                            estim_lr=estim_lr,
+                        )
+                    )
+                    previous_logged_fom = best_fom
+
+                if converged:
                     break
 
             if converged:
