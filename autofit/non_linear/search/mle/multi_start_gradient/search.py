@@ -85,16 +85,24 @@ class AbstractMultiStartGradient(AbstractMLE):
             ell_comps / shear at exactly 0); it does not rescue landscapes with
             broad non-finite regions (that is the Phase-2 restart-on-death layer).
         batch_size
-            The number of starts evaluated per vmapped ``value_and_grad`` call,
-            via ``jax.lax.map``. ``None`` (default) evaluates all ``n_starts`` in
-            a single ``jax.vmap`` — fastest, but it allocates the whole batched
-            jvp at once, which for a memory-heavy likelihood (e.g. a pixelized
-            source at 16 starts, ~58 GB in float64) exhausts even an 80 GB GPU.
-            Setting it trades a little speed for a bounded memory footprint.
+            The number of starts evaluated per compiled ``value_and_grad``
+            call. ``None`` (default) evaluates all ``n_starts`` in a single
+            ``jax.vmap`` — fastest, but it allocates the whole batched jvp at
+            once, which for a memory-heavy likelihood (e.g. a pixelized source
+            at 16 starts, ~58 GB in float64) exhausts even an 80 GB GPU.
+            Setting it sweeps the starts in ``batch_size``-wide vmapped chunks
+            from a Python loop, bounding both the memory footprint (one
+            chunk's jvp allocated at a time) and the XLA compile (one
+            chunk-shaped program, ever). The compile bound is why the sweep is
+            a Python loop and not an in-XLA scan: ``jax.lax.map`` welds the
+            whole sweep into one program, which for a multi-band
+            ``FactorGraphModel`` objective is intractable to compile (>1 hour
+            cold on CPU), while the same-width chunk alone compiles in
+            minutes.
 
             This is purely an **implementation-level tiling**: it is numerically
-            inert (identical results, only the allocation changes). That makes it
-            unlike ``af.Nautilus``'s ``n_batch``, which is Nautilus's own
+            inert (identical results, only the allocation and dispatch change).
+            That makes it unlike ``af.Nautilus``'s ``n_batch``, which is Nautilus's own
             algorithmic knob (how many points it proposes per iteration) that
             autofit merely forwards. Here ``n_starts`` is the algorithm; this
             only decides how many of those starts are evaluated at a time.
@@ -237,15 +245,18 @@ class AbstractMultiStartGradient(AbstractMLE):
         # Unbatched we vmap all starts at once — fastest, but it allocates the
         # whole batched jvp, which for a memory-heavy likelihood (e.g. a
         # pixelized source at 16 starts, ~58 GB in float64) exhausts even an
-        # 80 GB GPU. When `batch_size` is set we hand the tiling to
-        # `jax.lax.map`, which vmaps *within* each chunk and scans across them,
-        # handling a ragged final chunk without a second compile. It is
-        # numerically identical to the vmap; `batch_size` never changes results,
-        # it only bounds memory.
-        #
-        # `lax.map` is only used when batching is requested: with
-        # `batch_size=None` it degrades to a sequential scan, which would throw
-        # away the parallelism of the default path.
+        # 80 GB GPU. When `batch_size` is set we sweep the starts in
+        # `batch_size`-wide vmapped chunks from a Python loop. Only one
+        # chunk-shaped function is ever XLA-compiled (the jit cache keys on the
+        # `(batch_size, ndim)` shape; the ragged final chunk is padded to that
+        # shape and the padded rows discarded), so the compile cost is that of
+        # a single chunk regardless of `n_starts`. An in-XLA scan over the
+        # chunks (`jax.lax.map`) instead welds the whole sweep into one
+        # program, which for a multi-band `FactorGraphModel` objective is
+        # intractable to compile (>1 hour cold on CPU, and memory-explosive to
+        # compile) while the chunk alone compiles in minutes. The tiling is
+        # numerically identical to the vmap; `batch_size` never changes
+        # results, it only bounds memory and compile.
         _value_and_grad = jax.value_and_grad(fitness.call)
         _vmapped = jax.jit(jax.vmap(_value_and_grad))
 
@@ -254,9 +265,25 @@ class AbstractMultiStartGradient(AbstractMLE):
         else:
             batch_size = self.batch_size
 
-            @jax.jit
             def batched_value_and_grad(params):
-                return jax.lax.map(_value_and_grad, params, batch_size=batch_size)
+                foms_chunks = []
+                grads_chunks = []
+                for lo, hi, pad in _chunk_slices(params.shape[0], batch_size):
+                    chunk = params[lo:hi]
+                    if pad:
+                        chunk = jnp.concatenate(
+                            [chunk, jnp.tile(chunk[-1:], (pad, 1))]
+                        )
+                    foms, grads = _vmapped(chunk)
+                    if pad:
+                        foms = foms[:-pad]
+                        grads = grads[:-pad]
+                    foms_chunks.append(foms)
+                    grads_chunks.append(grads)
+                return (
+                    jnp.concatenate(foms_chunks),
+                    jnp.concatenate(grads_chunks),
+                )
 
         # The optax rule (resolved from optax / optax.contrib), guarded by
         # apply_if_finite, with a jitted per-start (vmapped) update step. Built
@@ -284,8 +311,7 @@ class AbstractMultiStartGradient(AbstractMLE):
 
             params = self._broad_starts(
                 model=model,
-                fitness=fitness,
-                batched_value_and_grad=batched_value_and_grad,
+                value_and_grad_single=jax.jit(_value_and_grad),
                 jnp=jnp,
             )
 
@@ -527,12 +553,18 @@ class AbstractMultiStartGradient(AbstractMLE):
 
         return params, opt_state
 
-    def _broad_starts(self, model, fitness, batched_value_and_grad, jnp):
+    def _broad_starts(self, model, value_and_grad_single, jnp):
         """
         Draw ``n_starts`` broad starting points in the unit cube, map them to
         physical parameters, and keep only those with a finite objective and a
         finite gradient (degenerate points such as ell_comps / shear at exactly 0
         have NaN gradients and must be filtered out).
+
+        ``value_and_grad_single`` is the jitted single-point objective built
+        once in ``_fit``: one XLA compile (persistently cached) serves every
+        draw. Evaluating the draws eagerly instead re-pays the un-compiled AD
+        cost per draw, which on a multi-band ``FactorGraphModel`` objective
+        dominated the whole fit (~13 minutes for 16 draws, cache or no cache).
         """
         rng = np.random.default_rng(0)
 
@@ -547,7 +579,7 @@ class AbstractMultiStartGradient(AbstractMLE):
             vector = jnp.asarray(
                 model.vector_from_unit_vector(unit_vector=list(unit_vector), xp=jnp)
             )
-            fom, grad = jax_value_and_grad_single(fitness, vector)
+            fom, grad = value_and_grad_single(vector)
             if np.isfinite(float(fom)) and np.all(np.isfinite(np.asarray(grad))):
                 starts.append(vector)
 
@@ -645,15 +677,20 @@ class AbstractMultiStartGradient(AbstractMLE):
         )
 
 
-def jax_value_and_grad_single(fitness, vector):
+def _chunk_slices(n_rows, batch_size):
     """
-    Single-point ``value_and_grad`` of the fitness objective, used to filter
-    broad starts down to those with a finite value and gradient before the
-    batched loop begins.
+    The ``(lo, hi, pad)`` chunk bounds the batched ``value_and_grad`` sweep
+    iterates over: rows ``lo:hi`` of the params array, padded by ``pad`` repeats
+    of the final row so every chunk presents the same ``(batch_size, ndim)``
+    shape to the compiled function (one XLA compile for the whole sweep). Only
+    the final chunk can be ragged (``pad > 0``) — the broad-start collection may
+    return fewer than ``n_starts`` rows, so raggedness is not restricted to
+    ``n_starts % batch_size``.
     """
-    import jax
-
-    return jax.value_and_grad(fitness.call)(vector)
+    return [
+        (lo, min(lo + batch_size, n_rows), max(0, lo + batch_size - n_rows))
+        for lo in range(0, n_rows, batch_size)
+    ]
 
 
 class MultiStartAdam(AbstractMultiStartGradient):
