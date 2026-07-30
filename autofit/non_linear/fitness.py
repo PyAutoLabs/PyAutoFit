@@ -16,6 +16,7 @@ from autofit.text import text_util
 
 
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
+from autofit.non_linear.jax_compile import log_on_first_compile
 from autofit.non_linear.paths.abstract import AbstractPaths
 from autofit.non_linear.analysis import Analysis
 
@@ -425,8 +426,15 @@ class Fitness:
                                 "Live display update raised an exception (ignored)."
                             )
 
+            # Searches hand their parameters over in whatever type they hold them:
+            # ndarray (Nautilus), JAX array, or a plain Python list (Dynesty's
+            # initializer). `np.asarray` normalizes all three -- calling `.tolist()`
+            # directly assumed the array case, which held only while Nautilus was
+            # the sole search wired up to quick updates (PyAutoFit#1434).
             result_info = text_util.result_max_lh_info_from(
-                max_log_likelihood_sample=self.quick_update_max_lh_parameters.tolist(),
+                max_log_likelihood_sample=np.asarray(
+                    self.quick_update_max_lh_parameters
+                ).tolist(),
                 max_log_likelihood=self.quick_update_max_lh,
                 model=self.model,
             )
@@ -504,11 +512,11 @@ class Fitness:
         after its first creation, avoiding repeated JIT compilation overhead.
         """
         import jax
-        start = time.time()
-        logger.info("JAX: Applying vmap and jit to likelihood function -- may take a few seconds.")
-        func = jax.vmap(jax.jit(self.call))
-        logger.info(f"JAX: vmap and jit applied in {time.time() - start} seconds.")
-        return func
+
+        return log_on_first_compile(
+            jax.vmap(jax.jit(self.call)),
+            "vectorized (vmap) likelihood function",
+        )
 
     @cached_property
     def _jit(self):
@@ -524,11 +532,11 @@ class Fitness:
         first use, so JIT compilation only occurs once.
         """
         import jax
-        start = time.time()
-        logger.info("JAX: Applying jit to likelihood function -- may take a few seconds.")
-        func = jax.jit(self.call)
-        logger.info(f"JAX: jit applied in {time.time() - start} seconds.")
-        return func
+
+        return log_on_first_compile(
+            jax.jit(self.call),
+            "likelihood function",
+        )
 
     @cached_property
     def _grad(self):
@@ -545,11 +553,11 @@ class Fitness:
         only once.
         """
         import jax
-        start = time.time()
-        logger.info("JAX: Applying grad to likelihood function -- may take a few seconds.")
-        func = jax.grad(self.call)
-        logger.info(f"JAX: grad applied in {time.time() - start} seconds.")
-        return func
+
+        return log_on_first_compile(
+            jax.grad(self.call),
+            "likelihood function gradient",
+        )
 
     def grad(self, *args, **kwargs):
         return self._grad(*args, **kwargs)

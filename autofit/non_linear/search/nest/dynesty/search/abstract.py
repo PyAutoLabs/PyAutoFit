@@ -182,6 +182,9 @@ class AbstractDynesty(AbstractNest, ABC):
             paths=self.paths,
             fom_is_log_likelihood=True,
             resample_figure_of_merit=-1.0e99,
+            iterations_per_quick_update=self.iterations_per_quick_update,
+            background_quick_update=self.quick_update_background,
+            live_visual_update=self.live_visual_update,
             use_jax_jit=getattr(analysis, "_use_jax", False) and self.use_jax_jit,
         )
 

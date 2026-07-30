@@ -28,6 +28,7 @@ from typing import Optional
 import numpy as np
 
 from autofit import exc
+from autofit.non_linear.jax_compile import log_on_first_compile
 from autofit.non_linear.samples.sample import Sample
 from autofit.non_linear.samples.samples import Samples
 from autofit.non_linear.samples.util import simple_model_for_kwargs
@@ -144,18 +145,21 @@ def latent_samples_from(
         if analysis._use_jax:
             import jax
             import jax.numpy as jnp
-            start = time.time()
             if batch_mode == "vmap":
-                logger.info("JAX: Applying vmap and jit to likelihood function for latent variables -- may take a few seconds.")
                 # vmap traces `variables` once for the whole batch, so a
                 # per-sample try/except is not possible here — latent functions
                 # on the vmap path must express failures as NaN (e.g.
                 # `jnp.where`), never by raising. The `jit` and numpy paths
                 # below do guard per sample.
-                batched_compute_latent = jax.jit(jax.vmap(compute_latent_for_model))
+                batched_compute_latent = log_on_first_compile(
+                    jax.jit(jax.vmap(compute_latent_for_model)),
+                    "latent variable function (vmap)",
+                )
             elif batch_mode == "jit":
-                logger.info("JAX: Applying per-sample jit to latent variables (LATENT_BATCH_MODE='jit') -- may take a few seconds on first sample.")
-                jitted_compute_latent = jax.jit(compute_latent_for_model)
+                jitted_compute_latent = log_on_first_compile(
+                    jax.jit(compute_latent_for_model),
+                    "latent variable function (per-sample jit)",
+                )
                 n_latents = len(keys)
                 nan_tuple = tuple(jnp.nan for _ in range(n_latents))
 
@@ -185,7 +189,6 @@ def latent_samples_from(
                 raise ValueError(
                     f"Unknown LATENT_BATCH_MODE={batch_mode!r}; expected 'vmap' or 'jit'."
                 )
-            logger.info(f"JAX: {batch_mode} dispatch applied in {time.time() - start} seconds.")
         else:
             n_latents = len(keys)
             nan_row = np.full(n_latents, np.nan)

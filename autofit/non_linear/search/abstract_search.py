@@ -57,6 +57,14 @@ from autofit.non_linear.test_mode import (
 
 logger = logging.getLogger(__name__)
 
+#: Iteration cadences at or above this mean "never". The packaged config default
+#: for both ``iterations_per_quick_update`` and ``iterations_per_full_update`` is
+#: the inf-like ``1e99`` sentinel documented on ``_steps_until_full_update`` --
+#: kept as a float so ``search.json`` stores a readable ``1e99`` rather than a
+#: 99-digit integer. Compared against a threshold rather than ``1e99`` exactly so
+#: a hand-set ``1e100`` in a workspace config reads as "never" too.
+ITERATIONS_NEVER = 1e90
+
 
 def check_cores(func):
     """
@@ -444,6 +452,35 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             paths.search = self
         self._paths = paths
 
+    @property
+    def quick_update_message(self) -> str:
+        """
+        One line, logged at the start of every search, telling the user the real
+        cadence of the on-the-fly maximum-likelihood updates.
+
+        The cadence is worth stating because it is the only thing that explains
+        the terminal's behaviour during a long fit: either updates appear every
+        N iterations, or nothing appears at all until the search finishes. The
+        packaged default is the ``ITERATIONS_NEVER`` sentinel, so "nothing at
+        all" is what most users get -- and a message that reported that as
+        ``1e+99 iterations`` would be technically true and practically useless.
+        Hence the two-branch wording, and hence naming the config key: the
+        disabled branch is the one a user is most likely to want to act on.
+        """
+        iterations = self.iterations_per_quick_update
+
+        if not np.isfinite(iterations) or iterations >= ITERATIONS_NEVER:
+            return (
+                "On-the-fly updates of the maximum likelihood model are disabled. "
+                "Set `updates: iterations_per_quick_update` in config/general.yaml "
+                "to a finite number of iterations to enable them."
+            )
+
+        return (
+            "On-the-fly updates of the maximum likelihood model every "
+            f"{int(iterations)} iterations."
+        )
+
     def copy_with_paths(self, paths):
         self.logger.debug(f"Creating a copy of {self._paths.name}")
         search_instance = copy.copy(self)
@@ -507,6 +544,7 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
                 logger.info("Starting non-linear search with JAX.")
         else:
             logger.info(f"Starting non-linear search with {self.number_of_cores} cores.")
+        logger.info(self.quick_update_message)
         self._log_process_state()
 
         model = analysis.modify_model(model)
