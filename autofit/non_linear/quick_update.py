@@ -32,10 +32,9 @@ def _convert_jax_to_numpy(instance):
 
 
 # Filenames the worker looks for under `paths.image_path` when refreshing
-# a live quick-update display. The first existing file wins. Quick updates
-# write `fit_quick.png` (6-panel subplot); full updates write `fit.png`
-# (12-panel). The quick variant is preferred when both exist.
-_DISPLAY_CANDIDATES = ("fit_quick.png", "fit.png")
+# a live quick-update display. The first existing file wins. Quick and full
+# updates both write the normal `fit.png` fit subplot.
+_DISPLAY_CANDIDATES = ("fit.png",)
 
 
 def _is_ipython_kernel() -> bool:
