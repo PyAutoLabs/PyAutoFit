@@ -5,6 +5,8 @@ from collections import abc
 from itertools import count
 from typing import Iterable
 
+from .context import fork_context
+
 logger = logging.getLogger(
     __name__
 )
@@ -42,7 +44,7 @@ class AbstractJob(ABC):
         """
 
 
-class Process(multiprocessing.Process):
+class Process(fork_context().Process):
 
     def __init__(
             self,
@@ -71,7 +73,7 @@ class Process(multiprocessing.Process):
         self.logger.info("created")
 
         self.job_queue = job_queue
-        self.queue = multiprocessing.Queue()
+        self.queue = fork_context().Queue()
 
         self.initializer = initializer
         self.initargs = initargs
@@ -146,7 +148,7 @@ class Process(multiprocessing.Process):
                 "The number of cores available must be at least 2 for parallel to run"
             )
 
-        job_queue = multiprocessing.Queue()
+        job_queue = fork_context().Queue()
 
         processes = [
             cls(

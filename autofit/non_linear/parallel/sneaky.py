@@ -8,6 +8,7 @@ from typing import Iterable, Optional, Callable
 from autonerves import conf
 
 from autofit.non_linear.paths.abstract import AbstractPaths
+from .context import fork_context
 from .process import AbstractJob, Process, StopCommand
 
 logger = logging.getLogger(__name__)
@@ -140,7 +141,7 @@ class SneakyProcess(Process):
 
         super().__init__(
             name,
-            job_queue=mp.Queue(),
+            job_queue=fork_context().Queue(),
             initializer=initializer,
             initargs=initargs,
             job_args=job_args,
@@ -391,7 +392,7 @@ class SneakierPool:
 
         logger.info("... using multiprocessing")
 
-        self.pool = mp.Pool(
+        self.pool = fork_context().Pool(
             processes=self.processes,
         )
 
