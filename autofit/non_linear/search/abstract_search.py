@@ -35,7 +35,7 @@ from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.mapper.model import ModelInstance
 from autofit.non_linear.initializer import Initializer
 from autofit.non_linear.fitness import Fitness
-from autofit.non_linear.parallel import SneakyPool, SneakierPool
+from autofit.non_linear.parallel import SneakyPool, SneakierPool, fork_context
 from autofit.non_linear.paths.abstract import AbstractPaths
 from autofit.non_linear.paths.database import DatabasePaths
 from autofit.non_linear.paths.directory import DirectoryPaths
@@ -1316,7 +1316,7 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         identify a 'master core' (the one whose id value is lowest) which handles model result output, visualization,
         etc."""
         self.logger.info("...using pool")
-        return mp.Pool(processes=self.number_of_cores)
+        return fork_context().Pool(processes=self.number_of_cores)
 
     @check_cores
     def make_sneaky_pool(self, fitness: Fitness) -> Optional[SneakyPool]:

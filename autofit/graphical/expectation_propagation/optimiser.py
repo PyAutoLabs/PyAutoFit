@@ -13,6 +13,7 @@ from autofit.graphical.factor_graphs.graph import FactorGraph
 from autofit.graphical.mean_field import Status, MeanField, FactorApproximation
 from autofit.graphical.utils import StatusFlag, LogWarnings
 from autofit.mapper.identifier import Identifier
+from autofit.non_linear.parallel import fork_context
 from autofit.non_linear.paths import DirectoryPaths
 from autofit.non_linear.paths.abstract import AbstractPaths
 from autofit.tools.util import IntervalCounter
@@ -460,7 +461,7 @@ class ParallelEPOptimiser(EPOptimiser):
             paths=paths,
             updater=updater,
         )
-        self.pool = multiprocessing.Pool(n_cores - 1)
+        self.pool = fork_context().Pool(n_cores - 1)
 
     def run(
         self,

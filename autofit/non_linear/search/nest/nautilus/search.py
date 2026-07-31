@@ -10,6 +10,7 @@ from autofit.database.sqlalchemy_ import sa
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.mapper.prior.vectorized import PriorVectorized
 from autofit.non_linear.fitness import Fitness
+from autofit.non_linear.parallel import fork_context
 from autofit.non_linear.paths.null import NullPaths
 from autofit.non_linear.search.nest import abstract_nest
 from autofit.non_linear.samples.sample import Sample
@@ -323,34 +324,38 @@ class Nautilus(abstract_nest.AbstractNest):
             Contains the data and the log likelihood function which fits an instance of the model to the data, returning
             the log likelihood the search maximizes.
         """
-        search_internal = self.sampler_cls(
-            prior=PriorVectorized(model=model),
-            likelihood=fitness.call_wrap,
-            n_dim=model.prior_count,
-            filepath=self.checkpoint_file,
-            pool=self.number_of_cores,
-            n_live=self.n_live,
-            n_update=self.n_update,
-            enlarge_per_dim=self.enlarge_per_dim,
-            n_points_min=self.n_points_min,
-            split_threshold=self.split_threshold,
-            n_networks=self.n_networks,
-            n_batch=self.n_batch,
-            n_like_new_bound=self.n_like_new_bound,
-            vectorized=self.vectorized,
-            seed=self.seed,
-        )
+        # A pool object is passed rather than pool=<int> so the pool uses the
+        # "fork" start method (see autofit.non_linear.parallel.fork_context) —
+        # nautilus builds its internal pools from the default context.
+        with fork_context().Pool(self.number_of_cores) as pool:
+            search_internal = self.sampler_cls(
+                prior=PriorVectorized(model=model),
+                likelihood=fitness.call_wrap,
+                n_dim=model.prior_count,
+                filepath=self.checkpoint_file,
+                pool=pool,
+                n_live=self.n_live,
+                n_update=self.n_update,
+                enlarge_per_dim=self.enlarge_per_dim,
+                n_points_min=self.n_points_min,
+                split_threshold=self.split_threshold,
+                n_networks=self.n_networks,
+                n_batch=self.n_batch,
+                n_like_new_bound=self.n_like_new_bound,
+                vectorized=self.vectorized,
+                seed=self.seed,
+            )
 
-        search_internal = self.call_search(
-            search_internal=search_internal,
-            model=model,
-            analysis=analysis,
-            fitness=fitness
-        )
+            search_internal = self.call_search(
+                search_internal=search_internal,
+                model=model,
+                analysis=analysis,
+                fitness=fitness
+            )
 
-        # Nautilus creates its own multiprocessing.Pool internally when pool=N.
-        # Close them here so their finalizers don't fire at interpreter shutdown
-        # (after pickle has been torn down, causing AttributeError on Pool.__del__).
+        # Drop the pool references so their finalizers don't fire at interpreter
+        # shutdown (after pickle has been torn down, causing AttributeError on
+        # Pool.__del__).
         for pool_attr in ("pool_l", "pool_s"):
             pool = getattr(search_internal, pool_attr, None)
             if pool is not None:

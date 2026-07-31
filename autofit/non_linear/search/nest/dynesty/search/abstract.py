@@ -20,6 +20,37 @@ from autofit.non_linear.test_mode import is_test_mode
 logger = logging.getLogger(__name__)
 
 
+def _fork_pool_cls():
+    """
+    dynesty's `Pool` pinned to the "fork" start method via
+    `autofit.non_linear.parallel.fork_context` — upstream hardcodes the default
+    multiprocessing context, which Python 3.14 changed to "forkserver" on Linux
+    (see that helper's docstring). `__enter__` mirrors `dynesty.pool.Pool.__enter__`
+    exactly apart from the context.
+    """
+    from dynesty import pool as dynesty_pool
+
+    from autofit.non_linear.parallel import fork_context
+
+    class ForkPool(dynesty_pool.Pool):
+        def __enter__(self):
+            initargs = (
+                self.loglike_0,
+                self.prior_transform_0,
+                self.logl_args or (),
+                self.logl_kwargs or {},
+                self.ptform_args or (),
+                self.ptform_kwargs or {},
+            )
+            self.pool = fork_context().Pool(
+                self.njobs, dynesty_pool.initializer, initargs
+            )
+            dynesty_pool.initializer(*initargs)
+            return self
+
+    return ForkPool
+
+
 def prior_transform(cube, model):
     phys_cube = model.vector_from_unit_vector(
         unit_vector=cube,
@@ -209,7 +240,7 @@ class AbstractDynesty(AbstractNest, ABC):
                 if self.force_x1_cpu or analysis._use_jax:
                     raise RuntimeError
 
-                from dynesty.pool import Pool
+                Pool = _fork_pool_cls()
 
                 with Pool(
                     njobs=self.number_of_cores,
@@ -230,7 +261,7 @@ class AbstractDynesty(AbstractNest, ABC):
 
                     checkpoint_exists = True
 
-            except RuntimeError:
+            except RuntimeError as e:
                 if not checkpoint_exists:
                     if getattr(analysis, "_use_jax", False):
                         self.logger.info(
@@ -242,8 +273,8 @@ class AbstractDynesty(AbstractNest, ABC):
                         )
                     else:
                         self.logger.info(
-                            """
-                            Your operating system does not support Python multiprocessing.
+                            f"""
+                            The Dynesty multiprocessing pool could not be created ({e!r}).
 
                             A single CPU non-multiprocessing Dynesty run is being performed.
                             """
