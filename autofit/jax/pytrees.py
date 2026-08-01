@@ -166,10 +166,26 @@ def _build_instance_pytree_funcs(cls):
     Classification is read from the shared ``_CLASS_FIELD_CLASSIFIERS`` dict,
     which is updated by every ``register_model`` call. Attributes unknown to
     the classifier (never declared on any walked model) default to constant —
-    safer than tracing an unknown object.
+    safer than tracing an unknown object — with one override: an attribute
+    whose *value* is a JAX array or tracer is always a dynamic child,
+    whatever the classifier says. Such values arise from attributes derived
+    inside ``__init__`` from traced parameters (e.g. an ``NFWMCRLudlowSph``
+    computing ``scale_radius`` from a free ``mass_at_200``); as aux data they
+    survive the flatten as raw Python references and re-enter nested traces
+    (a ``custom_jvp`` rule's inner jvp) as stale tracers, raising
+    ``UnexpectedTracerError``. A traced value is never safe aux.
     """
     constructor_args = _CLASS_CONSTRUCTOR_ARGS.get(cls, ())
     constructor_arg_set = set(constructor_args)
+
+    def _is_jax_value(value):
+        import jax
+
+        if isinstance(value, (jax.Array, jax.core.Tracer)):
+            return True
+        if isinstance(value, (tuple, list)):
+            return any(_is_jax_value(v) for v in value)
+        return False
 
     def _partition(instance):
         classifier = _CLASS_FIELD_CLASSIFIERS.get(cls, {})
@@ -180,7 +196,7 @@ def _build_instance_pytree_funcs(cls):
         for name, value in vars(instance).items():
             if name.startswith("_") or name in ("cls", "id"):
                 continue
-            is_dynamic = classifier.get(name, False)
+            is_dynamic = classifier.get(name, False) or _is_jax_value(value)
             in_ctor = name in constructor_arg_set
             if in_ctor and is_dynamic:
                 ctor_dyn.append((name, value))
