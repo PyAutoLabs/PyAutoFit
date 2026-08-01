@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 
 import autofit as af
@@ -51,3 +52,36 @@ def test__test_mode():
     search.apply_test_mode()
 
     assert search.n_like_max == 1
+
+
+def test__single_core_builds_no_pool(monkeypatch):
+    """
+    number_of_cores=1 must not construct a multiprocessing pool: nautilus
+    treats pool=None as fully serial, whereas a Pool(1) object forces every
+    likelihood call into a forked worker — which deadlocks in XLA compilation
+    when the likelihood touches JAX (#1442).
+    """
+    from autofit.non_linear.search.nest.nautilus import search as nautilus_search
+
+    def no_fork_context():
+        raise AssertionError(
+            "fork_context must not be used when number_of_cores == 1"
+        )
+
+    monkeypatch.setattr(nautilus_search, "fork_context", no_fork_context)
+    monkeypatch.setenv("PYAUTO_TEST_MODE", "1")
+
+    model = af.Model(af.ex.Gaussian)
+    analysis = af.ex.Analysis(
+        data=np.full(100, 5.0),
+        noise_map=np.full(100, 1.0),
+    )
+
+    search = af.Nautilus(
+        name="nautilus_single_core",
+        unique_tag="single_core_no_pool_test",
+        n_live=10,
+        number_of_cores=1,
+    )
+
+    search.fit(model=model, analysis=analysis)

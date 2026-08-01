@@ -2,6 +2,7 @@ import numpy as np
 import logging
 import os
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
@@ -327,7 +328,18 @@ class Nautilus(abstract_nest.AbstractNest):
         # A pool object is passed rather than pool=<int> so the pool uses the
         # "fork" start method (see autofit.non_linear.parallel.fork_context) —
         # nautilus builds its internal pools from the default context.
-        with fork_context().Pool(self.number_of_cores) as pool:
+        #
+        # For a single core no pool may be created at all: nautilus treats
+        # pool=None (and the int 1) as fully serial, whereas a Pool(1) object
+        # forces every likelihood call into a forked worker — which deadlocks
+        # in XLA compilation when the likelihood touches JAX, since a forked
+        # child of a JAX-initialized parent cannot compile.
+        if self.number_of_cores <= 1:
+            pool_context = nullcontext(None)
+        else:
+            pool_context = fork_context().Pool(self.number_of_cores)
+
+        with pool_context as pool:
             search_internal = self.sampler_cls(
                 prior=PriorVectorized(model=model),
                 likelihood=fitness.call_wrap,
