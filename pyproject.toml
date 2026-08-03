@@ -24,7 +24,11 @@ classifiers = [
 ]
 keywords = ["cli"]
 dependencies = [
-    "autonerves",
+    # Floor, not a pin. Without one, pip backtracking the extras chain
+    # (autofit[jax] -> autonerves[jax]) may walk the release history to 2022:
+    # "version X does not provide the extra 'jax'" is a pip *warning*, not an
+    # error, so a pre-extras release is a legal solution. PyAutoLens#687.
+    "autonerves>=2026.7.29.2",
     "array_api_compat",
     "anesthetic>=2.9.0",
     "corner==2.2.2",
@@ -64,7 +68,7 @@ local_scheme = "no-local-version"
 
 
 [project.optional-dependencies]
-jax = ["autonerves[jax]", "optax>=0.2.5"]
+jax = ["autonerves[jax]>=2026.7.29.2", "optax>=0.2.5"]
 mcp = ["mcp"]
 optional = [
     "autofit[jax]",
