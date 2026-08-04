@@ -981,11 +981,34 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         Sampler-specific keys to merge into ``samples_info`` when the
         sampler is bypassed via ``PYAUTO_TEST_MODE=2`` or ``=3``.
 
-        Override in subclasses to add the diagnostic keys that the real
-        run would populate (e.g. NUTS ESS, MCMC autocorrelations) so that
-        tutorial scripts and downstream code can access those keys
-        without ``KeyError``. Use NaN/0 placeholders — the bypass did not
-        actually sample.
+        **Opt-in, not a per-sampler obligation.** Most searches do not
+        override this, and that is correct — no library code reads these
+        diagnostic keys under bypass. The properties that read them
+        (``SamplesMCMC.total_steps``, ``SamplesNest.total_samples``, …)
+        live on ``Samples`` subclasses the bypass never constructs;
+        ``_fit_bypass_test_mode`` always builds a ``SamplesPDF``. The only
+        consumers are workspace scripts reading ``samples_info[...]``
+        directly, so override this only when such a script exists.
+
+        Which fix applies depends on what that script does with the keys:
+
+        - It **prints** them (a tutorial, whose point is the prose, so it
+          may legitimately run bypassed) → override here, returning NaN/0
+          placeholders. The bypass did not sample; honest empties.
+        - It **asserts** on them (a test) → the script must not run
+          bypassed at all. Give it an ``ENV: real_search`` declaration
+          instead. Do **not** add placeholders for an asserting reader:
+          the assert then silently passes on a stub value, which is worse
+          than the ``KeyError`` it replaced.
+
+        Both live cases follow that split. ``BlackJAXNUTS`` overrides this
+        because ``autofit_workspace/scripts/searches/mcmc.py`` prints
+        ``ess_min`` / ``n_divergent``, carries no ``__Env__`` declaration
+        and is in that workspace's ``smoke_tests.txt``, so it runs
+        bypassed on every PR (PyAutoFit #1260).
+        ``AbstractMultiStartGradient`` deliberately does not: its only
+        reader asserts on ``total_steps``, so that script declares
+        ``ENV: real_search jax`` instead (autofit_workspace_test #83).
         """
         return {}
 
