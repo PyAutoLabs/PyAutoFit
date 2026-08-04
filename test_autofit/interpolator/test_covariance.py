@@ -1,4 +1,5 @@
 import logging
+import random
 from unittest.mock import patch
 
 import pytest
@@ -9,6 +10,8 @@ import numpy as np
 from autofit import CovarianceInterpolator
 import autofit as af
 from autofit.non_linear.search.nest.dynesty.search.static import DynestyStatic
+
+SEED = 20260802
 
 
 @pytest.fixture(autouse=True)
@@ -52,6 +55,53 @@ def limit_maxcall(monkeypatch):
         original_init(self, *args, **kwargs)
 
     monkeypatch.setattr(DynestyStatic, "__init__", patched_init)
+
+
+@pytest.fixture(autouse=True)
+def seed_search_randomness(monkeypatch):
+    """
+    Make the Dynesty searches these tests run reproducible.
+
+    `limit_maxcall` above caps each search at a single likelihood call so this
+    module stays fast, which leaves the recovered value dominated by the
+    sampler's randomness rather than by convergence. Unseeded, the numerical
+    recovery assertions are therefore coin flips: measured over 2000 runs,
+    `test_variable_and_constant` missed `abs=5.0` 1.65% of the time (95% CI
+    1.18-2.31%) and `test_single_variable` missed `abs=2.0` 3.6% of the time.
+    The 1.65% is what killed the 2026.8.2.1 live release.
+
+    Three independent generators feed that result, so seeding any one of them
+    is not enough:
+
+    * `numpy.random`, used by `test_variable_and_constant` to build its samples;
+    * the stdlib `random` module, used by `autofit.non_linear.initializer` to
+      draw the search's initial unit values;
+    * dynesty's own `rstate`, which defaults to
+      `numpy.random.Generator(PCG64(None))` — seeded from OS entropy and
+      reachable from neither of the above. This is the dominant term, and the
+      only one `test_single_variable` (which makes no random call of its own)
+      depends on at all.
+
+    Global generator state is restored on teardown so the seeding cannot leak
+    into whatever runs next in the same process.
+    """
+    import dynesty.dynesty
+
+    monkeypatch.setattr(
+        dynesty.dynesty,
+        "get_random_generator",
+        lambda seed=None: np.random.default_rng(SEED if seed is None else seed),
+    )
+
+    random_state = random.getstate()
+    numpy_state = np.random.get_state()
+    random.seed(SEED)
+    np.random.seed(SEED)
+    try:
+        yield
+    finally:
+        random.setstate(random_state)
+        np.random.set_state(numpy_state)
 
 
 def test_interpolate(interpolator):
@@ -120,6 +170,7 @@ def test_single_variable():
 
 
 def test_variable_and_constant():
+    rng = np.random.default_rng(SEED)
     samples_list = [
         af.SamplesPDF(
             model=af.Collection(
@@ -133,8 +184,8 @@ def test_variable_and_constant():
                     log_prior=1.0,
                     weight=1.0,
                     kwargs={
-                        ("v",): value + 0.1 * (1 - np.random.random()),
-                        ("x",): 0.5 * (1 - +np.random.random()),
+                        ("v",): value + 0.1 * (1 - rng.random()),
+                        ("x",): 0.5 * (1 - +rng.random()),
                     },
                 )
                 for _ in range(50)
