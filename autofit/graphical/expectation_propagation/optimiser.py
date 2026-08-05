@@ -240,7 +240,7 @@ class EPOptimiser:
         self._consecutive_failures: Dict[Factor, int] = {}
         # Factors that raised at least once, and factors that landed at least
         # one successful update; together these identify a factor whose message
-        # is still the one it started with. See `_check_stale_factors`.
+        # is still the one it started with. See `_stale_factor_warnings`.
         self._factors_raised: Set[Factor] = set()
         self._factors_updated: Set[Factor] = set()
 
@@ -334,20 +334,21 @@ class EPOptimiser:
         status: Status,
         max_consecutive_failures: int,
         raised: bool,
-    ):
+    ) -> bool:
         """
         Track how many sweeps in a row a given factor's optimiser has *raised*.
 
         A single raise is survivable — the sweep continues on that factor's
-        previous message. A factor that raises on *every* sweep is not: EP would
-        converge on a stale message and report success. Abort instead, naming
-        the factor, which is strictly more useful than the raw traceback the
-        failure used to produce.
+        previous message. A factor that raises on *every* sweep is not going to
+        start working, so once it has raised `max_consecutive_failures` times in
+        a row there is nothing to gain by sweeping further: stop, warn, and let
+        `run` return what it has. The result is still reported, but loudly
+        qualified — see `_stale_factor_warnings`.
 
         Only raises are counted. A returned `StatusFlag.FAILURE` is an ordinary,
         recoverable outcome that EP absorbs by design — the Laplace optimiser
         returns one whenever its line search fails — and counting those would
-        abort healthy fits.
+        cut healthy fits short.
 
         Counting is per-factor and resets on any sweep that does not raise, so
         an intermittent failure (the observed case) never trips it.
@@ -359,10 +360,10 @@ class EPOptimiser:
             status `factor_step` returned, *before* the mean-field projection,
             which may legitimately overwrite the flag with `BAD_PROJECTION`.
 
-        Raises
-        ------
-        exc.FactorOptimisationException
-            If `factor` has now raised `max_consecutive_failures` sweeps in a row.
+        Returns
+        -------
+        True if this factor has now failed enough consecutive sweeps that the
+        run should stop early.
         """
         if raised:
             self._factors_raised.add(factor)
@@ -371,7 +372,7 @@ class EPOptimiser:
 
             logger.warning(
                 "Factor %s raised on %d consecutive step(s) "
-                "(aborting at %d); continuing with its previous message. "
+                "(giving up on it at %d); continuing with its previous message. "
                 "Latest messages: %s",
                 factor.name,
                 count,
@@ -380,58 +381,61 @@ class EPOptimiser:
             )
 
             if max_consecutive_failures and count >= max_consecutive_failures:
-                raise exc.FactorOptimisationException(
-                    f"Factor {factor.name} raised on "
-                    f"{count} consecutive steps and has been abandoned.\n\n"
-                    f"Every other factor's messages are unaffected, but this "
-                    f"factor's message is stale, so the fit is not converging "
-                    f"on this factor and any result would be misleading.\n\n"
-                    f"Most recent failure: "
-                    f"{'; '.join(status.messages) or '(no message recorded)'}"
+                logger.warning(
+                    "Factor %s has raised on %d consecutive steps; abandoning "
+                    "further sweeps. Its message is whatever it last held, so "
+                    "the returned mean field is not a posterior for this factor.",
+                    factor.name,
+                    count,
                 )
+                return True
         else:
             self._factors_updated.add(factor)
             self._consecutive_failures.pop(factor, None)
 
-    def _check_stale_factors(self):
-        """
-        Refuse to return a result built on a factor that never updated.
+        return False
 
-        The consecutive-failure threshold alone is not enough. When several
+    def _stale_factor_warnings(self) -> List[str]:
+        """
+        Warn about any factor whose message is still the one it started with.
+
+        A per-factor failure count is not enough to detect this. When several
         factors raise, *nothing* in the mean field changes, so the KL step
         between sweeps is zero and `EPHistory` declares convergence — often
-        within two sweeps, before any per-factor count reaches its threshold.
-        The run then terminates "successfully" and returns the starting priors
-        dressed up as a posterior. That is the exact outcome the threshold was
-        asked to prevent (PyAutoFit#1405), and it has to be caught here rather
-        than by counting.
+        within two sweeps, before any count reaches its threshold. The run then
+        terminates "successfully" and the returned mean field holds the starting
+        priors for those factors, dressed up as a posterior (PyAutoFit#1405).
+
+        The result is still returned — callers with a partly-failed graph may
+        well want the factors that did converge — but never quietly: these
+        strings are logged as warnings and written into `ep_diagnostics.results`
+        alongside the sigma-collapse warnings.
 
         The condition is deliberately narrow: a factor that raised at least once
         and *never once* updated. A factor that failed intermittently but landed
-        at least one update is left alone, so the common transient failure still
-        costs a sweep rather than the fit.
-
-        Raises
-        ------
-        exc.FactorOptimisationException
-            If any factor's message is still the one it started with.
+        at least one update has a real message and is not reported.
         """
         stale = self._factors_raised - self._factors_updated
         if not stale:
-            return
+            return []
 
         names = ", ".join(sorted(factor.name for factor in stale))
-        raise exc.FactorOptimisationException(
-            f"Expectation propagation finished, but these factors never "
-            f"completed a single update: {names}.\n\n"
-            f"Their optimisers raised on every sweep, so their messages are "
-            f"still the ones the fit started with. Any mean field reported "
-            f"here is the prior for those factors, not a posterior — the "
-            f"result would be misleading, so it is not returned.\n\n"
-            f"Note that EP may report convergence in this state: with no "
-            f"factor updating, the KL step between sweeps is zero, which is "
-            f"indistinguishable from having converged."
-        )
+        return [
+            f"STALE FACTORS: {names} never completed a single update — their "
+            f"optimisers raised on every sweep. The mean field returned for "
+            f"them is the prior the fit started with, not a posterior. Do not "
+            f"read those values as a result. Note that EP may also report "
+            f"convergence in this state: with no factor updating, the KL step "
+            f"between sweeps is zero, which is indistinguishable from having "
+            f"converged."
+        ]
+
+    def _warn_stale_factors(self):
+        """
+        Log the stale-factor warnings, whether or not output paths are enabled.
+        """
+        for warning in self._stale_factor_warnings():
+            logger.warning(warning)
 
     def run(
         self,
@@ -496,9 +500,10 @@ class EPOptimiser:
                     new_model_dist, factor_approx, model_approx, status
                 )
                 self.diagnostics.snapshot(factor, model_approx, status)
-                self._check_consecutive_failures(
+                if self._check_consecutive_failures(
                     factor, status, max_consecutive_failures, raised=raised
-                )
+                ):
+                    break
                 if status and _should_log:
                     self._log_factor(factor)
 
@@ -520,9 +525,7 @@ class EPOptimiser:
             self._output_results(model_approx)
             self._output_diagnostics(final=True, model_approx=model_approx)
         self._warn_sigma_collapse()
-        # After the diagnostics are on disk, so they remain inspectable if this
-        # refuses to return the result.
-        self._check_stale_factors()
+        self._warn_stale_factors()
 
         return model_approx
 
@@ -549,7 +552,9 @@ class EPOptimiser:
         self.diagnostics.plot(self.output_path)
 
         if final and model_approx is not None:
-            warnings_list = check_sigma_collapse(self.diagnostics)
+            warnings_list = (
+                self._stale_factor_warnings() + check_sigma_collapse(self.diagnostics)
+            )
             with open(self.output_path / "ep_diagnostics.results", "w+") as f:
                 f.write(mean_field_summary(model_approx.mean_field))
                 f.write("\n")
@@ -687,9 +692,10 @@ class ParallelEPOptimiser(EPOptimiser):
                 )
                 factor = factor_approx.factor
                 self.diagnostics.snapshot(factor, model_approx, status)
-                self._check_consecutive_failures(
+                if self._check_consecutive_failures(
                     factor, status, max_consecutive_failures, raised=raised
-                )
+                ):
+                    break
                 if status and _should_log:
                     self._log_factor(factor)
 
@@ -712,6 +718,6 @@ class ParallelEPOptimiser(EPOptimiser):
             self._output_results(model_approx)
             self._output_diagnostics(final=True, model_approx=model_approx)
         self._warn_sigma_collapse()
-        self._check_stale_factors()
+        self._warn_stale_factors()
 
         return model_approx

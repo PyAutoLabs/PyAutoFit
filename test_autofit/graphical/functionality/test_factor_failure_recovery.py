@@ -12,6 +12,8 @@ that reproduced this on the release leg (PyAutoFit#1405): two factors connected 
 one shared variable, no `HierarchicalFactor` involved.
 """
 
+import logging
+
 import numpy as np
 import pytest
 
@@ -25,6 +27,7 @@ from autofit.graphical.expectation_propagation.history import EPHistory
 from autofit.graphical.utils import StatusFlag
 from autofit.mapper.variable import Variable
 from autofit.messages.normal import NormalMessage
+from autofit.non_linear.paths.directory import DirectoryPaths
 
 
 def make_shared_variable_approx():
@@ -115,19 +118,17 @@ def test_failure_is_recorded_as_a_failure_not_a_success():
     )
 
 
-def test_persistent_failure_aborts_naming_the_factor():
+def test_persistent_failure_stops_sweeping_early():
     """
-    A factor that fails *every* sweep must not be tolerated indefinitely: EP
-    would converge on its stale message and report success.
+    A factor that fails *every* sweep is not going to start working, so EP stops
+    rather than burning the full `max_steps` on it — but it still returns.
     """
     model_approx, factor_graph, prior, likelihood = make_shared_variable_approx()
 
+    failing = InitializerFailingOptimiser(n_failures=1000)
     optimiser = graph.EPOptimiser(
         factor_graph,
-        factor_optimisers={
-            prior: InitializerFailingOptimiser(n_failures=1000),
-            likelihood: ExactFactorFit(),
-        },
+        factor_optimisers={prior: failing, likelihood: ExactFactorFit()},
         # `kl_tol=None` disables the convergence check: this graph is exact and
         # would otherwise be declared converged after one sweep, before the
         # failure count could build up.
@@ -135,10 +136,12 @@ def test_persistent_failure_aborts_naming_the_factor():
         paths=False,
     )
 
-    with pytest.raises(exc.FactorOptimisationException) as exc_info:
-        optimiser.run(model_approx, max_steps=20, max_consecutive_failures=3)
+    optimiser.run(model_approx, max_steps=20, max_consecutive_failures=3)
 
-    assert prior.name in str(exc_info.value), "the abort message does not name the factor"
+    assert failing.call_count == 3, (
+        "expected the run to stop after 3 consecutive raises, not sweep on to "
+        f"max_steps; got {failing.call_count} attempts"
+    )
 
 
 def test_consecutive_failure_count_resets_on_success():
@@ -170,17 +173,19 @@ def test_consecutive_failure_count_resets_on_success():
     assert intermittent.call_count > 2
 
 
-def test_never_updating_factor_is_not_reported_as_a_converged_result():
+def test_never_updating_factor_is_warned_about_loudly(caplog):
     """
-    The consecutive-failure threshold is not sufficient on its own.
+    The result is returned even when no factor ever updated — but it must not be
+    returned quietly.
 
     When every factor raises, nothing in the mean field changes, so the KL step
     between sweeps is zero and `EPHistory` declares convergence — in practice
     within two sweeps, before any per-factor count reaches its threshold. The
-    run would then return the starting priors as though they were a posterior.
+    mean field then holds the starting priors, and a caller reading it without
+    the warning would take priors for a posterior.
 
-    Note the threshold here is deliberately higher than the number of sweeps
-    that will actually run, so this can only pass via the end-of-run check.
+    The threshold here is deliberately higher than the number of sweeps that
+    will run, so this can only pass via the end-of-run check.
     """
     model_approx, factor_graph, prior, likelihood = make_shared_variable_approx()
 
@@ -193,12 +198,41 @@ def test_never_updating_factor_is_not_reported_as_a_converged_result():
         paths=False,
     )
 
-    with pytest.raises(exc.FactorOptimisationException) as exc_info:
-        optimiser.run(model_approx, max_steps=2, max_consecutive_failures=100)
+    with caplog.at_level(logging.WARNING):
+        result = optimiser.run(model_approx, max_steps=2, max_consecutive_failures=100)
 
-    message = str(exc_info.value)
-    assert "never completed a single update" in message
-    assert prior.name in message and likelihood.name in message
+    assert result is not None, "the result should still be returned"
+
+    warnings = optimiser._stale_factor_warnings()
+    assert len(warnings) == 1
+    assert "never completed a single update" in warnings[0]
+    assert prior.name in warnings[0] and likelihood.name in warnings[0]
+
+    logged = caplog.text
+    assert "STALE FACTORS" in logged, "the stale-factor warning was not logged"
+
+
+def test_stale_factor_warning_is_written_to_the_diagnostics_file(tmp_path):
+    """
+    The warning has to survive the run, not just scroll past in a log — it goes
+    into `ep_diagnostics.results` beside the sigma-collapse warnings.
+    """
+    model_approx, factor_graph, prior, likelihood = make_shared_variable_approx()
+
+    optimiser = graph.EPOptimiser(
+        factor_graph,
+        factor_optimisers={
+            prior: InitializerFailingOptimiser(n_failures=1000),
+            likelihood: InitializerFailingOptimiser(n_failures=1000),
+        },
+        paths=DirectoryPaths(name="stale_factors", path_prefix=str(tmp_path)),
+    )
+
+    optimiser.run(model_approx, max_steps=2, max_consecutive_failures=100)
+
+    written = (optimiser.output_path / "ep_diagnostics.results").read_text()
+    assert "STALE FACTORS" in written
+    assert prior.name in written and likelihood.name in written
 
 
 def test_partially_updating_factor_is_not_treated_as_stale():

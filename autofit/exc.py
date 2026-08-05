@@ -54,19 +54,6 @@ class InitializerException(Exception):
     """
 
 
-class FactorOptimisationException(Exception):
-    """
-    Thrown when a single factor in an expectation propagation graph fails to
-    optimise on too many consecutive sweeps.
-
-    An individual failed factor update is not fatal — it is recorded as a
-    failure and the sweep continues using that factor's previous message (see
-    `graphical.expectation_propagation.optimiser.factor_step`). This is raised
-    only when one factor has failed enough times in a row that continuing would
-    mean converging on a stale message and reporting success.
-    """
-
-
 class SamplesException(Exception):
     pass
 
