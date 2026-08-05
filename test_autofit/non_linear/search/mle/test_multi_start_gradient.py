@@ -6,7 +6,11 @@ import pytest
 import autofit as af
 from autofit import example
 from autofit.non_linear.search import abstract_search
-from autofit.non_linear.search.mle.multi_start_gradient.search import _chunk_slices
+from autofit.non_linear.search.mle.multi_start_gradient.search import (
+    _chunk_slices,
+    batch_memory_model,
+    batch_size_within_budget,
+)
 from autonerves.dictable import from_dict, to_dict
 
 # The MultiStart gradient searches are JAX-native at fit time, but their
@@ -691,3 +695,71 @@ def test__samples_info__reports_a_cleared_stop_reason_as_unfinished():
 
     assert samples.samples_info["stop_reason"] is None
     assert samples.samples_info["converged"] is False
+
+
+# --- Batched-jvp memory projection (PyAutoFit#1452) ---------------------------
+#
+# Same contract as the _chunk_slices tests above: the projection arithmetic is
+# pure Python and lives here, while the JAX measurement it consumes
+# (`Analysis.batched_memory_bytes`) is exercised in autofit_workspace_test.
+
+GB = 1024 ** 3
+
+# The 2026-07-30 release failure: XLA reported 85,898,814,480 bytes for a
+# 48-start interferometer jvp, i.e. 1,789,558,635 bytes per start.
+INCIDENT_PER_START = 1_789_558_635
+
+
+def test__batch_memory_model__recovers_fixed_and_per_start():
+    fixed = 2 * GB
+    at_1 = fixed + INCIDENT_PER_START
+    at_2 = fixed + 2 * INCIDENT_PER_START
+
+    assert batch_memory_model(at_1, at_2) == (fixed, INCIDENT_PER_START)
+
+
+@pytest.mark.parametrize(
+    "at_1, at_2",
+    [
+        (10, 4),  # non-monotonic measurements
+        (10, 10),  # identical measurements
+    ],
+)
+def test__batch_memory_model__never_yields_a_negative_slope(at_1, at_2):
+    # A negative slope would invert the budget arithmetic and suggest an
+    # absurdly large batch, which is worse than saying nothing.
+    fixed, per_start = batch_memory_model(at_1, at_2)
+    assert per_start == 0
+    assert fixed >= 0
+
+
+def test__batch_size_within_budget__suggests_the_largest_batch_that_fits():
+    fixed, per_start = 2 * GB, INCIDENT_PER_START
+
+    suggested = batch_size_within_budget(fixed, per_start, 48, 16 * GB)
+
+    assert 1 <= suggested < 48
+    assert fixed + suggested * per_start <= 16 * GB
+    assert fixed + (suggested + 1) * per_start > 16 * GB
+
+
+def test__batch_size_within_budget__none_when_the_full_batch_fits():
+    # None means "leave batch_size=None" — the single-vmap fast path is kept.
+    assert batch_size_within_budget(2 * GB, INCIDENT_PER_START, 48, 400 * GB) is None
+
+
+@pytest.mark.parametrize(
+    "fixed, per_start, n_starts, budget, expected",
+    [
+        (100 * GB, 0, 48, 1 * GB, 1),  # fixed cost alone busts it; tiling cannot help
+        (1, 0, 48, 1 * GB, None),  # no per-start cost and it fits
+        (0, 1, 48, 47, 47),  # never returns n_starts itself
+        (0, 100 * GB, 48, 1 * GB, 1),  # not even one start fits -> still 1
+        (2 * GB, INCIDENT_PER_START, 48, 0, None),  # unknown budget
+        (2 * GB, INCIDENT_PER_START, 1, 1, None),  # nothing to tile
+    ],
+)
+def test__batch_size_within_budget__degenerate_inputs(
+    fixed, per_start, n_starts, budget, expected
+):
+    assert batch_size_within_budget(fixed, per_start, n_starts, budget) == expected
