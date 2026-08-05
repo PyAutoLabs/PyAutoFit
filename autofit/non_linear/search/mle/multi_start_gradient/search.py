@@ -353,6 +353,96 @@ class AbstractMultiStartGradient(AbstractMLE):
 
         return " | ".join(parts)
 
+    def _memory_budget_bytes(self):
+        """
+        Bytes available to the batched jvp, or ``None`` if not determinable.
+
+        Prefers the JAX device's own limit (the GPU case this guard mainly
+        exists for) and falls back to free host RAM.
+        """
+        try:
+            import jax
+
+            stats = jax.devices()[0].memory_stats() or {}
+            for key in ("bytes_limit", "bytes_reservable_limit"):
+                if stats.get(key):
+                    return int(stats[key])
+        except Exception:
+            pass
+
+        try:
+            import psutil
+
+            return int(psutil.virtual_memory().available)
+        except Exception:
+            return None
+
+    def _warn_if_unbatched_exceeds_memory(self, model, analysis):
+        """
+        Warn, before compiling the full ``n_starts`` vmap, when its batched jvp
+        is projected to exceed available memory — naming the ``batch_size`` that
+        would fit.
+
+        Without this the only signal is XLA's ``RESOURCE_EXHAUSTED: Out of
+        memory allocating N bytes``, raised from inside the compiled program
+        with nothing pointing at the knob that fixes it. That cost two nightly
+        release runs in 2026-07 (PyAutoFit#1452).
+
+        This only ever *warns*. ``batch_size`` is numerically inert, so
+        auto-applying the suggestion would be safe in principle, but silently
+        changing the execution shape of every existing run on the strength of a
+        projection is not a trade this should make on its own.
+
+        **Known limitation.** ``memory_analysis`` reports 0 on a CPU-only JAX
+        build, which is where the release harness runs. The projection is
+        skipped entirely in that case rather than guessing, so this guard
+        currently helps GPU users and leaves the CPU path to the (now
+        unfiltered) traceback. Making the CPU path measurable is follow-up
+        work and needs validating against a real run, not a unit test.
+
+        Any failure here is swallowed: a memory projection must never be the
+        reason a fit does not start.
+        """
+        try:
+            probe = getattr(analysis, "batched_memory_bytes", None)
+            if probe is None or self.n_starts is None or self.n_starts <= 1:
+                return
+
+            bytes_at_1 = probe(model=model, batch_size=1, gradient=True)
+            if not bytes_at_1:  # None (not on JAX) or 0 (CPU-only: unmeasurable)
+                return
+
+            bytes_at_2 = probe(model=model, batch_size=2, gradient=True)
+            if not bytes_at_2:
+                return
+
+            budget = self._memory_budget_bytes()
+            if not budget:
+                return
+
+            fixed, per_start = batch_memory_model(bytes_at_1, bytes_at_2)
+            suggested = batch_size_within_budget(
+                fixed, per_start, self.n_starts, budget
+            )
+            if suggested is None:
+                return
+
+            projected = fixed + self.n_starts * per_start
+            gb = 1024 ** 3
+            self.logger.warning(
+                f"{type(self).__name__} is set to evaluate all "
+                f"{self.n_starts} starts in one jax.vmap (batch_size=None). "
+                f"Its batched value_and_grad is projected to need "
+                f"~{projected / gb:.1f} GB against ~{budget / gb:.1f} GB "
+                f"available, so this fit is likely to fail with an XLA "
+                f"RESOURCE_EXHAUSTED error. Pass batch_size={suggested} (or "
+                f"lower) to sweep the starts in chunks instead — the result is "
+                f"numerically identical, only the allocation and dispatch "
+                f"change."
+            )
+        except Exception:
+            return
+
     def _fit(
         self,
         model: AbstractPriorModel,
@@ -416,6 +506,7 @@ class AbstractMultiStartGradient(AbstractMLE):
         _vmapped = jax.jit(jax.vmap(_value_and_grad))
 
         if self.batch_size is None:
+            self._warn_if_unbatched_exceeds_memory(model=model, analysis=analysis)
             batched_value_and_grad = _vmapped
         else:
             batch_size = self.batch_size
@@ -877,6 +968,61 @@ class AbstractMultiStartGradient(AbstractMLE):
             sample_list=sample_list,
             samples_info=samples_info,
         )
+
+
+def batch_memory_model(bytes_at_1, bytes_at_2):
+    """
+    Split a measured batched-jvp footprint into its fixed and per-start parts.
+
+    Two probe points are enough because the footprint is affine in the batch
+    width: ``bytes(n) = fixed + n * per_start``. ``per_start`` is the slope
+    (what one extra start costs), ``fixed`` the intercept (buffers shared by
+    the whole batch, e.g. the dataset and any persistent operator).
+
+    Measuring *both* is the point. Guidance in the workspaces has claimed VRAM
+    "does not scale with batch size for the persistent buffers, so if it fits
+    at ``batch_size=1`` you can push it up" — true only when ``per_start`` is
+    small next to ``fixed``. For an interferometer likelihood under
+    ``value_and_grad`` it is not: the 2026-07-30 release failure projected to
+    ~1.79 GB *per start*, so 48 starts wanted ~86 GB and the single-start
+    probe that "fit" said nothing useful (PyAutoFit#1452).
+
+    Returns ``(fixed, per_start)``, both clamped at 0 — a non-monotonic or
+    noisy pair of measurements must never yield a negative slope and so a
+    nonsensically large batch suggestion.
+    """
+    per_start = max(0, bytes_at_2 - bytes_at_1)
+    fixed = max(0, bytes_at_1 - per_start)
+    return fixed, per_start
+
+
+def batch_size_within_budget(fixed, per_start, n_starts, budget_bytes):
+    """
+    The largest batch width whose projected footprint fits ``budget_bytes``.
+
+    Returns ``None`` when the full ``n_starts`` batch already fits — the
+    caller should then leave ``batch_size=None`` and keep today's single-vmap
+    fast path. Otherwise returns an int in ``[1, n_starts)``.
+
+    A budget that cannot fit even one start still returns 1: tiling to a
+    single start is the most this knob can do, and a hard failure is the
+    search's to report, not this projection's to pre-empt.
+    """
+    if budget_bytes <= 0 or n_starts <= 1:
+        return None
+
+    def projected(n):
+        return fixed + n * per_start
+
+    if projected(n_starts) <= budget_bytes:
+        return None
+
+    if per_start <= 0:
+        # Fixed cost alone blows the budget; tiling cannot help, but a
+        # single start is still the smallest thing we can ask for.
+        return 1
+
+    return max(1, min(n_starts - 1, int((budget_bytes - fixed) // per_start)))
 
 
 def _chunk_slices(n_rows, batch_size):

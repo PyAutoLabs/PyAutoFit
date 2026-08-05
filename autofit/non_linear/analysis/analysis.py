@@ -334,23 +334,35 @@ class Analysis(ABC):
     def perform_quick_update(self, paths, instance):
         raise NotImplementedError
 
-    def print_vram_use(self, model, batch_size : int) -> str:
+    def batched_memory_bytes(self, model, batch_size: int, gradient: bool = False):
         """
-        Print JAX VRAM use for a given batch size.
+        Measure the memory a batched evaluation of this analysis would need.
+
+        Compiles (but never runs) ``jax.vmap`` over ``batch_size`` copies of the
+        model at its prior medians and reads XLA's own memory analysis, so this
+        is a lowering-time estimate — it cannot itself OOM the way the run it is
+        predicting would.
 
         Parameters
         ----------
         batch_size
-            The batch size to profile, which is the number of model evaluations JAX will perform simultaneously.
+            Number of model evaluations JAX would perform simultaneously.
+        gradient
+            Measure ``jax.value_and_grad`` of the likelihood rather than the
+            likelihood alone. **A gradient search must pass True.** The jvp
+            carries the whole forward tape, so a likelihood-only measurement
+            can under-report a gradient optimizer's footprint by a large
+            factor — that gap is exactly what let a 48-start interferometer fit
+            reach ~86 GB while the likelihood-only figure looked modest
+            (PyAutoFit#1452).
+
+        Returns
+        -------
+        The projected bytes, or ``None`` when this analysis is not on the JAX
+        path (nothing to measure).
         """
-        from autofit.non_linear.test_mode import skip_fit_output
-
-        if skip_fit_output():
-            return
-
         if not self._use_jax:
-            print("use_jax=False for this analysis, therefore does not use GPU and VRAM use cannot be profiled.")
-            return
+            return None
 
         import jax
         import jax.numpy as jnp
@@ -372,15 +384,47 @@ class Analysis(ABC):
 
         parameters = jnp.array(parameters)
 
-        batched_call = jax.jit(jax.vmap(fitness.call))
+        call = jax.value_and_grad(fitness.call) if gradient else fitness.call
+
+        batched_call = jax.jit(jax.vmap(call))
         lowered = batched_call.lower(parameters)
         compiled = lowered.compile()
         memory_analysis = compiled.memory_analysis()
 
-        vram_bytes = (
-                memory_analysis.output_size_in_bytes
-                + memory_analysis.temp_size_in_bytes
+        return (
+            memory_analysis.output_size_in_bytes
+            + memory_analysis.temp_size_in_bytes
         )
+
+    def print_vram_use(self, model, batch_size : int, gradient: bool = False) -> str:
+        """
+        Print JAX VRAM use for a given batch size.
+
+        Parameters
+        ----------
+        batch_size
+            The batch size to profile, which is the number of model evaluations JAX will perform simultaneously.
+        gradient
+            Profile ``value_and_grad`` rather than the likelihood alone. Pass
+            True when the search is a gradient optimizer (e.g.
+            ``af.MultiStartProdigy``) — see ``batched_memory_bytes``.
+        """
+        from autofit.non_linear.test_mode import skip_fit_output
+
+        if skip_fit_output():
+            return
+
+        if not self._use_jax:
+            print("use_jax=False for this analysis, therefore does not use GPU and VRAM use cannot be profiled.")
+            return
+
+        vram_bytes = self.batched_memory_bytes(
+            model=model, batch_size=batch_size, gradient=gradient
+        )
+
+        # Stated so the number is never read as covering more than it measures:
+        # the likelihood-only figure does not bound a gradient search.
+        measured = "likelihood + gradient" if gradient else "likelihood only"
 
         if vram_bytes == 0:
             print(
@@ -389,5 +433,5 @@ class Analysis(ABC):
             )
         else:
             print(
-                f"VRAM USE = {vram_bytes / 1024 ** 3:.3f} GB"
+                f"VRAM USE = {vram_bytes / 1024 ** 3:.3f} GB ({measured}, batch_size={batch_size})"
             )
