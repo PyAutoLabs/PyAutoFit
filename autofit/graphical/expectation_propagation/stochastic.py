@@ -1,6 +1,7 @@
 import logging
 from typing import Dict, List, Generator
 
+from autofit import exc
 from autofit.graphical.expectation_propagation.ep_mean_field import EPMeanField
 from autofit.graphical.mean_field import Status
 from autofit.graphical.utils import StatusFlag, LogWarnings
@@ -28,13 +29,27 @@ class StochasticEPOptimiser(EPOptimiser):
                 )
 
             messages = status.messages + tuple(caught_warnings.messages)
-            status = Status(status.success, messages, status.flag)
-        except (ValueError, ArithmeticError, RuntimeError) as e:
+            # Keyword arguments: `Status`'s third positional parameter is
+            # `updated`, not `flag` — see the same fix in `optimiser.factor_step`.
+            status = Status(
+                success=status.success,
+                messages=messages,
+                updated=status.updated,
+                flag=status.flag,
+            )
+        except (
+            ValueError,
+            ArithmeticError,
+            RuntimeError,
+            exc.InitializerException,
+        ) as e:
             logger.exception(e)
             status = Status(
-                False,
-                status.messages + (f"Factor: {factor} experienced error {e}",),
-                StatusFlag.FAILURE,
+                success=False,
+                messages=status.messages
+                + (f"Factor: {factor} experienced error {e}",),
+                updated=False,
+                flag=StatusFlag.EXCEPTION,
             )
 
         factor_logger.debug(status)

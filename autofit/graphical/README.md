@@ -154,6 +154,34 @@ subtraction of natural parameters is not closed in the family),
 previous message per-parameter (`update_invalid`) and flags
 `StatusFlag.BAD_PROJECTION`.
 
+**Failed factor update**: a factor's own optimiser may *raise* rather
+than return — most commonly `InitializerException`, when EP has driven
+the factor to a state where every drawn start point has the same figure
+of merit. `factor_step` catches this, degrades to the factor's previous
+message, and flags `StatusFlag.EXCEPTION`, so one bad factor costs one
+sweep's update rather than the whole graph fit. This is distinct from a
+*returned* `StatusFlag.FAILURE` (e.g. the Laplace optimiser's "line
+search failed"), which EP absorbs routinely. A factor that raises on
+every sweep is not going to start working, so after
+`max_consecutive_failures` (default 3) consecutive raises on one factor
+`run` stops sweeping early; only raises are counted, and the count
+resets on any sweep that does not raise. Every raise is recorded in
+`ep_history.csv` as an `EXCEPTION` row and logged as a warning.
+
+The result is still returned in that state — a partly-failed graph may
+still hold converged messages worth having — but never quietly. If
+enough factors raise, *nothing* in the mean field changes, so the KL
+step of Eq. (12) is zero and `EPHistory` declares convergence — in
+practice within two sweeps, before any per-factor count reaches its
+threshold — and the mean field holds the starting priors for those
+factors. `run` therefore checks, once the sweeps are over, whether any
+factor both raised and never once updated, and emits a **STALE FACTORS**
+warning naming them: logged, and written into `ep_diagnostics.results`
+beside the sigma-collapse warnings. Read that file before trusting a
+mean field from a run that logged failures. A factor that failed
+intermittently but landed at least one update is not stale and is not
+reported.
+
 ## 4. Convergence — `EPHistory` (`expectation_propagation/history.py`)
 
 After each factor update the history records the new `EPMeanField`.

@@ -3,7 +3,7 @@ import multiprocessing
 import os
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Dict, Optional, List, Tuple
+from typing import Dict, Optional, List, Set, Tuple
 
 from autofit import exc
 from autofit.graphical.expectation_propagation.ep_mean_field import EPMeanField
@@ -136,12 +136,37 @@ def factor_step(factor_approx, optimiser, model_approx=None):
 
         messages = status.messages + tuple(caught_warnings.messages)
 
-        status = Status(status.success, messages, status.flag, result=status.result)
+        # Keyword arguments matter here: `Status`'s third positional parameter is
+        # `updated`, not `flag`. Passing the flag positionally silently dropped it
+        # and left `flag` at its `SUCCESS` default, so a failed factor step was
+        # recorded in `ep_history.csv` as a success.
+        status = Status(
+            success=status.success,
+            messages=messages,
+            updated=status.updated,
+            flag=status.flag,
+            result=status.result,
+        )
 
-    except (ValueError, ArithmeticError, RuntimeError) as e:
+    except (
+        ValueError,
+        ArithmeticError,
+        RuntimeError,
+        exc.InitializerException,
+    ) as e:
+        # `InitializerException` is raised when a factor's own optimiser cannot
+        # find a start point — most commonly because EP has driven the factor to
+        # a state where every drawn point has the same figure of merit. That is a
+        # failure of this sweep's update for this factor, not of the graph fit:
+        # degrade to the factor's previous message and let the sweep continue,
+        # with the failure recorded. `EPOptimiser` aborts if one factor keeps
+        # failing (see `max_consecutive_failures`).
         logger.exception(e)
         status = Status(
-            False, (f"Factor: {factor} experienced error {e}",), StatusFlag.FAILURE,
+            success=False,
+            messages=(f"Factor: {factor} experienced error {e}",),
+            updated=False,
+            flag=StatusFlag.EXCEPTION,
         )
         new_model_dist = factor_approx.model_dist
 
@@ -209,6 +234,15 @@ class EPOptimiser:
             
         self.ep_history = ep_history or EPHistory()
         self.diagnostics = EPDiagnostics()
+
+        # Per-factor count of consecutive failed updates; see
+        # `_check_consecutive_failures`. Reset at the start of every `run`.
+        self._consecutive_failures: Dict[Factor, int] = {}
+        # Factors that raised at least once, and factors that landed at least
+        # one successful update; together these identify a factor whose message
+        # is still the one it started with. See `_stale_factor_warnings`.
+        self._factors_raised: Set[Factor] = set()
+        self._factors_updated: Set[Factor] = set()
 
         self.visualiser = None
         if paths is None:
@@ -294,6 +328,115 @@ class EPOptimiser:
     def factor_step(self, factor_approx, optimiser, model_approx=None):
         return factor_step(factor_approx, optimiser, model_approx=model_approx)
 
+    def _check_consecutive_failures(
+        self,
+        factor: Factor,
+        status: Status,
+        max_consecutive_failures: int,
+        raised: bool,
+    ) -> bool:
+        """
+        Track how many sweeps in a row a given factor's optimiser has *raised*.
+
+        A single raise is survivable — the sweep continues on that factor's
+        previous message. A factor that raises on *every* sweep is not going to
+        start working, so once it has raised `max_consecutive_failures` times in
+        a row there is nothing to gain by sweeping further: stop, warn, and let
+        `run` return what it has. The result is still reported, but loudly
+        qualified — see `_stale_factor_warnings`.
+
+        Only raises are counted. A returned `StatusFlag.FAILURE` is an ordinary,
+        recoverable outcome that EP absorbs by design — the Laplace optimiser
+        returns one whenever its line search fails — and counting those would
+        cut healthy fits short.
+
+        Counting is per-factor and resets on any sweep that does not raise, so
+        an intermittent failure (the observed case) never trips it.
+
+        Parameters
+        ----------
+        raised
+            Whether this factor's optimiser raised on this sweep. Read from the
+            status `factor_step` returned, *before* the mean-field projection,
+            which may legitimately overwrite the flag with `BAD_PROJECTION`.
+
+        Returns
+        -------
+        True if this factor has now failed enough consecutive sweeps that the
+        run should stop early.
+        """
+        if raised:
+            self._factors_raised.add(factor)
+            count = self._consecutive_failures.get(factor, 0) + 1
+            self._consecutive_failures[factor] = count
+
+            logger.warning(
+                "Factor %s raised on %d consecutive step(s) "
+                "(giving up on it at %d); continuing with its previous message. "
+                "Latest messages: %s",
+                factor.name,
+                count,
+                max_consecutive_failures,
+                "; ".join(status.messages) or "(none)",
+            )
+
+            if max_consecutive_failures and count >= max_consecutive_failures:
+                logger.warning(
+                    "Factor %s has raised on %d consecutive steps; abandoning "
+                    "further sweeps. Its message is whatever it last held, so "
+                    "the returned mean field is not a posterior for this factor.",
+                    factor.name,
+                    count,
+                )
+                return True
+        else:
+            self._factors_updated.add(factor)
+            self._consecutive_failures.pop(factor, None)
+
+        return False
+
+    def _stale_factor_warnings(self) -> List[str]:
+        """
+        Warn about any factor whose message is still the one it started with.
+
+        A per-factor failure count is not enough to detect this. When several
+        factors raise, *nothing* in the mean field changes, so the KL step
+        between sweeps is zero and `EPHistory` declares convergence — often
+        within two sweeps, before any count reaches its threshold. The run then
+        terminates "successfully" and the returned mean field holds the starting
+        priors for those factors, dressed up as a posterior (PyAutoFit#1405).
+
+        The result is still returned — callers with a partly-failed graph may
+        well want the factors that did converge — but never quietly: these
+        strings are logged as warnings and written into `ep_diagnostics.results`
+        alongside the sigma-collapse warnings.
+
+        The condition is deliberately narrow: a factor that raised at least once
+        and *never once* updated. A factor that failed intermittently but landed
+        at least one update has a real message and is not reported.
+        """
+        stale = self._factors_raised - self._factors_updated
+        if not stale:
+            return []
+
+        names = ", ".join(sorted(factor.name for factor in stale))
+        return [
+            f"STALE FACTORS: {names} never completed a single update — their "
+            f"optimisers raised on every sweep. The mean field returned for "
+            f"them is the prior the fit started with, not a posterior. Do not "
+            f"read those values as a result. Note that EP may also report "
+            f"convergence in this state: with no factor updating, the KL step "
+            f"between sweeps is zero, which is indistinguishable from having "
+            f"converged."
+        ]
+
+    def _warn_stale_factors(self):
+        """
+        Log the stale-factor warnings, whether or not output paths are enabled.
+        """
+        for warning in self._stale_factor_warnings():
+            logger.warning(warning)
+
     def run(
         self,
         model_approx: EPMeanField,
@@ -301,6 +444,7 @@ class EPOptimiser:
         log_interval: int = 10,
         visualise_interval: int = 100,
         output_interval: int = 10,
+        max_consecutive_failures: int = 3,
     ) -> EPMeanField:
         """
         Run the optimisation on an approximation of the model.
@@ -322,6 +466,13 @@ class EPOptimiser:
             How steps should we wait before outputting information?
             This includes the model.results file which describes the current mean values
             of each message.
+        max_consecutive_failures
+            How many consecutive sweeps a single factor's optimiser may *raise*
+            on before the fit is aborted. One raise is not fatal — the sweep
+            continues on that factor's previous message — but a factor that
+            raises every sweep would leave EP converging on a stale message and
+            reporting success. A returned failure status (e.g. a failed line
+            search) is not counted. Set to 0 to never abort.
 
         Returns
         -------
@@ -330,6 +481,10 @@ class EPOptimiser:
         should_log = IntervalCounter(log_interval)
         should_visualise = IntervalCounter(visualise_interval)
         should_output = IntervalCounter(output_interval)
+
+        self._consecutive_failures = {}
+        self._factors_raised = set()
+        self._factors_updated = set()
 
         for _ in range(max_steps):
             _should_log = should_log()
@@ -340,10 +495,15 @@ class EPOptimiser:
                 new_model_dist, status = self.factor_step(
                     factor_approx, optimiser, model_approx=model_approx,
                 )
+                raised = status.flag is StatusFlag.EXCEPTION
                 model_approx, status = self.updater.update_model_approx(
                     new_model_dist, factor_approx, model_approx, status
                 )
                 self.diagnostics.snapshot(factor, model_approx, status)
+                if self._check_consecutive_failures(
+                    factor, status, max_consecutive_failures, raised=raised
+                ):
+                    break
                 if status and _should_log:
                     self._log_factor(factor)
 
@@ -365,6 +525,7 @@ class EPOptimiser:
             self._output_results(model_approx)
             self._output_diagnostics(final=True, model_approx=model_approx)
         self._warn_sigma_collapse()
+        self._warn_stale_factors()
 
         return model_approx
 
@@ -391,7 +552,9 @@ class EPOptimiser:
         self.diagnostics.plot(self.output_path)
 
         if final and model_approx is not None:
-            warnings_list = check_sigma_collapse(self.diagnostics)
+            warnings_list = (
+                self._stale_factor_warnings() + check_sigma_collapse(self.diagnostics)
+            )
             with open(self.output_path / "ep_diagnostics.results", "w+") as f:
                 f.write(mean_field_summary(model_approx.mean_field))
                 f.write("\n")
@@ -470,6 +633,7 @@ class ParallelEPOptimiser(EPOptimiser):
         log_interval: int = 10,
         visualise_interval: int = 100,
         output_interval: int = 10,
+        max_consecutive_failures: int = 3,
     ) -> EPMeanField:
         """
         Run the optimisation on an approximation of the model.
@@ -491,6 +655,9 @@ class ParallelEPOptimiser(EPOptimiser):
             How steps should we wait before outputting information?
             This includes the model.results file which describes the current mean values
             of each message.
+        max_consecutive_failures
+            How many consecutive sweeps a single factor's optimiser may raise on
+            before the fit is aborted. See `EPOptimiser.run`.
 
         Returns
         -------
@@ -499,6 +666,10 @@ class ParallelEPOptimiser(EPOptimiser):
         should_log = IntervalCounter(log_interval)
         should_visualise = IntervalCounter(visualise_interval)
         should_output = IntervalCounter(output_interval)
+
+        self._consecutive_failures = {}
+        self._factors_raised = set()
+        self._factors_updated = set()
 
         for _ in range(max_steps):
             _should_log = should_log()
@@ -515,11 +686,16 @@ class ParallelEPOptimiser(EPOptimiser):
             for (factor_approx, _), (new_model_dist, status) in zip(
                 factor_approx_optimisers, new_dist_statuses
             ):
+                raised = status.flag is StatusFlag.EXCEPTION
                 model_approx, status = self.updater.update_model_approx(
                     new_model_dist, factor_approx, model_approx, status
                 )
                 factor = factor_approx.factor
                 self.diagnostics.snapshot(factor, model_approx, status)
+                if self._check_consecutive_failures(
+                    factor, status, max_consecutive_failures, raised=raised
+                ):
+                    break
                 if status and _should_log:
                     self._log_factor(factor)
 
@@ -542,5 +718,6 @@ class ParallelEPOptimiser(EPOptimiser):
             self._output_results(model_approx)
             self._output_diagnostics(final=True, model_approx=model_approx)
         self._warn_sigma_collapse()
+        self._warn_stale_factors()
 
         return model_approx
