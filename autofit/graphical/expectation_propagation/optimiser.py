@@ -3,7 +3,7 @@ import multiprocessing
 import os
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Dict, Optional, List, Tuple
+from typing import Dict, Optional, List, Set, Tuple
 
 from autofit import exc
 from autofit.graphical.expectation_propagation.ep_mean_field import EPMeanField
@@ -238,6 +238,11 @@ class EPOptimiser:
         # Per-factor count of consecutive failed updates; see
         # `_check_consecutive_failures`. Reset at the start of every `run`.
         self._consecutive_failures: Dict[Factor, int] = {}
+        # Factors that raised at least once, and factors that landed at least
+        # one successful update; together these identify a factor whose message
+        # is still the one it started with. See `_check_stale_factors`.
+        self._factors_raised: Set[Factor] = set()
+        self._factors_updated: Set[Factor] = set()
 
         self.visualiser = None
         if paths is None:
@@ -360,6 +365,7 @@ class EPOptimiser:
             If `factor` has now raised `max_consecutive_failures` sweeps in a row.
         """
         if raised:
+            self._factors_raised.add(factor)
             count = self._consecutive_failures.get(factor, 0) + 1
             self._consecutive_failures[factor] = count
 
@@ -384,7 +390,48 @@ class EPOptimiser:
                     f"{'; '.join(status.messages) or '(no message recorded)'}"
                 )
         else:
+            self._factors_updated.add(factor)
             self._consecutive_failures.pop(factor, None)
+
+    def _check_stale_factors(self):
+        """
+        Refuse to return a result built on a factor that never updated.
+
+        The consecutive-failure threshold alone is not enough. When several
+        factors raise, *nothing* in the mean field changes, so the KL step
+        between sweeps is zero and `EPHistory` declares convergence — often
+        within two sweeps, before any per-factor count reaches its threshold.
+        The run then terminates "successfully" and returns the starting priors
+        dressed up as a posterior. That is the exact outcome the threshold was
+        asked to prevent (PyAutoFit#1405), and it has to be caught here rather
+        than by counting.
+
+        The condition is deliberately narrow: a factor that raised at least once
+        and *never once* updated. A factor that failed intermittently but landed
+        at least one update is left alone, so the common transient failure still
+        costs a sweep rather than the fit.
+
+        Raises
+        ------
+        exc.FactorOptimisationException
+            If any factor's message is still the one it started with.
+        """
+        stale = self._factors_raised - self._factors_updated
+        if not stale:
+            return
+
+        names = ", ".join(sorted(factor.name for factor in stale))
+        raise exc.FactorOptimisationException(
+            f"Expectation propagation finished, but these factors never "
+            f"completed a single update: {names}.\n\n"
+            f"Their optimisers raised on every sweep, so their messages are "
+            f"still the ones the fit started with. Any mean field reported "
+            f"here is the prior for those factors, not a posterior — the "
+            f"result would be misleading, so it is not returned.\n\n"
+            f"Note that EP may report convergence in this state: with no "
+            f"factor updating, the KL step between sweeps is zero, which is "
+            f"indistinguishable from having converged."
+        )
 
     def run(
         self,
@@ -432,6 +479,8 @@ class EPOptimiser:
         should_output = IntervalCounter(output_interval)
 
         self._consecutive_failures = {}
+        self._factors_raised = set()
+        self._factors_updated = set()
 
         for _ in range(max_steps):
             _should_log = should_log()
@@ -471,6 +520,9 @@ class EPOptimiser:
             self._output_results(model_approx)
             self._output_diagnostics(final=True, model_approx=model_approx)
         self._warn_sigma_collapse()
+        # After the diagnostics are on disk, so they remain inspectable if this
+        # refuses to return the result.
+        self._check_stale_factors()
 
         return model_approx
 
@@ -611,6 +663,8 @@ class ParallelEPOptimiser(EPOptimiser):
         should_output = IntervalCounter(output_interval)
 
         self._consecutive_failures = {}
+        self._factors_raised = set()
+        self._factors_updated = set()
 
         for _ in range(max_steps):
             _should_log = should_log()
@@ -658,5 +712,6 @@ class ParallelEPOptimiser(EPOptimiser):
             self._output_results(model_approx)
             self._output_diagnostics(final=True, model_approx=model_approx)
         self._warn_sigma_collapse()
+        self._check_stale_factors()
 
         return model_approx

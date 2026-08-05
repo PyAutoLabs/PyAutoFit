@@ -169,6 +169,17 @@ message and reporting success, `EPOptimiser.run` aborts with
 count resets on any sweep that does not raise. Every raise is recorded
 in `ep_history.csv` as an `EXCEPTION` row and logged as a warning.
 
+That count is not sufficient on its own. If enough factors raise,
+*nothing* in the mean field changes, so the KL step of Eq. (12) is zero
+and `EPHistory` declares convergence — in practice within two sweeps,
+before any per-factor count reaches its threshold — and the run returns
+the starting priors as though they were a posterior. `run` therefore
+also checks, once the sweeps are over and the diagnostics are written,
+that no factor both raised and never once updated, and raises
+`FactorOptimisationException` naming any that did. A factor that failed
+intermittently but landed at least one update is not stale and its
+result is returned normally.
+
 ## 4. Convergence — `EPHistory` (`expectation_propagation/history.py`)
 
 After each factor update the history records the new `EPMeanField`.

@@ -170,6 +170,59 @@ def test_consecutive_failure_count_resets_on_success():
     assert intermittent.call_count > 2
 
 
+def test_never_updating_factor_is_not_reported_as_a_converged_result():
+    """
+    The consecutive-failure threshold is not sufficient on its own.
+
+    When every factor raises, nothing in the mean field changes, so the KL step
+    between sweeps is zero and `EPHistory` declares convergence — in practice
+    within two sweeps, before any per-factor count reaches its threshold. The
+    run would then return the starting priors as though they were a posterior.
+
+    Note the threshold here is deliberately higher than the number of sweeps
+    that will actually run, so this can only pass via the end-of-run check.
+    """
+    model_approx, factor_graph, prior, likelihood = make_shared_variable_approx()
+
+    optimiser = graph.EPOptimiser(
+        factor_graph,
+        factor_optimisers={
+            prior: InitializerFailingOptimiser(n_failures=1000),
+            likelihood: InitializerFailingOptimiser(n_failures=1000),
+        },
+        paths=False,
+    )
+
+    with pytest.raises(exc.FactorOptimisationException) as exc_info:
+        optimiser.run(model_approx, max_steps=2, max_consecutive_failures=100)
+
+    message = str(exc_info.value)
+    assert "never completed a single update" in message
+    assert prior.name in message and likelihood.name in message
+
+
+def test_partially_updating_factor_is_not_treated_as_stale():
+    """
+    The end-of-run check must stay narrow: a factor that failed at some point
+    but landed at least one update has a real message, and its fit is returned.
+    """
+    model_approx, factor_graph, prior, likelihood = make_shared_variable_approx()
+
+    optimiser = graph.EPOptimiser(
+        factor_graph,
+        factor_optimisers={
+            prior: InitializerFailingOptimiser(n_failures=1),
+            likelihood: ExactFactorFit(),
+        },
+        paths=False,
+    )
+
+    result = optimiser.run(model_approx, max_steps=4)
+
+    (x,) = [v for v in result.mean_field if v.name == "x"]
+    assert np.isfinite(result.mean_field[x].mean)
+
+
 def test_returned_failure_status_does_not_trip_the_abort():
     """
     Only a *raise* counts toward the abort. Optimisers return
