@@ -17,6 +17,27 @@ from autofit.non_linear.parallel import SneakyPool
 logger = logging.getLogger(__name__)
 
 
+IDENTICAL_FIGURES_OF_MERIT_MESSAGE = """
+                The initial samples all have the same figure of merit (e.g. log likelihood values).
+
+                The non-linear search will therefore not progress correctly.
+
+                Possible causes for this behaviour are:
+
+                - The `log_likelihood_function` of the analysis class is defined incorrectly.
+                - The model parameterization creates numerically inaccurate log likelihoods.
+                - The model is so tightly constrained that every drawn point is effectively the
+                  same point. This is the usual cause when the search is a factor optimiser
+                  inside an outer loop that updates its priors, e.g. expectation propagation.
+
+                Note that this is a check for *identical* figures of merit, made with
+                `np.allclose`, which is `False` for `nan`. `nan` draws are also discarded
+                by `figure_of_metric` before they ever reach the check. An all-`nan`
+                `log_likelihood_function` therefore cannot raise this exception and is not
+                a possible cause of it.
+                """
+
+
 class AbstractInitializer(ABC):
 
     @abstractmethod
@@ -117,19 +138,7 @@ class AbstractInitializer(ABC):
         if total_points > 1 and np.allclose(
                 a=figures_of_merit_list[0], b=figures_of_merit_list[1:]
         ):
-            raise exc.InitializerException(
-                """
-                The initial samples all have the same figure of merit (e.g. log likelihood values).
-
-                The non-linear search will therefore not progress correctly.
-
-                Possible causes for this behaviour are:
-
-                - The `log_likelihood_function` of the analysis class is defined incorrectly.
-                - The model parameterization creates numerically inaccurate log likelihoods.
-                - The`log_likelihood_function`  is always returning `nan` values.            
-                """
-            )
+            raise exc.InitializerException(IDENTICAL_FIGURES_OF_MERIT_MESSAGE)
 
         logger.info(f"Initial samples generated, starting non-linear search")
 
@@ -182,19 +191,7 @@ class AbstractInitializer(ABC):
         if total_points > 1 and np.allclose(
                 a=figures_of_merit_list[0], b=figures_of_merit_list[1:]
         ):
-            raise exc.InitializerException(
-                """
-                The initial samples all have the same figure of merit (e.g. log likelihood values).
-
-                The non-linear search will therefore not progress correctly.
-
-                Possible causes for this behaviour are:
-
-                - The `log_likelihood_function` of the analysis class is defined incorrectly.
-                - The model parameterization creates numerically inaccurate log likelihoods.
-                - The`log_likelihood_function`  is always returning `nan` values.            
-                """
-            )
+            raise exc.InitializerException(IDENTICAL_FIGURES_OF_MERIT_MESSAGE)
 
         logger.info(f"Initial samples generated, starting non-linear search")
 

@@ -259,6 +259,12 @@ class StatusFlag(Enum):
     SUCCESS = 1
     NO_CHANGE = 2
     BAD_PROJECTION = 3
+    # The factor's optimiser *raised* rather than returning a failed status.
+    # Distinct from FAILURE, which an optimiser returns routinely and which EP
+    # is designed to absorb (e.g. "Line search failed" from the Laplace
+    # optimiser). Only EXCEPTION counts toward the consecutive-failure abort in
+    # `EPOptimiser`.
+    EXCEPTION = 4
 
     @classmethod
     def get_flag(cls, success, n_iter):
