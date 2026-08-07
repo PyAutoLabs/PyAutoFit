@@ -152,22 +152,18 @@ search = af.Emcee(number_of_cores=4)
 
 ## Plots
 
-Every non-linear search supported by **PyAutoFit** has a dedicated `plotter` class that allows the results of the
-model-fit to be plotted and inspected.
+The results of a model-fit are plotted and inspected via the plot functions of `autofit.plot`, which wrap the
+in-built visualization libraries of the searches. These are fully described in the `plot` package of the workspace.
 
-This uses that search's in-built visualization libraries, which are fully described in the `plot` package of the
-workspace.
-
-For example, `Emcee` has a corresponding `EmceePlotter`, which is used as follows.
+For example, `corner_cornerpy` wraps `corner.py` and is used as follows.
 
 Checkout the `plot` package for a complete description of the plots that can be made for a given search.
 
 ```python
 samples = result.samples
 
-plotter = aplt.MCMCPlotter(samples=samples)
-
-plotter.corner(
+aplt.corner_cornerpy(
+    samples=samples,
     bins=20,
     range=None,
     color="k",
@@ -256,8 +252,8 @@ Information about Emcee can be found at the following links:
 
 The following workspace example shows examples of fitting data with Emcee and plotting the results.
 
-- `autofit_workspace/notebooks/searches/mcmc/Emcee.ipynb`
-- `autofit_workspace/notebooks/plot/EmceePlotter.ipynb`
+- `autofit_workspace/notebooks/searches/mcmc.ipynb`
+- `autofit_workspace/notebooks/plot/emcee_plotter.ipynb`
 
 The following code shows how to use Emcee with all available options.
 

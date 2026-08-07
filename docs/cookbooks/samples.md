@@ -289,12 +289,11 @@ Sigma =  10.001029545296722
 
 ## Search Plots
 
-The Probability Density Functions (PDF's) of the results can be plotted using the Emcee's visualization
-tool `corner.py`, which is wrapped via the `EmceePlotter` object.
+The Probability Density Functions (PDF's) of the results can be plotted using the visualization
+tool `corner.py`, which is wrapped via the `corner_cornerpy` function.
 
 ```python
-plotter = aplt.MCMCPlotter(samples=result.samples)
-plotter.corner()
+aplt.corner_cornerpy(samples=result.samples)
 ```
 
 This plot appears as follows:
