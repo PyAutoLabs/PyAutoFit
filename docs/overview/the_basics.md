@@ -539,8 +539,7 @@ algorithm (e.g. the internal dynesty samples).
 Below we use the samples to plot the probability density function cornerplot of the results.
 
 ```python
-plotter = aplt.NestPlotter(samples=result.samples)
-plotter.corner_anesthetic()
+aplt.corner_anesthetic(samples=result.samples)
 ```
 
 The plot appears as follows:
