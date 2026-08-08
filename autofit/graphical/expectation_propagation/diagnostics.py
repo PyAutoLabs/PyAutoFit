@@ -245,8 +245,11 @@ def check_sigma_collapse(
             warnings_list.append(
                 f"sigma-collapse: variable '{name}' has std {stds[-1]:.3g} "
                 f"below the floor {std_floor:.1g} — the fit has likely "
-                f"collapsed to a point (see PyAutoFit #1332 F10; consider "
-                f"damping, e.g. delta < 1, or per-factor sampler optimisers)."
+                f"collapsed to a point (see PyAutoFit #1332 F10). Mitigations "
+                f"are problem-dependent: optional damping is available via "
+                f"updater=af.SimplerUpdater(delta=0.5), but has worsened "
+                f"hierarchical scale collapse in repeated-run diagnostics; "
+                f"validate it across repeated fits."
             )
             continue
 

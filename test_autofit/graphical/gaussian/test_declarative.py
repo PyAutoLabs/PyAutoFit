@@ -92,6 +92,54 @@ def test_custom_optimiser(make_model_factor):
     assert factor_optimisers[factor_2] is default_optimiser
 
 
+def test_custom_updater_reaches_ep_optimiser(factor_model):
+    updater = af.SimplerUpdater(delta=0.5)
+
+    ep_optimiser = factor_model._make_ep_optimiser(
+        ep.LaplaceOptimiser(),
+        updater=updater,
+    )
+
+    assert ep_optimiser.updater is updater
+
+
+def test_default_updater_is_undamped(factor_model):
+    ep_optimiser = factor_model._make_ep_optimiser(ep.LaplaceOptimiser())
+
+    assert isinstance(ep_optimiser.updater, af.SimplerUpdater)
+    assert ep_optimiser.updater.delta(factor=None, model_approx=None) == 1.0
+
+
+@pytest.mark.parametrize(
+    "updater",
+    [None, af.SimplerUpdater(delta=0.5)],
+)
+def test_optimise_forwards_optional_updater(factor_model, updater, monkeypatch):
+    captured = {}
+
+    class StubEPOptimiser:
+        ep_history = None
+
+        @staticmethod
+        def run(model_approx, **kwargs):
+            return model_approx
+
+    def make_ep_optimiser(
+        optimiser,
+        paths=None,
+        ep_history=None,
+        updater=None,
+    ):
+        captured["updater"] = updater
+        return StubEPOptimiser()
+
+    monkeypatch.setattr(factor_model, "_make_ep_optimiser", make_ep_optimiser)
+
+    factor_model.optimise(ep.LaplaceOptimiser(), updater=updater)
+
+    assert captured["updater"] is updater
+
+
 def test_factor_model_attributes(factor_model):
     """
     There are:

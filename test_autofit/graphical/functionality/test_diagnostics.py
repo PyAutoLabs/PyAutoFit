@@ -131,6 +131,8 @@ def test_sigma_collapse_floor():
     assert len(warnings_list) == 1
     assert "collapsed" in warnings_list[0]
     assert "floor" in warnings_list[0]
+    assert "updater=af.SimplerUpdater(delta=0.5)" in warnings_list[0]
+    assert "problem-dependent" in warnings_list[0]
 
 
 def test_sigma_collapse_monotone():

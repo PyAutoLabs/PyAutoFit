@@ -208,6 +208,10 @@ class EPOptimiser:
             be optimised
         paths
             Optionally define how data should be output
+        updater
+            An optional policy controlling the strength of factor-message
+            updates. If omitted, full updates are used via
+            ``SimplerUpdater(delta=1.0)``.
         """
         factor_optimisers = factor_optimisers or {}
         self.factor_graph = factor_graph

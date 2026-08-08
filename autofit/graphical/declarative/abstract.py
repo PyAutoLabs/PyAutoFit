@@ -5,7 +5,10 @@ from typing import Tuple
 
 from autofit.graphical.declarative.factor.prior import PriorFactor
 from autofit.graphical.declarative.graph import DeclarativeFactorGraph
-from autofit.graphical.expectation_propagation import AbstractFactorOptimiser
+from autofit.graphical.expectation_propagation import (
+    AbstractFactorOptimiser,
+    ApproxUpdater,
+)
 from autofit.graphical.expectation_propagation import EPMeanField, EPOptimiser
 from autofit.mapper.prior.abstract import Prior
 from autofit.mapper.prior_model.collection import Collection
@@ -151,6 +154,7 @@ class AbstractDeclarativeFactor(Analysis, ABC):
         optimiser: AbstractFactorOptimiser,
         paths: Optional[AbstractPaths] = None,
         ep_history: Optional = None,
+        updater: Optional[ApproxUpdater] = None,
     ) -> EPOptimiser:
         return EPOptimiser(
             self.graph,
@@ -162,6 +166,7 @@ class AbstractDeclarativeFactor(Analysis, ABC):
             },
             ep_history=ep_history,
             paths=paths,
+            updater=updater,
         )
 
     def optimise(
@@ -169,6 +174,7 @@ class AbstractDeclarativeFactor(Analysis, ABC):
         optimiser: AbstractFactorOptimiser,
         paths: Optional[AbstractPaths] = None,
         ep_history: Optional = None,
+        updater: Optional[ApproxUpdater] = None,
         **kwargs,
     ):
         """
@@ -182,6 +188,9 @@ class AbstractDeclarativeFactor(Analysis, ABC):
             object is copied to every optimiser.
         optimiser
             An optimiser that acts on graphs
+        updater
+            An optional policy controlling how strongly EP factor messages are
+            updated. If omitted, EP keeps its existing undamped update policy.
 
         Returns
         -------
@@ -190,7 +199,12 @@ class AbstractDeclarativeFactor(Analysis, ABC):
         """
         from autofit.graphical.declarative.result import EPResult
 
-        opt = self._make_ep_optimiser(optimiser, paths=paths, ep_history=ep_history)
+        opt = self._make_ep_optimiser(
+            optimiser,
+            paths=paths,
+            ep_history=ep_history,
+            updater=updater,
+        )
         updated_ep_mean_field = opt.run(self.mean_field_approximation(), **kwargs)
 
         return EPResult(

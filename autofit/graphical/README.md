@@ -147,6 +147,19 @@ equivalently, an exponential moving average on natural parameters:
 factors update more slowly). `δ` may therefore be a scalar or a
 per-variable `MeanField` of scalars.
 
+The declarative API accepts this policy explicitly:
+
+    factor_graph.optimise(
+        optimiser,
+        updater=af.SimplerUpdater(delta=0.5),
+    )
+
+`updater=None` is the default and preserves the existing undamped
+`SimplerUpdater(delta=1.0)` behaviour. Damping is problem-dependent rather
+than a universal convergence fix; in particular, it has worsened hierarchical
+scale collapse in repeated-run diagnostics, so a damped configuration should
+be validated across repeated fits.
+
 **Invalid-projection fallback**: if the division produces an invalid
 message (e.g. negative variance — possible because Eq. (10)'s
 subtraction of natural parameters is not closed in the family),
@@ -278,6 +291,7 @@ re-verify (see the seam tests in
 | `AnalysisFactor(prior_model, analysis, optimiser)` | one `Factor` whose value is `analysis.log_likelihood_function` on the instance built from its variables | carries its own tilted-fit optimiser (§3.2) |
 | each free `Prior` | one graph `Variable` **and** one `PriorFactor` | priors are ordinary factors (§1); `PriorFactor` currently wraps the message's bound `factor` method, which strips the exact-update hooks — the conjugate update of §3.2 is *not* auto-selected declaratively (tracked: #1337 / plan #1338 WP1) |
 | the *same prior object* assigned to several models | one shared `Variable` connecting those factors | this is how information flows between datasets |
+| `optimise(..., updater=...)` | `EPOptimiser(updater=...)` | the supplied update policy survives lowering unchanged; omitting it preserves the undamped `delta=1.0` default |
 | compound prior (`prior_a * x + prior_b`, `mapper/prior/arithmetic/`) | **no graph variable** — the arithmetic is evaluated at instance-creation inside every factor that references it; only its component priors are variables | the relation is enforced *exactly* inside each tilted fit (no extra approximation — cf. §6); consequently the compound quantity has no message, no marginal, no evidence contribution of its own. (A `model.<property>` sugar for building these was deliberately reverted in `be6411755`.) |
 | `HierarchicalFactor` | one `Factor` per drawn variable (plus the distribution's parameter variables) | deliberate dimensionality choice |
 | — (no declarative expression) | `Factor(..., factor_out=v)` graph-level deterministic variables (§6.1) | **not reachable** from the declarative layer, by design as of the 2026-07 review (Phase 5, #1336): it trades the exact in-factor relation for a factorised q(v) with messages |
