@@ -18,6 +18,12 @@ from .graphical.declarative.factor.analysis import AnalysisFactor
 from .graphical.declarative.factor.analysis import EPAnalysisFactor
 from .graphical.declarative.collection import FactorGraphModel
 from .graphical.declarative.factor.hierarchical import HierarchicalFactor
+from .graphical.expectation_propagation.optimiser import (
+    ApproxUpdater,
+    DynamicUpdater,
+    FactorUpdater,
+    SimplerUpdater,
+)
 from .graphical.laplace import LaplaceOptimiser
 from .non_linear.grid.grid_list import GridList
 from .non_linear.samples.summary import SamplesSummary
