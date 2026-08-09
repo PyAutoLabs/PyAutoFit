@@ -41,7 +41,7 @@ class GammaMessage(AbstractMessage):
 
     @staticmethod
     def calc_natural_parameters(alpha, beta, xp=np):
-        return xp.array([alpha - 1, -beta])
+        return xp.stack([alpha - 1, -beta])
 
     @staticmethod
     def invert_natural_parameters(natural_parameters):
@@ -50,7 +50,7 @@ class GammaMessage(AbstractMessage):
 
     @staticmethod
     def to_canonical_form(x, xp=np):
-        return xp.array([np.log(x), x])
+        return xp.stack([xp.log(x), x])
 
     @classmethod
     def invert_sufficient_statistics(cls, suff_stats):

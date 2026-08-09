@@ -204,7 +204,7 @@ class TruncatedNormalMessage(AbstractMessage):
             η₂ = -1 / (2σ²)
         """
         precision = 1 / sigma**2
-        return xp.array([mu * precision, -precision / 2])
+        return xp.stack([mu * precision, -precision / 2])
 
     @staticmethod
     def invert_natural_parameters(natural_parameters : np.ndarray) -> Tuple[float, float]:
@@ -248,7 +248,7 @@ class TruncatedNormalMessage(AbstractMessage):
         -------
         The sufficient statistics [x, x²].
         """
-        return xp.array([x, x**2])
+        return xp.stack([x, x**2])
 
     @classmethod
     def invert_sufficient_statistics(cls, suff_stats: Tuple[float, float]) -> np.ndarray:
@@ -722,7 +722,7 @@ class TruncatedNaturalNormal(TruncatedNormalMessage):
         eta2
             The second natural parameter.
         """
-        return xp.array([eta1, eta2])
+        return xp.stack([eta1, eta2])
 
     def natural_parameters(self, xp=np) -> np.ndarray:
         """
