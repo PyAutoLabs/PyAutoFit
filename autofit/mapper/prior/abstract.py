@@ -185,6 +185,7 @@ class Prior(Variable, ABC, ArithmeticMixin):
         self,
         arguments,
         ignore_assertions=False,
+        xp=np,
     ):
         """Look up this prior's value in an arguments dictionary.
 
@@ -194,8 +195,11 @@ class Prior(Variable, ABC, ArithmeticMixin):
             A dictionary mapping Prior objects to physical values.
         ignore_assertions
             Unused for priors (present for interface compatibility).
+        xp
+            Unused for direct prior lookup. Accepted so compound prior models can
+            propagate their selected NumPy/JAX backend recursively.
         """
-        _ = ignore_assertions
+        _ = ignore_assertions, xp
         return arguments[self]
 
     def project(self, samples, log_weight_list):
