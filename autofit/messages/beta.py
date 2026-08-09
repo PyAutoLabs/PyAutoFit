@@ -223,7 +223,7 @@ class BetaMessage(AbstractMessage):
         -------
         Natural parameters [alpha - 1, beta - 1].
         """
-        return xp.array([alpha - 1, beta - 1])
+        return xp.stack([alpha - 1, beta - 1])
 
     @staticmethod
     def invert_natural_parameters(
@@ -276,7 +276,7 @@ class BetaMessage(AbstractMessage):
         -------
         Canonical sufficient statistics [log(x), log(1 - x)].
         """
-        return xp.array([xp.log(x), xp.log1p(-x)])
+        return xp.stack([xp.log(x), xp.log1p(-x)])
 
     @cached_property
     def mean(self) -> Union[np.ndarray, float]:
