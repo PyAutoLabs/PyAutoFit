@@ -80,3 +80,34 @@ def test_message_array_construction_is_jittable_and_matches_numpy(message_array,
 
     assert actual.shape == expected.shape
     np.testing.assert_allclose(np.asarray(actual), expected)
+
+
+MESSAGE_LOG_PARTITION_CASES = [
+    pytest.param(
+        lambda value, xp: GammaMessage(value + 1.0, value + 2.0).log_partition(xp=xp),
+        id="gamma",
+    ),
+    pytest.param(
+        lambda value, xp: BetaMessage(value + 1.0, value + 2.0).log_partition(xp=xp),
+        id="beta",
+    ),
+]
+
+
+@pytest.mark.parametrize("message_log_partition", MESSAGE_LOG_PARTITION_CASES)
+@pytest.mark.parametrize(
+    "value",
+    [pytest.param(2.0, id="scalar"), pytest.param([2.0, 3.0], id="batched")],
+)
+def test_message_log_partition_is_jittable_and_matches_numpy(
+    message_log_partition, value
+):
+    numpy_value = np.asarray(value)
+    expected = message_log_partition(numpy_value, np)
+
+    actual = jax.jit(lambda traced: message_log_partition(traced, jnp))(
+        jnp.asarray(value)
+    )
+
+    assert actual.shape == np.shape(expected)
+    np.testing.assert_allclose(np.asarray(actual), expected, rtol=1e-6)

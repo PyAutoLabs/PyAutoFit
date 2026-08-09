@@ -149,6 +149,7 @@ class CompoundPrior(AbstractPriorModel, ArithmeticMixin, Compound, ABC):
         self,
         arguments: dict,
         ignore_assertions=False,
+        xp=np,
     ):
         """
         Instantiate the left object.
@@ -168,6 +169,7 @@ class CompoundPrior(AbstractPriorModel, ArithmeticMixin, Compound, ABC):
             return self._left.instance_for_arguments(
                 arguments,
                 ignore_assertions=ignore_assertions,
+                xp=xp,
             )
         except AttributeError:
             return self._left
@@ -176,6 +178,7 @@ class CompoundPrior(AbstractPriorModel, ArithmeticMixin, Compound, ABC):
         self,
         arguments: dict,
         ignore_assertions=False,
+        xp=np,
     ):
         """
         Instantiate the right object.
@@ -195,6 +198,7 @@ class CompoundPrior(AbstractPriorModel, ArithmeticMixin, Compound, ABC):
             return self._right.instance_for_arguments(
                 arguments,
                 ignore_assertions=ignore_assertions,
+                xp=xp,
             )
         except AttributeError:
             return self._right
@@ -217,9 +221,11 @@ class SumPrior(CompoundPrior):
         return self.left_for_arguments(
             arguments,
             ignore_assertions=ignore_assertions,
+            xp=xp,
         ) + self.right_for_arguments(
             arguments,
             ignore_assertions=ignore_assertions,
+            xp=xp,
         )
 
     def __str__(self):
@@ -243,9 +249,11 @@ class MultiplePrior(CompoundPrior):
         return self.left_for_arguments(
             arguments,
             ignore_assertions=ignore_assertions,
+            xp=xp,
         ) * self.right_for_arguments(
             arguments,
             ignore_assertions=ignore_assertions,
+            xp=xp,
         )
 
 
@@ -263,9 +271,11 @@ class DivisionPrior(CompoundPrior):
         return self.left_for_arguments(
             arguments,
             ignore_assertions=ignore_assertions,
+            xp=xp,
         ) / self.right_for_arguments(
             arguments,
             ignore_assertions=ignore_assertions,
+            xp=xp,
         )
 
 
@@ -283,9 +293,11 @@ class FloorDivPrior(CompoundPrior):
         return self.left_for_arguments(
             arguments,
             ignore_assertions=ignore_assertions,
+            xp=xp,
         ) // self.right_for_arguments(
             arguments,
             ignore_assertions=ignore_assertions,
+            xp=xp,
         )
 
 
@@ -303,9 +315,11 @@ class ModPrior(CompoundPrior):
         return self.left_for_arguments(
             arguments,
             ignore_assertions=ignore_assertions,
+            xp=xp,
         ) % self.right_for_arguments(
             arguments,
             ignore_assertions=ignore_assertions,
+            xp=xp,
         )
 
 
@@ -323,9 +337,11 @@ class PowerPrior(CompoundPrior):
         return self.left_for_arguments(
             arguments,
             ignore_assertions=ignore_assertions,
+            xp=xp,
         ) ** self.right_for_arguments(
             arguments,
             ignore_assertions=ignore_assertions,
+            xp=xp,
         )
 
 
@@ -407,6 +423,7 @@ class NegativePrior(ModifiedPrior):
         return -self.prior.instance_for_arguments(
             arguments,
             ignore_assertions=ignore_assertions,
+            xp=xp,
         )
 
 
@@ -425,6 +442,7 @@ class AbsolutePrior(ModifiedPrior):
             self.prior.instance_for_arguments(
                 arguments,
                 ignore_assertions=ignore_assertions,
+                xp=xp,
             )
         )
 
@@ -440,10 +458,11 @@ class Log(ModifiedPrior):
         ignore_assertions=False,
         xp=np,
     ):
-        return np.log(
+        return xp.log(
             self.prior.instance_for_arguments(
                 arguments,
                 ignore_assertions=ignore_assertions,
+                xp=xp,
             )
         )
 
@@ -459,9 +478,10 @@ class Log10(ModifiedPrior):
         ignore_assertions=False,
         xp=np,
     ):
-        return np.log10(
+        return xp.log10(
             self.prior.instance_for_arguments(
                 arguments,
                 ignore_assertions=ignore_assertions,
+                xp=xp,
             )
         )

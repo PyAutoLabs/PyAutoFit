@@ -8,10 +8,15 @@ from autofit.messages.utils import invpsilog
 class GammaMessage(AbstractMessage):
 
     def log_partition(self, xp=np):
-        from scipy import special
+        if xp is np:
+            from scipy.special import gammaln
+        else:
+            from jax.scipy.special import gammaln
 
-        alpha, beta = GammaMessage.invert_natural_parameters(self.natural_parameters(xp=xp))
-        return special.gammaln(alpha) - alpha * np.log(beta)
+        alpha, beta = GammaMessage.invert_natural_parameters(
+            self.natural_parameters(xp=xp)
+        )
+        return gammaln(alpha) - alpha * xp.log(beta)
 
     log_base_measure = 0.0
     _support = ((0, np.inf),)
@@ -24,14 +29,21 @@ class GammaMessage(AbstractMessage):
             log_norm=0.0,
             id_=None
     ):
-        self.alpha = alpha
-        self.beta = beta
+        if isinstance(alpha, (np.ndarray, float, int, list)):
+            xp = np
+        else:
+            import jax.numpy as jnp
+
+            xp = jnp
+
         super().__init__(
             alpha,
             beta,
             log_norm=log_norm,
-            id_=id_
+            id_=id_,
+            _xp=xp,
         )
+        self.alpha, self.beta = self.parameters
 
     def value_for(self, unit: float) -> float:
         raise NotImplemented()

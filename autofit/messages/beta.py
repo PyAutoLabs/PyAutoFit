@@ -146,14 +146,21 @@ class BetaMessage(AbstractMessage):
         id_
             Identifier for the message. Default is None.
         """
-        self.alpha = alpha
-        self.beta = beta
+        if isinstance(alpha, (np.ndarray, float, int, list)):
+            xp = np
+        else:
+            import jax.numpy as jnp
+
+            xp = jnp
+
         super().__init__(
             alpha,
             beta,
             log_norm=log_norm,
-            id_=id_
+            id_=id_,
+            _xp=xp,
         )
+        self.alpha, self.beta = self.parameters
 
     def value_for(self, unit: float) -> float:
         """
@@ -184,7 +191,10 @@ class BetaMessage(AbstractMessage):
         -------
         The value of the log Beta function, i.e. betaln(alpha, beta).
         """
-        from scipy.special import betaln
+        if xp is np:
+            from scipy.special import betaln
+        else:
+            from jax.scipy.special import betaln
 
         return betaln(*self.parameters)
 
