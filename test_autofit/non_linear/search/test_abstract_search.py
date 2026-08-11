@@ -5,6 +5,7 @@ import pytest
 
 import autofit as af
 from autonerves import conf
+from autofit.non_linear.paths.null import NullPaths
 
 pytestmark = pytest.mark.filterwarnings("ignore::FutureWarning")
 
@@ -473,3 +474,120 @@ class TestBypassToleratesFitException:
 
         with pytest.raises(ValueError):
             search.fit(model=af.Model(af.m.MockClassx2), analysis=_BrokenAnalysis())
+
+
+class _RejectsLowValue:
+    def __init__(self, value):
+        if value < 0.75:
+            raise af.exc.FitException("value must be at least 0.75")
+        self.value = value
+
+
+class _RejectsLowValueUnexpectedly:
+    def __init__(self, value):
+        if value < 0.75:
+            raise ValueError("unexpected constructor failure")
+        self.value = value
+
+
+class _AlwaysRejects:
+    def __init__(self, value):
+        raise af.exc.FitException("no valid instance exists")
+
+
+class _RejectedFinalSampleSearch(af.mock.MockSearch):
+    """Search double whose reduced sampler returns one rejected region."""
+
+    def __init__(self, samples):
+        super().__init__(fit_fast=False, paths=NullPaths())
+        self._rejected_samples = samples
+
+    def _fit(self, model, analysis):
+        return object(), object()
+
+    def perform_update(
+        self,
+        model,
+        analysis,
+        during_analysis,
+        fitness=None,
+        search_internal=None,
+    ):
+        return self._rejected_samples
+
+
+def _model_and_rejected_samples(cls):
+    model = af.Model(cls)
+    model.value = af.UniformPrior(lower_limit=0.0, upper_limit=1.0)
+    sample_list = af.DynestyStatic._build_fake_samples(
+        model=model,
+        parameter_vector=[0.1],
+        log_likelihood=-1.0e99,
+    )
+    samples = af.SamplesPDF(
+        model=model,
+        sample_list=sample_list,
+        samples_info={"log_evidence": -1.0e99},
+    )
+    return model, samples
+
+
+class TestReducedModeRejectedFinalSample:
+    def test__test_mode_1__fitexception_gets_valid_representative(self, monkeypatch):
+        monkeypatch.setenv("PYAUTO_TEST_MODE", "1")
+        model, rejected_samples = _model_and_rejected_samples(_RejectsLowValue)
+
+        result = _RejectedFinalSampleSearch(samples=rejected_samples).fit(
+            model=model,
+            analysis=af.m.MockAnalysis(),
+        )
+
+        assert result.samples_summary.instance.value >= 0.75
+        assert result.samples.max_log_likelihood_sample.log_likelihood == pytest.approx(
+            -1.0e99
+        )
+        assert all(instance.value >= 0.75 for instance in result.samples.instances)
+
+    def test__normal_mode__fitexception_still_propagates(self, monkeypatch):
+        monkeypatch.delenv("PYAUTO_TEST_MODE", raising=False)
+        model, rejected_samples = _model_and_rejected_samples(_RejectsLowValue)
+
+        result = _RejectedFinalSampleSearch(samples=rejected_samples).fit(
+            model=model,
+            analysis=af.m.MockAnalysis(),
+        )
+
+        with pytest.raises(af.exc.FitException):
+            result.samples_summary.instance
+
+    def test__test_mode_1__non_fitexception_still_propagates(self, monkeypatch):
+        monkeypatch.setenv("PYAUTO_TEST_MODE", "1")
+        model, rejected_samples = _model_and_rejected_samples(
+            _RejectsLowValueUnexpectedly
+        )
+
+        with pytest.raises(ValueError, match="unexpected constructor failure"):
+            _RejectedFinalSampleSearch(samples=rejected_samples).fit(
+                model=model,
+                analysis=af.m.MockAnalysis(),
+            )
+
+    def test__test_mode_1__bounded_failure_is_clear(self, monkeypatch):
+        from autofit.non_linear.search import abstract_search
+
+        monkeypatch.setenv("PYAUTO_TEST_MODE", "1")
+        monkeypatch.setattr(
+            abstract_search,
+            "TEST_MODE_REPRESENTATIVE_MAX_ATTEMPTS",
+            2,
+        )
+        model, rejected_samples = _model_and_rejected_samples(_AlwaysRejects)
+
+        with pytest.raises(
+            af.exc.FitException,
+            match="could not construct a valid representative result after 2 attempts",
+        ):
+            _RejectedFinalSampleSearch(samples=rejected_samples).fit(
+                model=model,
+                analysis=af.m.MockAnalysis(),
+            )

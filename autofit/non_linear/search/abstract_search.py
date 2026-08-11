@@ -65,6 +65,11 @@ logger = logging.getLogger(__name__)
 #: a hand-set ``1e100`` in a workspace config reads as "never" too.
 ITERATIONS_NEVER = 1e90
 
+# A reduced test-mode fit needs a valid representative instance for result
+# construction and search chaining.  Keep fallback sampling bounded so an
+# impossible model fails clearly instead of hanging a smoke-test worker.
+TEST_MODE_REPRESENTATIVE_MAX_ATTEMPTS = 100
+
 
 def check_cores(func):
     """
@@ -747,8 +752,22 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             during_analysis=False,
         )
 
+        samples_summary = samples.summary()
+
+        if mode == 1:
+            try:
+                samples_summary.instance
+            except exc.FitException as error:
+                samples = self._test_mode_samples_after_rejected_fit(
+                    model=model,
+                    error=error,
+                )
+                samples_summary = samples.summary()
+                self.paths.save_samples_summary(samples_summary=samples_summary)
+                self.paths.save_samples(samples=samples)
+
         result = analysis.make_result(
-            samples_summary=samples.summary(),
+            samples_summary=samples_summary,
             paths=self.paths,
             samples=samples,
             search_internal=search_internal,
@@ -762,6 +781,82 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         self.paths.completed()
 
         return result
+
+    def _test_mode_samples_after_rejected_fit(
+        self,
+        model: AbstractPriorModel,
+        error: exc.FitException,
+    ) -> Samples:
+        """Build valid representative samples after a mode-1 rejected result.
+
+        ``Fitness`` maps :class:`FitException` to the sampler's rejection
+        sentinel.  A production search naturally moves on to another point,
+        but ``PYAUTO_TEST_MODE=1`` may stop after that first evaluation.  Its
+        posterior can therefore contain only the rejected point, which cannot
+        be reconstructed while finalizing the result.
+
+        Try the prior medians first, then a deterministic sequence of prior
+        draws.  Every synthetic sample is validated before it is returned so
+        result construction and downstream chaining cannot reconstruct another
+        rejected point.  The fixed seed keeps smoke tests reproducible without
+        changing the application's global random state.
+        """
+        from autofit.non_linear.samples.pdf import SamplesPDF
+
+        logger.warning(
+            "TEST MODE 1: the reduced search's final sample raised "
+            f"FitException ({error.__cause__ or error!r}); replacing it with "
+            "a valid representative sample for result construction."
+        )
+
+        rng = np.random.default_rng(seed=0)
+        last_error = error
+
+        for attempt in range(TEST_MODE_REPRESENTATIVE_MAX_ATTEMPTS):
+            unit_vector = (
+                [0.5] * model.prior_count
+                if attempt == 0
+                else rng.random(model.prior_count).tolist()
+            )
+
+            try:
+                parameter_vector = [
+                    float(value)
+                    for value in model.vector_from_unit_vector(
+                        unit_vector=unit_vector,
+                    )
+                ]
+                sample_list = self._build_fake_samples(
+                    model=model,
+                    parameter_vector=parameter_vector,
+                    log_likelihood=-1.0e99,
+                )
+
+                for sample in sample_list:
+                    model.instance_from_vector(
+                        vector=sample.parameter_lists_for_model(model)
+                    )
+            except exc.FitException as candidate_error:
+                last_error = candidate_error
+                continue
+
+            samples_info = {
+                "total_iterations": 1,
+                "time": 0.0,
+                "log_evidence": -1.0e99,
+            }
+            samples_info.update(self._test_mode_samples_info())
+
+            return SamplesPDF(
+                model=model,
+                sample_list=sample_list,
+                samples_info=samples_info,
+            )
+
+        raise exc.FitException(
+            "TEST MODE 1 could not construct a valid representative result "
+            f"after {TEST_MODE_REPRESENTATIVE_MAX_ATTEMPTS} attempts."
+        ) from last_error
 
     def result_via_completed_fit(
         self,
