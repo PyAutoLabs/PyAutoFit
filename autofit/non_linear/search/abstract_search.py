@@ -759,7 +759,7 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
                 samples_summary.instance
             except exc.FitException as error:
                 samples = self._test_mode_samples_after_rejected_fit(
-                    model=model,
+                    samples=samples,
                     error=error,
                 )
                 samples_summary = samples.summary()
@@ -784,7 +784,7 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
 
     def _test_mode_samples_after_rejected_fit(
         self,
-        model: AbstractPriorModel,
+        samples: Samples,
         error: exc.FitException,
     ) -> Samples:
         """Build valid representative samples after a mode-1 rejected result.
@@ -801,8 +801,6 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         rejected point.  The fixed seed keeps smoke tests reproducible without
         changing the application's global random state.
         """
-        from autofit.non_linear.samples.pdf import SamplesPDF
-
         logger.warning(
             "TEST MODE 1: the reduced search's final sample raised "
             f"FitException ({error.__cause__ or error!r}); replacing it with "
@@ -811,6 +809,7 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
 
         rng = np.random.default_rng(seed=0)
         last_error = error
+        model = samples.model
 
         for attempt in range(TEST_MODE_REPRESENTATIVE_MAX_ATTEMPTS):
             unit_vector = (
@@ -841,13 +840,14 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
                 continue
 
             samples_info = {
+                **(samples.samples_info or {}),
                 "total_iterations": 1,
                 "time": 0.0,
                 "log_evidence": -1.0e99,
             }
             samples_info.update(self._test_mode_samples_info())
 
-            return SamplesPDF(
+            return samples.from_list_info_and_model(
                 model=model,
                 sample_list=sample_list,
                 samples_info=samples_info,

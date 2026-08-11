@@ -7,6 +7,28 @@ import autofit as af
 pytestmark = pytest.mark.filterwarnings("ignore::FutureWarning")
 
 
+class _RejectsLowStoredValue:
+    def __init__(self, value):
+        if value < 0.5:
+            raise af.exc.FitException("stored value is outside the current domain")
+        self.value = value
+
+
+def _guarded_samples(parameter_lists, log_likelihood_list, weight_list):
+    model = af.Model(_RejectsLowStoredValue)
+    model.value = af.UniformPrior(lower_limit=0.0, upper_limit=1.0)
+    return af.SamplesPDF(
+        model=model,
+        sample_list=af.Sample.from_lists(
+            model=model,
+            parameter_lists=parameter_lists,
+            log_likelihood_list=log_likelihood_list,
+            log_prior_list=[0.0] * len(parameter_lists),
+            weight_list=weight_list,
+        ),
+    )
+
+
 def test__table__headers(samples_x5):
     assert samples_x5._headers == [
         "mock_class_1.one",
@@ -69,6 +91,48 @@ def test__max_log_likelihood(samples_x5):
     assert instance.mock_class_1.two == 22.0
     assert instance.mock_class_1.three == 23.0
     assert instance.mock_class_1.four == 24.0
+
+
+def test__max_log_likelihood__historical_invalid_best_uses_next_valid_instance():
+    samples = _guarded_samples(
+        parameter_lists=[[0.1], [0.9]],
+        log_likelihood_list=[2.0, 1.0],
+        weight_list=[0.5, 0.5],
+    )
+
+    assert samples.max_log_likelihood(as_instance=False) == [0.1]
+    assert samples.max_log_likelihood().value == 0.9
+
+
+def test__draw_randomly_via_pdf__historical_invalid_draw_is_retried(monkeypatch):
+    from autofit.non_linear.samples import pdf
+
+    samples = _guarded_samples(
+        parameter_lists=[[0.1], [0.9]],
+        log_likelihood_list=[2.0, 1.0],
+        weight_list=[0.5, 0.5],
+    )
+    choices = iter([0, 1])
+    monkeypatch.setattr(pdf.np.random, "choice", lambda *args, **kwargs: next(choices))
+
+    assert samples.draw_randomly_via_pdf().value == 0.9
+
+
+def test__draw_randomly_via_pdf__all_invalid_fails_clearly(monkeypatch):
+    from autofit.non_linear.samples import pdf
+
+    samples = _guarded_samples(
+        parameter_lists=[[0.1]],
+        log_likelihood_list=[1.0],
+        weight_list=[1.0],
+    )
+    monkeypatch.setattr(pdf, "VALID_INSTANCE_MAX_ATTEMPTS", 2)
+
+    with pytest.raises(
+        af.exc.SamplesException,
+        match="Could not draw a valid model instance.*after 2 attempts",
+    ):
+        samples.draw_randomly_via_pdf()
 
 
 def test__max_log_posterior():
@@ -165,6 +229,7 @@ def test__samples_above_weight_threshold_from():
     assert len(samples_above_weight_threshold) == 3
     assert samples_above_weight_threshold.sample_list[0].weight == 1.0
 
+
 def test__samples_drawn_randomly_via_pdf_from():
 
     model = af.Collection(mock_class=af.m.MockClassx4)
@@ -194,6 +259,7 @@ def test__samples_drawn_randomly_via_pdf_from():
 
     assert len(samples_drawn_randomly_via_pdf) == 3
     assert samples_drawn_randomly_via_pdf.sample_list[0].weight == 0.2
+
 
 def test__addition_of_samples(samples_x5):
     samples = samples_x5 + samples_x5
