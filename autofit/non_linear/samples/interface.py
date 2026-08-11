@@ -53,6 +53,13 @@ class SamplesInterface(ABC):
         self._names = None
         self._instance = None
 
+    def _rebind_model(self, model: AbstractPriorModel) -> None:
+        """Rebind a copied samples object without retaining model-derived caches."""
+        self.model = model
+        self._paths = None
+        self._names = None
+        self._instance = None
+
     @property
     def instance(self):
         if self._instance is None:

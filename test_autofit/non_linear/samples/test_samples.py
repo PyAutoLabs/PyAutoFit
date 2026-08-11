@@ -29,6 +29,62 @@ def _guarded_samples(parameter_lists, log_likelihood_list, weight_list):
     )
 
 
+def _factor_graph_samples():
+    shared_value = af.UniformPrior(lower_limit=0.0, upper_limit=1.0)
+    factor_models = [
+        af.Collection(galaxies=af.Model(_RejectsLowStoredValue, value=shared_value))
+        for _ in range(2)
+    ]
+    factor_graph = af.FactorGraphModel(
+        *[
+            af.AnalysisFactor(
+                prior_model=factor_model,
+                analysis=af.m.MockAnalysis(),
+            )
+            for factor_model in factor_models
+        ]
+    )
+    model = factor_graph.global_prior_model
+    samples = af.SamplesPDF(
+        model=model,
+        sample_list=af.Sample.from_lists(
+            model=model,
+            parameter_lists=[[0.9]],
+            log_likelihood_list=[1.0],
+            log_prior_list=[0.0],
+            weight_list=[1.0],
+        ),
+    )
+    return samples, factor_models[0]
+
+
+@pytest.mark.parametrize("use_summary", [False, True])
+def test__subsamples__rebuilds_instance_after_model_rebind(use_summary):
+    samples, factor_model = _factor_graph_samples()
+    source = samples.summary() if use_summary else samples
+
+    global_instance = source.instance
+    child = source.subsamples(model=factor_model)
+
+    assert child._instance is None
+    assert child.instance is not global_instance
+    assert child.instance.galaxies.value == pytest.approx(0.9)
+
+
+@pytest.mark.parametrize("method_name", ["with_paths", "without_paths"])
+def test__path_filter__clears_model_derived_caches(samples_x5, method_name):
+    samples_x5.instance
+    samples_x5.paths
+    samples_x5.names
+
+    paths = [("mock_class_1", "one")]
+    filtered = getattr(samples_x5, method_name)(paths)
+
+    assert filtered._instance is None
+    assert filtered._paths is None
+    assert filtered._names is None
+
+
 def test__table__headers(samples_x5):
     assert samples_x5._headers == [
         "mock_class_1.one",

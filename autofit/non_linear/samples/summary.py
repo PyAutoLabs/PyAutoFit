@@ -77,9 +77,7 @@ class SamplesSummary(SamplesInterface):
             return None
 
         copied = copy(self)
-        copied._paths = None
-        copied._names = None
-        copied.model = model
+        copied._rebind_model(model=model)
 
         copied._max_log_likelihood_sample = self.max_log_likelihood_sample.subsample(
             self.path_map_for_model(model)

@@ -756,7 +756,7 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
 
         if mode == 1:
             try:
-                samples_summary.instance
+                samples_summary.max_log_likelihood()
             except exc.FitException as error:
                 samples = self._test_mode_samples_after_rejected_fit(
                     samples=samples,

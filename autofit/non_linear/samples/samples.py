@@ -500,7 +500,7 @@ class Samples(SamplesInterface, ABC):
         A set of samples with a reduced set of attributes
         """
         with_paths = copy(self)
-        with_paths.model = self.model.with_paths(paths)
+        with_paths._rebind_model(model=self.model.with_paths(paths))
         with_paths.sample_list = [
             sample.with_paths(paths) for sample in self.sample_list
         ]
@@ -526,7 +526,7 @@ class Samples(SamplesInterface, ABC):
         A set of samples with a reduced set of attributes
         """
         with_paths = copy(self)
-        with_paths.model = self.model.without_paths(paths)
+        with_paths._rebind_model(model=self.model.without_paths(paths))
         with_paths.sample_list = [
             sample.without_paths(paths) for sample in self.sample_list
         ]
@@ -538,9 +538,7 @@ class Samples(SamplesInterface, ABC):
 
         path_map = self.path_map_for_model(model)
         copied = copy(self)
-        copied._paths = None
-        copied._names = None
-        copied.model = model
+        copied._rebind_model(model=model)
 
         copied.sample_list = [sample.subsample(path_map) for sample in self.sample_list]
         return copied
