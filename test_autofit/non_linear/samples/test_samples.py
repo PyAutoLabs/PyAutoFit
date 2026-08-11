@@ -160,6 +160,51 @@ def test__max_log_likelihood__historical_invalid_best_uses_next_valid_instance()
     assert samples.max_log_likelihood().value == 0.9
 
 
+def test__valid_sample_instance_pairs__skips_historical_invalid_points():
+    samples = _guarded_samples(
+        parameter_lists=[[0.1], [0.9]],
+        log_likelihood_list=[2.0, 1.0],
+        weight_list=[0.6, 0.4],
+    )
+
+    pairs = samples.valid_sample_instance_pairs()
+
+    assert len(pairs) == 1
+    assert pairs[0][0].weight == 0.4
+    assert pairs[0][1].value == 0.9
+
+
+def test__valid_sample_instance_pairs__all_invalid_returns_empty():
+    samples = _guarded_samples(
+        parameter_lists=[[0.1]],
+        log_likelihood_list=[1.0],
+        weight_list=[1.0],
+    )
+
+    assert samples.valid_sample_instance_pairs() == []
+
+
+def test__valid_sample_instance_pairs__does_not_hide_programming_errors():
+    class _RaisesUnexpectedly:
+        def __init__(self, value):
+            raise ValueError("real bug")
+
+    model = af.Model(_RaisesUnexpectedly)
+    samples = af.SamplesPDF(
+        model=model,
+        sample_list=af.Sample.from_lists(
+            model=model,
+            parameter_lists=[[1.0]],
+            log_likelihood_list=[1.0],
+            log_prior_list=[0.0],
+            weight_list=[1.0],
+        ),
+    )
+
+    with pytest.raises(ValueError, match="real bug"):
+        samples.valid_sample_instance_pairs()
+
+
 def test__draw_randomly_via_pdf__historical_invalid_draw_is_retried(monkeypatch):
     from autofit.non_linear.samples import pdf
 

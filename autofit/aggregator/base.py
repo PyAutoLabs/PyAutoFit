@@ -1,12 +1,9 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from functools import partial
-import logging
 from typing import List, Optional, Generator
 
 import autofit as af
-
-logger = logging.getLogger(__name__)
 
 
 class AggBase(ABC):
@@ -136,36 +133,7 @@ class AggBase(ABC):
 
     @staticmethod
     def _valid_sample_instance_pairs(samples, minimum_weight: float):
-        """Return weighted samples whose model instances still reconstruct.
-
-        Constructor validation can become stricter after a result was written.
-        Such historical points are not usable objects, but they must not make an
-        entire aggregator query fail.  ``FitException`` is the narrow model-point
-        rejection contract; programming errors continue to propagate.
-        """
-        pairs = []
-        rejected = 0
-
-        for sample in samples.sample_list:
-            if sample.weight <= minimum_weight:
-                continue
-            try:
-                instance = samples.model.instance_from_vector(
-                    sample.parameter_lists_for_model(model=samples.model)
-                )
-            except af.exc.FitException:
-                rejected += 1
-                continue
-            pairs.append((sample, instance))
-
-        if rejected:
-            logger.warning(
-                "Skipped %d stored sample(s) rejected by current model "
-                "validation while building aggregator objects.",
-                rejected,
-            )
-
-        return pairs
+        return samples.valid_sample_instance_pairs(minimum_weight=minimum_weight)
 
     def randomly_drawn_via_pdf_gen_from(self, total_samples: int):
         """

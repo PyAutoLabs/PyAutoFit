@@ -80,6 +80,52 @@ class Samples(SamplesInterface, ABC):
             for sample in self.sample_list
         ]
 
+    def valid_sample_instance_pairs(
+        self,
+        minimum_weight: float = float("-inf"),
+        ignore_assertions: bool = False,
+    ) -> List[Tuple[Sample, ModelInstance]]:
+        """Return stored samples paired with instances they can still build.
+
+        Constructor validation can become stricter after a result was written.
+        Historical points rejected through the narrow :class:`FitException`
+        contract are therefore skipped, while programming errors continue to
+        propagate.
+
+        Parameters
+        ----------
+        minimum_weight
+            Only samples with a weight strictly greater than this value are
+            considered.
+        ignore_assertions
+            If ``True``, model assertions are not checked while constructing an
+            instance. Constructor validation still applies.
+        """
+        pairs = []
+        rejected = 0
+
+        for sample in self.sample_list:
+            if sample.weight <= minimum_weight:
+                continue
+            try:
+                instance = sample.instance_for_model(
+                    model=self.model,
+                    ignore_assertions=ignore_assertions,
+                )
+            except exc.FitException:
+                rejected += 1
+                continue
+            pairs.append((sample, instance))
+
+        if rejected:
+            logger.warning(
+                "Skipped %d stored sample(s) rejected by current model "
+                "validation while reconstructing instances.",
+                rejected,
+            )
+
+        return pairs
+
     @property
     def log_evidence(self):
         return None
