@@ -322,18 +322,70 @@ class Samples(SamplesInterface, ABC):
             return 0
         return int(np.nanargmax(log_likelihood_list))
 
-    @to_instance
-    def max_log_likelihood(self) -> List[float]:
+    def max_log_likelihood(
+        self,
+        as_instance: bool = True,
+        as_dict: bool = False,
+    ) -> Union[List[float], Dict, ModelInstance]:
         """
         The parameters of the maximum log likelihood sample of the `NonLinearSearch` returned as a model instance or
         list of values.
+
+        When an older stored result contains a point which a newer model class
+        rejects with :class:`FitException`, instance reconstruction falls back
+        to the next-highest-likelihood valid point.  The recorded best vector is
+        still returned unchanged when ``as_instance=False`` or ``as_dict=True``;
+        only the request to materialize an object needs this compatibility path.
         """
 
         sample = self.max_log_likelihood_sample
-
-        return sample.parameter_lists_for_paths(
+        vector = sample.parameter_lists_for_paths(
             self.paths if sample.is_path_kwargs else self.names
         )
+
+        if as_dict:
+            return {".".join(path[0]): value for path, value in zip(self.paths, vector)}
+
+        if not as_instance:
+            return vector
+
+        try:
+            return self._instance_from_vector(vector)
+        except exc.FitException as error:
+            last_error = error
+
+        valid_sample_candidates = sorted(
+            (candidate for candidate in self.sample_list if candidate is not sample),
+            key=lambda candidate: (
+                float("-inf")
+                if np.isnan(candidate.log_likelihood)
+                else candidate.log_likelihood
+            ),
+            reverse=True,
+        )
+
+        for candidate in valid_sample_candidates:
+            candidate_vector = candidate.parameter_lists_for_paths(
+                self.paths if candidate.is_path_kwargs else self.names
+            )
+            try:
+                instance = self._instance_from_vector(candidate_vector)
+            except exc.FitException as error:
+                last_error = error
+                continue
+
+            logger.warning(
+                "The maximum-likelihood stored sample can no longer be "
+                "reconstructed because the model rejected it with "
+                "FitException; using the highest-likelihood valid stored "
+                "sample instead."
+            )
+            return instance
+
+        raise exc.SamplesException(
+            "None of the stored samples can be reconstructed as a valid model "
+            "instance."
+        ) from last_error
 
     @property
     def max_log_posterior_sample(self) -> Sample:

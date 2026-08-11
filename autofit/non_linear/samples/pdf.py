@@ -1,4 +1,5 @@
 import math
+import logging
 import pathlib
 import warnings
 from typing import Dict, List, Optional, Tuple, Union
@@ -6,6 +7,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 
 from autonerves import conf
+from autofit import exc
 from autonerves.output import should_output
 from autofit.mapper.model import ModelInstance
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
@@ -13,6 +15,10 @@ from autofit.non_linear.samples.sample import Sample, load_from_table
 from autofit.non_linear.samples.samples import to_instance
 from .samples import Samples
 from .summary import SamplesSummary
+
+logger = logging.getLogger(__name__)
+
+VALID_INSTANCE_MAX_ATTEMPTS = 100
 
 
 class SamplesPDF(Samples):
@@ -312,8 +318,11 @@ class SamplesPDF(Samples):
         lowers = self.values_at_lower_sigma(sigma=sigma, as_instance=False)
         return list(map(lambda upper, lower: upper - lower, uppers, lowers))
 
-    @to_instance
-    def draw_randomly_via_pdf(self) -> Union[List, ModelInstance]:
+    def draw_randomly_via_pdf(
+        self,
+        as_instance: bool = True,
+        as_dict: bool = False,
+    ) -> Union[List, Dict, ModelInstance]:
         """
         The parameter vector of an individual sample of the non-linear search drawn randomly from the PDF, returned as
         a 1D list.
@@ -322,11 +331,40 @@ class SamplesPDF(Samples):
         for non-linear searches like nested sampling).
         """
 
-        sample_index = np.random.choice(
-            a=range(len(self.sample_list)), p=self.weight_list
-        )
+        last_error = None
 
-        return self.parameter_lists[sample_index][:]
+        for attempt in range(VALID_INSTANCE_MAX_ATTEMPTS):
+            sample_index = np.random.choice(
+                a=range(len(self.sample_list)), p=self.weight_list
+            )
+            vector = self.parameter_lists[sample_index][:]
+
+            if as_dict:
+                return {
+                    ".".join(path[0]): value for path, value in zip(self.paths, vector)
+                }
+
+            if not as_instance:
+                return vector
+
+            try:
+                instance = self._instance_from_vector(vector)
+            except exc.FitException as error:
+                last_error = error
+                continue
+
+            if attempt > 0:
+                logger.warning(
+                    "A randomly drawn stored sample can no longer be "
+                    "reconstructed because the model rejected it with "
+                    "FitException; drew another stored sample instead."
+                )
+            return instance
+
+        raise exc.SamplesException(
+            "Could not draw a valid model instance from the stored PDF after "
+            f"{VALID_INSTANCE_MAX_ATTEMPTS} attempts."
+        ) from last_error
 
     def samples_drawn_randomly_via_pdf_from(self, total_draws: int = 100) -> "SamplesPDF":
         """
