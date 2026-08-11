@@ -596,6 +596,50 @@ class TestReducedModeRejectedFinalSample:
         assert len(result) == 2
         assert all(child.instance.galaxies.value >= 0.75 for child in result)
 
+    def test__test_mode_1__valid_factor_graph_children_keep_per_analysis_model(
+        self, monkeypatch
+    ):
+        """Validation must not leave child results bound to a cached global instance."""
+        monkeypatch.setenv("PYAUTO_TEST_MODE", "1")
+
+        shared_value = af.UniformPrior(lower_limit=0.0, upper_limit=1.0)
+        factor_models = [
+            af.Collection(galaxies=af.Model(_RejectsLowValue, value=shared_value))
+            for _ in range(2)
+        ]
+        factor_graph = af.FactorGraphModel(
+            *[
+                af.AnalysisFactor(
+                    prior_model=factor_model,
+                    analysis=af.m.MockAnalysis(),
+                )
+                for factor_model in factor_models
+            ]
+        )
+        model = factor_graph.global_prior_model
+        valid_samples = _TaggedSamplesPDF(
+            model=model,
+            sample_list=af.Sample.from_lists(
+                model=model,
+                parameter_lists=[[0.9]],
+                log_likelihood_list=[1.0],
+                log_prior_list=[0.0],
+                weight_list=[1.0],
+            ),
+            samples_info={"log_evidence": 1.0, "sampler_marker": "retained"},
+        )
+
+        result = _RejectedFinalSampleSearch(samples=valid_samples).fit(
+            model=model,
+            analysis=factor_graph,
+        )
+
+        assert type(result.samples) is _TaggedSamplesPDF
+        assert len(result) == 2
+        assert all(
+            child.instance.galaxies.value == pytest.approx(0.9) for child in result
+        )
+
     def test__normal_mode__fitexception_still_propagates(self, monkeypatch):
         monkeypatch.delenv("PYAUTO_TEST_MODE", raising=False)
         model, rejected_samples = _model_and_rejected_samples(_RejectsLowValue)
