@@ -202,3 +202,130 @@ def test_parallel_end_of_run_guards():
     opt._output_diagnostics()
     opt._output_diagnostics(final=True, model_approx=model_approx)
     opt._warn_sigma_collapse()
+
+
+def _scale_diagnostics(means, stds, variable="parent_sigma"):
+    """
+    An `EPDiagnostics` carrying one registered parent-scale variable
+    with the given mean/std trajectory.
+    """
+    diagnostics = EPDiagnostics()
+    diagnostics.scale_variables = {variable}
+    diagnostics.variable_rows = [
+        {"step": step, "factor": "hierarchical", "variable": variable,
+         "mean": float(mean), "std": float(std)}
+        for step, (mean, std) in enumerate(zip(means, stds))
+    ]
+    return diagnostics
+
+
+# The three states below are the measured outcomes of the PyAutoFit #1405 toy
+# (parent scale hyper-prior mean 10, truth 10): two COLLAPSE runs and the
+# RECOVER band. See PyAutoMind complete/2026/07/ep_scale_collapse_assets/.
+@pytest.mark.parametrize(
+    "final_mean, final_std",
+    [
+        (0.80, 0.11),      # shallow collapse — the std alone looks unremarkable
+        (0.0030, 1e-5),    # deep collapse
+    ],
+)
+def test_scale_collapse_flags_measured_collapses(final_mean, final_std):
+    diagnostics = _scale_diagnostics(
+        means=[10.0, 8.0, 4.0, final_mean],
+        stds=[5.0, 3.0, 1.0, final_std],
+    )
+
+    warnings_list = graph.check_sigma_collapse(diagnostics)
+
+    assert len(warnings_list) == 1
+    assert "scale-collapse" in warnings_list[0]
+    assert "parent_sigma" in warnings_list[0]
+    assert "#1405" in warnings_list[0]
+
+
+@pytest.mark.parametrize("final_mean, final_std", [(9.1, 0.9), (12.8, 2.4)])
+def test_scale_collapse_silent_on_measured_recoveries(final_mean, final_std):
+    diagnostics = _scale_diagnostics(
+        means=[10.0, 8.0, 11.0, final_mean],
+        stds=[5.0, 3.0, 2.0, final_std],
+    )
+
+    assert graph.check_sigma_collapse(diagnostics) == []
+
+
+def test_scale_collapse_needs_confidence_not_just_a_small_mean():
+    """
+    A small parent scale that is honestly uncertain is not a collapse —
+    the pathology is a small scale reported *confidently*.
+    """
+    diagnostics = _scale_diagnostics(
+        means=[10.0, 8.0, 4.0, 0.80],
+        stds=[5.0, 3.0, 1.0, 2.0],
+    )
+
+    assert graph.check_sigma_collapse(diagnostics) == []
+
+
+def test_scale_check_applies_only_to_registered_scale_variables():
+    """
+    The same trajectory on an unregistered variable must not be flagged:
+    the relative test is meaningful for a scale hyperparameter, not for
+    an arbitrary variable that happens to approach zero.
+    """
+    diagnostics = _scale_diagnostics(means=[10.0, 4.0, 0.0030], stds=[5.0, 1.0, 1e-5])
+    diagnostics.scale_variables = set()
+
+    assert graph.check_sigma_collapse(diagnostics) == []
+
+
+def test_monotone_limb_survives_unchanged_steps():
+    """
+    A variable only moves when a factor adjacent to it is updated, but a
+    snapshot is recorded for every variable on every factor update. The
+    monotone test must not be defeated by the resulting repeated rows.
+    """
+    shrinking = np.geomspace(1.0, 1e-5, num=8)
+    # Interleave each real update with two steps at which this variable
+    # did not move — the shape a real multi-factor graph produces.
+    with_repeats = [std for std in shrinking for _ in range(3)]
+
+    diagnostics = EPDiagnostics()
+    diagnostics.variable_rows = [
+        {"step": step, "factor": "f", "variable": "shrinking", "mean": 1.0,
+         "std": float(std)}
+        for step, std in enumerate(with_repeats)
+    ]
+
+    warnings_list = graph.check_sigma_collapse(diagnostics)
+
+    assert len(warnings_list) == 1
+    assert "monotonically" in warnings_list[0]
+
+
+def test_register_hierarchical_scales_finds_the_parent_sigma():
+    import autofit as af
+
+    hierarchical_factor = af.HierarchicalFactor(
+        af.GaussianPrior,
+        mean=af.GaussianPrior(mean=50.0, sigma=10.0),
+        sigma=af.GaussianPrior(mean=10.0, sigma=5.0),
+    )
+    for _ in range(3):
+        hierarchical_factor.add_drawn_variable(af.GaussianPrior(mean=50.0, sigma=10.0))
+
+    factor_graph = af.FactorGraphModel(hierarchical_factor)
+
+    diagnostics = EPDiagnostics()
+    diagnostics.register_hierarchical_scales(factor_graph.graph)
+
+    sigma_prior = dict(hierarchical_factor.prior_tuples)["sigma"]
+    assert diagnostics.scale_variables == {sigma_prior.name}
+
+
+def test_register_hierarchical_scales_tolerates_a_plain_factor_graph():
+    model_approx, _ = make_model_approx()
+
+    diagnostics = EPDiagnostics()
+    diagnostics.register_hierarchical_scales(model_approx.factor_graph)
+
+    assert diagnostics.scale_variables == set()

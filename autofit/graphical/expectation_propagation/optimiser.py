@@ -238,6 +238,7 @@ class EPOptimiser:
             
         self.ep_history = ep_history or EPHistory()
         self.diagnostics = EPDiagnostics()
+        self.diagnostics.register_hierarchical_scales(factor_graph)
 
         # Per-factor count of consecutive failed updates; see
         # `_check_consecutive_failures`. Reset at the start of every `run`.

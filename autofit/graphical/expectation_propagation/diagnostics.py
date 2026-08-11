@@ -10,10 +10,16 @@ while the fit runs and analysed after it finishes:
   writes them as machine-readable CSVs and a matplotlib evolution plot.
 - ``mean_field_summary`` — a human-readable table of a mean field,
   suitable for printing at the end of any example or script.
-- ``check_sigma_collapse`` — guards against the known pathology where
-  repeated undamped EP updates over-count shared information and every
-  sigma collapses towards zero around the starting point (rather than
-  the data); see PyAutoFit issue #1332 (F10).
+- ``check_sigma_collapse`` — guards against two collapse pathologies.
+  First, the one from PyAutoFit issue #1332 (F10): repeated undamped EP
+  updates over-count shared information and every sigma collapses
+  towards zero around the starting point (rather than the data).
+  Second, the *hierarchical parent-scale* collapse of PyAutoFit issue
+  #1405: the scale hyperparameter of a ``HierarchicalFactor``'s parent
+  distribution settles near zero with an error bar that is
+  over-confident only *relative to that mean* — reporting "no scatter"
+  as a confident answer. The two need different tests; see
+  ``check_sigma_collapse``.
 
 Outputs written to the EP output folder by ``EPOptimiser`` when paths
 are enabled:
@@ -27,11 +33,17 @@ are enabled:
 import csv
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+#: Argument names by which a parent distribution's *scale* parameter is
+#: recognised on a ``HierarchicalFactor``. ``GaussianPrior`` and
+#: ``LogGaussianPrior`` call it ``sigma``; the others are accepted so a
+#: distribution that names it differently is still covered.
+_SCALE_ARGUMENT_NAMES = frozenset({"sigma", "scale", "std", "stddev"})
 
 
 def _scalar_mean_std(message) -> Tuple[float, float]:
@@ -65,8 +77,36 @@ class EPDiagnostics:
         """
         self.factor_rows: List[dict] = []
         self.variable_rows: List[dict] = []
+        self.scale_variables: Set[str] = set()
         self._previous_mean_field = None
         self._step = 0
+
+    def register_hierarchical_scales(self, factor_graph) -> None:
+        """
+        Record which variables are hierarchical parent *scale*
+        hyperparameters, so ``check_sigma_collapse`` can apply the
+        scale-specific test to them (PyAutoFit #1405).
+
+        A ``HierarchicalFactor`` parameterises a parent distribution
+        with priors named after that distribution's arguments — e.g.
+        ``af.HierarchicalFactor(af.GaussianPrior, mean=..., sigma=...)``.
+        The scale argument is the one that collapses, so it is picked
+        out by name (``_SCALE_ARGUMENT_NAMES``).
+
+        Silently records nothing for a graph with no hierarchical
+        factors, or one that does not expose them (a plain
+        ``FactorGraph`` rather than a ``DeclarativeFactorGraph``) —
+        diagnostics must never kill the fit.
+        """
+        try:
+            distribution_models = factor_graph.hierarchical_factors
+        except AttributeError:
+            return
+
+        for distribution_model in distribution_models:
+            for name, prior in distribution_model.prior_tuples:
+                if name in _SCALE_ARGUMENT_NAMES:
+                    self.scale_variables.add(prior.name)
 
     def snapshot(self, factor, model_approx, status) -> None:
         """
@@ -210,23 +250,94 @@ def mean_field_summary(mean_field) -> str:
     return "\n".join(lines)
 
 
+def _drop_consecutive_repeats(values: np.ndarray) -> np.ndarray:
+    """
+    Collapse runs of identical consecutive values to a single entry.
+
+    ``EPDiagnostics.snapshot`` records *every* variable on *every*
+    factor update, but a factor update only moves the marginals of the
+    variables adjacent to that factor. A variable's history is
+    therefore dominated by steps at which it did not move at all, and a
+    strict ``diff < 0`` monotonicity test can essentially never be
+    satisfied in a multi-factor graph. Dropping the repeats restores
+    the test to what it was written to mean: consecutive *updates of
+    this variable* that shrank it.
+
+    The first and last values are always preserved, so magnitude
+    comparisons against them are unaffected.
+    """
+    if len(values) < 2:
+        return values
+    return values[np.insert(np.diff(values) != 0, 0, True)]
+
+
+def _flag_scale_collapse(
+    means: np.ndarray,
+    stds: np.ndarray,
+    mean_fraction: float,
+    relative_error: float,
+) -> bool:
+    """
+    Whether a hierarchical parent scale has collapsed (PyAutoFit #1405).
+
+    True when the scale's mean has fallen below ``mean_fraction`` of
+    its initial value *and* its error is small relative to that mean —
+    i.e. the fit is confidently reporting near-zero parent scatter.
+
+    A non-positive initial mean gives no baseline to collapse from, so
+    no judgement is made. A latest mean at or below zero is outside the
+    scale's support and is always flagged.
+    """
+    initial, latest = means[0], means[-1]
+
+    if not initial > 0:
+        return False
+    if latest <= 0:
+        return True
+    if latest >= mean_fraction * initial:
+        return False
+
+    return stds[-1] / latest < relative_error
+
+
 def check_sigma_collapse(
     diagnostics: EPDiagnostics,
     std_floor: float = 1e-8,
     monotone_steps: int = 5,
     shrink_factor: float = 1e-3,
+    scale_mean_fraction: float = 0.2,
+    scale_relative_error: float = 0.5,
 ) -> List[str]:
     """
-    Detect the EP sigma-collapse pathology (PyAutoFit #1332, F10).
+    Detect the two EP collapse pathologies.
 
-    Repeated undamped EP updates can over-count shared-variable
-    information: every std shrinks monotonically towards zero around
-    the *starting* means, while the KL convergence criterion never
-    triggers. This check flags a variable when either:
+    **Sigma collapse (PyAutoFit #1332, F10).** Repeated undamped EP
+    updates can over-count shared-variable information: every std
+    shrinks monotonically towards zero around the *starting* means,
+    while the KL convergence criterion never triggers. This check flags
+    a variable when either:
 
     - its latest std is below ``std_floor``, or
-    - its std has shrunk monotonically for the last ``monotone_steps``
-      updates *and* by more than a factor ``1 / shrink_factor`` overall.
+    - its std has shrunk monotonically over its last ``monotone_steps``
+      *updates* (steps at which it did not move are not counted — see
+      ``_drop_consecutive_repeats``) *and* by more than a factor
+      ``1 / shrink_factor`` overall.
+
+    **Hierarchical parent-scale collapse (PyAutoFit #1405).** Both
+    tests above are *absolute* and variable-agnostic, because #1332 is
+    a pathology in which every std goes to zero. The parent scale of a
+    ``HierarchicalFactor`` collapses in a different shape: its *mean*
+    goes to ~0 while its std stays moderate in absolute terms and is
+    over-confident only *relative to that mean* — a confident claim of
+    "no scatter". Measured on the #1405 toy, the collapsed runs sit at
+    mean 0.80 (std 0.11) and mean 0.0030 against a parent scale
+    hyper-prior of mean 10, where healthy runs recover 9.1-12.8; an
+    absolute std test cannot separate those, and does not fire on
+    either. So for variables registered by
+    ``EPDiagnostics.register_hierarchical_scales`` a variable is
+    additionally flagged when its mean has fallen below
+    ``scale_mean_fraction`` of its initial value *and* its relative
+    error ``std / |mean|`` is below ``scale_relative_error``.
 
     Returns
     -------
@@ -235,11 +346,34 @@ def check_sigma_collapse(
     results text at the end of a run.
     """
     warnings_list = []
+    scale_variables = getattr(diagnostics, "scale_variables", set())
 
     for name, rows in diagnostics.variable_history.items():
         stds = np.array([std for _, _, std in rows], dtype=float)
+        means = np.array([mean for _, mean, _ in rows], dtype=float)
         if len(stds) == 0:
             continue
+
+        if name in scale_variables and _flag_scale_collapse(
+            means, stds, scale_mean_fraction, scale_relative_error
+        ):
+            relative_error = (
+                stds[-1] / abs(means[-1]) if means[-1] != 0 else float("inf")
+            )
+            warnings_list.append(
+                f"scale-collapse: hierarchical parent scale '{name}' has "
+                f"collapsed to {means[-1]:.3g} "
+                f"({means[-1] / means[0]:.1%} of its initial {means[0]:.3g}) "
+                f"with a relative error of {relative_error:.2g} — the fit is "
+                f"reporting near-zero parent scatter as a confident answer "
+                f"(see PyAutoFit #1405). This is a known EP instability for "
+                f"scale hyperparameters and the value should NOT be trusted; "
+                f"cross-check the parent scatter against a joint sampler fit "
+                f"of the same graph."
+            )
+            continue
+
+        stds = _drop_consecutive_repeats(stds)
 
         if stds[-1] < std_floor:
             warnings_list.append(
@@ -258,7 +392,7 @@ def check_sigma_collapse(
             if np.all(np.diff(tail) < 0) and stds[-1] < shrink_factor * stds[0]:
                 warnings_list.append(
                     f"sigma-collapse: variable '{name}' std has shrunk "
-                    f"monotonically over the last {monotone_steps} updates to "
+                    f"monotonically over its last {monotone_steps} updates to "
                     f"{stds[-1]:.3g} ({stds[-1] / stds[0]:.1e} of its initial "
                     f"value) — possible information over-counting (PyAutoFit "
                     f"#1332 F10)."
