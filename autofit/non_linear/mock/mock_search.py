@@ -3,7 +3,7 @@ from typing import Optional, Tuple
 from autofit import exc
 from autofit.graphical import FactorApproximation
 from autofit.graphical.utils import Status
-from autofit.non_linear.mock.mock_samples import MockSamples
+from autofit.non_linear.mock.mock_samples import MockSamples, prior_median_kwargs
 from autofit.non_linear.search.abstract_search import NonLinearSearch
 from autofit.non_linear.mock.mock_result import MockResult
 from autofit.non_linear.mock.mock_samples_summary import MockSamplesSummary
@@ -25,7 +25,7 @@ def samples_with_log_likelihood_list(log_likelihood_list, kwargs):
 
 
 def _make_samples(model):
-    return {path: prior.value_for(0.5) for path, prior in model.path_priors_tuples}
+    return prior_median_kwargs(model)
 
 
 class MockSearch(NonLinearSearch):
