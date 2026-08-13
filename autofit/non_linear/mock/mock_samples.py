@@ -8,6 +8,22 @@ def samples_with_log_likelihood_list(log_likelihood_list):
     ]
 
 
+def prior_median_kwargs(model):
+    """
+    Placeholder sample values for a model, taken as the median of each prior.
+
+    A blanket value like ``1.0`` is invalid for any parameter whose prior
+    constrains it, so filling a mock sample with one builds an unphysical
+    instance. For example an elliptical profile's ``ell_comps`` must have a
+    magnitude below 1, and ``(1.0, 1.0)`` raises on construction. Prior medians
+    are always in range, so they are safe for every model.
+    """
+    if not model:
+        return {}
+
+    return {path: prior.value_for(0.5) for path, prior in model.path_priors_tuples}
+
+
 class MockSamples(SamplesPDF):
     def __init__(
         self,
@@ -40,7 +56,7 @@ class MockSamples(SamplesPDF):
                 log_likelihood=log_likelihood,
                 log_prior=0.0,
                 weight=0.0,
-                kwargs={path: 1.0 for path in self.model.paths} if self.model else {},
+                kwargs=prior_median_kwargs(self.model),
             )
             for log_likelihood in range(3)
         ]

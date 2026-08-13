@@ -1,4 +1,5 @@
 from autofit.mapper.prior_model.collection import Collection
+from autofit.non_linear.mock.mock_samples import prior_median_kwargs
 from autofit.non_linear.samples.sample import Sample
 from autofit.non_linear.samples.summary import SamplesSummary
 
@@ -23,7 +24,7 @@ class MockSamplesSummary(SamplesSummary):
 
         self._max_log_likelihood_instance = max_log_likelihood_instance
         self._prior_means = prior_means
-        self._kwargs = {path: 1.0 for path in self.model.paths} if self.model else {}
+        self._kwargs = prior_median_kwargs(self.model)
 
     @property
     def max_log_likelihood_sample(self):
