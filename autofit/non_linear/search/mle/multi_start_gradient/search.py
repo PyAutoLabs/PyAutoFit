@@ -216,6 +216,45 @@ class AbstractMultiStartGradient(AbstractMLE):
         return bool(converged) or total_steps >= self.n_steps
 
     @staticmethod
+    def _nan_lane_counts(foms, grad_finite):
+        """
+        Split one step's non-finite lanes into the two failure modes, and return
+        the alive mask the caller needs anyway.
+
+        Two distinct things go wrong per lane, and conflating them hides the
+        second:
+
+        - **value-NaN** — the likelihood is *undefined* at this point. This is
+          the lane death ``resurrect`` already triggers on.
+        - **gradient-NaN** — the likelihood is defined but *not differentiable*.
+          Nothing detects this today: ``optax.apply_if_finite`` zeroes the
+          update, so the lane silently freezes in place while still counting as
+          alive. A frozen lane looks exactly like a converged one in the
+          figure-of-merit trace.
+
+        The two counts are **disjoint by construction**: a lane that is
+        non-finite in both is one value-NaN, not one of each. A dead lane's
+        gradient is almost always non-finite too, so counting them independently
+        would double-report the ordinary case and drown the interesting one.
+
+        Returns ``(alive, n_value_nan, n_grad_nan)``. ``alive`` is returned
+        rather than recomputed by the caller so the finiteness test on ``foms``
+        happens once per step.
+
+        Pure NumPy and free of search state so it can be tested directly;
+        ``_fit`` itself needs jax + optax + a JAX-traceable ``Analysis`` and
+        cannot be driven from the NumPy-only library suite (same reasoning as
+        ``_is_final_boundary`` above).
+        """
+        alive = np.isfinite(np.asarray(foms))
+        grad_finite = np.asarray(grad_finite).astype(bool)
+
+        n_value_nan = int(np.count_nonzero(~alive))
+        n_grad_nan = int(np.count_nonzero(alive & ~grad_finite))
+
+        return alive, n_value_nan, n_grad_nan
+
+    @staticmethod
     def _stop_reason_on_resume(stop_reason):
         """
         The ``stop_reason`` a resumed run should start from, given the one
@@ -503,7 +542,26 @@ class AbstractMultiStartGradient(AbstractMLE):
         # numerically identical to the vmap; `batch_size` never changes
         # results, it only bounds memory and compile.
         _value_and_grad = jax.value_and_grad(fitness.call)
-        _vmapped = jax.jit(jax.vmap(_value_and_grad))
+
+        # Per-start gradient finiteness is reduced *inside* the jitted call, as a
+        # third output, rather than by a separate op on its result. The reduction
+        # itself is trivially cheap either way; what costs is dispatch. Fused,
+        # XLA folds the ``isfinite``/``all`` into the backward pass and the step
+        # returns one extra ``(n_starts,)`` bool alongside the foms it already
+        # syncs on — no extra kernel launch, no extra device->host round-trip.
+        # Reducing eagerly outside the jit instead measured ~+3% per step against
+        # a ~1.5% noise floor (worse than pulling the whole ``(n_starts, ndim)``
+        # gradient to host, which is what it was meant to avoid); fused it is
+        # +0.05%, below noise. See
+        # ``autolens_profiling/scripts/misc/searches/multi_start_nan_accounting_overhead.py``.
+        #
+        # ``_value_and_grad`` is deliberately left as a 2-tuple: the single-point
+        # initial-draw path below jits it directly and unpacks two values.
+        def _value_and_grad_finite(vector):
+            fom, grad = _value_and_grad(vector)
+            return fom, grad, jnp.all(jnp.isfinite(grad))
+
+        _vmapped = jax.jit(jax.vmap(_value_and_grad_finite))
 
         if self.batch_size is None:
             self._warn_if_unbatched_exceeds_memory(model=model, analysis=analysis)
@@ -514,21 +572,25 @@ class AbstractMultiStartGradient(AbstractMLE):
             def batched_value_and_grad(params):
                 foms_chunks = []
                 grads_chunks = []
+                grad_finite_chunks = []
                 for lo, hi, pad in _chunk_slices(params.shape[0], batch_size):
                     chunk = params[lo:hi]
                     if pad:
                         chunk = jnp.concatenate(
                             [chunk, jnp.tile(chunk[-1:], (pad, 1))]
                         )
-                    foms, grads = _vmapped(chunk)
+                    foms, grads, grad_finite = _vmapped(chunk)
                     if pad:
                         foms = foms[:-pad]
                         grads = grads[:-pad]
+                        grad_finite = grad_finite[:-pad]
                     foms_chunks.append(foms)
                     grads_chunks.append(grads)
+                    grad_finite_chunks.append(grad_finite)
                 return (
                     jnp.concatenate(foms_chunks),
                     jnp.concatenate(grads_chunks),
+                    jnp.concatenate(grad_finite_chunks),
                 )
 
         # The optax rule (resolved from optax / optax.contrib), guarded by
@@ -547,6 +609,14 @@ class AbstractMultiStartGradient(AbstractMLE):
             fom_history = list(search_internal["fom_history"])
             total_steps = int(search_internal["total_steps"])
             n_resurrections = int(search_internal.get("n_resurrections", 0))
+            # ``.get`` with a default: a ``search_internal`` written before the
+            # NaN accounting existed has neither key, and a resumed run must not
+            # KeyError on it. The restored totals are lifetime counts, so a
+            # resumed run continues accumulating rather than restarting at zero.
+            n_value_nan_lane_steps = int(
+                search_internal.get("n_value_nan_lane_steps", 0)
+            )
+            n_grad_nan_lane_steps = int(search_internal.get("n_grad_nan_lane_steps", 0))
             stop_reason = search_internal.get("stop_reason", None)
 
             self.logger.info(
@@ -573,6 +643,8 @@ class AbstractMultiStartGradient(AbstractMLE):
             fom_history = []
             total_steps = 0
             n_resurrections = 0
+            n_value_nan_lane_steps = 0
+            n_grad_nan_lane_steps = 0
             stop_reason = None
 
             self.logger.info(
@@ -622,9 +694,22 @@ class AbstractMultiStartGradient(AbstractMLE):
                         self.logger.info(self._compile_message(batched=True))
                     awaiting_compile = False
 
-                foms, grads = batched_value_and_grad(params)
+                foms, grads, grad_finite = batched_value_and_grad(params)
 
-                alive = np.isfinite(np.asarray(foms))
+                # Measurement only — this accounting never gates a redraw. A
+                # gradient-NaN lane is *not* resurrected here: doing so would
+                # change search behaviour and shift every existing benchmark,
+                # so the policy question waits on what these counts show. The
+                # counters are accumulated unconditionally, outside the
+                # ``self.resurrect`` guard below, because with ``resurrect``
+                # off ``n_resurrections`` stays zero and this is then the only
+                # record that lanes died at all.
+                alive, n_value_nan, n_grad_nan = self._nan_lane_counts(
+                    foms=foms, grad_finite=grad_finite
+                )
+                n_value_nan_lane_steps += n_value_nan
+                n_grad_nan_lane_steps += n_grad_nan
+
                 foms_np = np.where(alive, np.asarray(foms), np.inf)
                 best_index = int(np.argmin(foms_np))
                 if foms_np[best_index] < best_fom:
@@ -705,6 +790,8 @@ class AbstractMultiStartGradient(AbstractMLE):
                 "fom_history": np.asarray(fom_history),
                 "total_steps": total_steps,
                 "n_resurrections": n_resurrections,
+                "n_value_nan_lane_steps": n_value_nan_lane_steps,
+                "n_grad_nan_lane_steps": n_grad_nan_lane_steps,
                 "stop_reason": stop_reason,
             }
             self.paths.save_search_internal(obj=search_internal)
@@ -942,6 +1029,17 @@ class AbstractMultiStartGradient(AbstractMLE):
             "max_consecutive_nan": self.max_consecutive_nan,
             "resurrect": self.resurrect,
             "n_resurrections": int(search_internal.get("n_resurrections", 0)),
+            # Per-step non-finite accounting, split by failure mode. Value-NaN
+            # is an undefined likelihood; gradient-NaN is a defined but
+            # non-differentiable one, counted only for lanes still alive by
+            # value so the two are disjoint. ``.get`` for the same
+            # legacy-``search_internal`` reason as ``n_resurrections``.
+            "n_value_nan_lane_steps": int(
+                search_internal.get("n_value_nan_lane_steps", 0)
+            ),
+            "n_grad_nan_lane_steps": int(
+                search_internal.get("n_grad_nan_lane_steps", 0)
+            ),
             # Auto-convergence outcome: whether the run stopped on the plateau
             # check ("converged") or exhausted the ``n_steps`` ceiling
             # ("max_steps"), the settings that produced it, and the global-best

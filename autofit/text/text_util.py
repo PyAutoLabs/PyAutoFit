@@ -117,6 +117,42 @@ def search_summary_from_samples(samples) -> [str]:
     if hasattr(samples, "total_accepted_samples"):
         line.append(f"Total Accepted Samples = {samples.total_accepted_samples}\n")
         line.append(f"Acceptance Ratio = {samples.acceptance_ratio}\n")
+
+    # Per-step non-finite accounting from the gradient searches
+    # (``MultiStartGradient``). Guarded on the key rather than the search type,
+    # following the duck-typed MCMC block above: this function is on every
+    # search's summary path (``paths/abstract.py`` -> ``search_summary_to_file``),
+    # so a search whose ``samples_info`` lacks these keys — Nautilus, which is
+    # jit-only and has no gradient to be non-finite — must emit nothing at all.
+    #
+    # Rates, not just counts: raw totals are not comparable across runs, since
+    # they scale with the lane-step budget. 797 on a 16x3000 run and 10 on an
+    # 8x300 run differ 80x raw but only ~2x per lane-step.
+    #
+    # Named as the neutral facts they are. These are counts of undefined and
+    # non-differentiable likelihood evaluations; they are deliberately NOT
+    # presented as a smoothness or sampler-difficulty metric, because the
+    # correlation with (for example) HMC divergence rates is unvalidated.
+    samples_info = getattr(samples, "samples_info", None) or {}
+
+    if "n_value_nan_lane_steps" in samples_info:
+        n_value_nan = int(samples_info.get("n_value_nan_lane_steps", 0))
+        n_grad_nan = int(samples_info.get("n_grad_nan_lane_steps", 0))
+
+        line.append(f"Resurrections = {int(samples_info.get('n_resurrections', 0))}\n")
+        line.append(f"Value-NaN Lane-Steps = {n_value_nan}\n")
+        line.append(f"Gradient-NaN Lane-Steps = {n_grad_nan}\n")
+
+        # ``n_starts * total_steps`` is the number of lane-steps actually taken.
+        # A search that died before its first step has a zero denominator, so
+        # the rates are omitted rather than reported as a division error.
+        lane_steps = int(samples_info.get("n_starts", 0)) * int(
+            samples_info.get("total_steps", 0)
+        )
+        if lane_steps > 0:
+            line.append(f"Value-NaN Lane-Step Rate = {n_value_nan / lane_steps}\n")
+            line.append(f"Gradient-NaN Lane-Step Rate = {n_grad_nan / lane_steps}\n")
+
     if samples.time is not None:
         line.append(f"Time To Run = {dt.timedelta(seconds=float(samples.time))}\n")
         line.append(
