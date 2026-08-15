@@ -277,6 +277,45 @@ class Fitness:
 
         return figure_of_merit
 
+    def log_likelihood_from(self, figure_of_merit, parameters):
+        """
+        Invert the figure-of-merit convention to recover the log likelihood.
+
+        `call` maps a log likelihood to the figure of merit (FoM) the search consumes: it adds the summed log prior
+        when `fom_is_log_likelihood` is `False` (giving a log posterior) and multiplies by `-2.0` when
+        `convert_to_chi_squared` is `True` (giving a chi-squared). This method applies the exact inverse, so any
+        code holding a FoM can get back the log likelihood on the scale that `Samples` persist.
+
+        Both callers need that inverse. `call_wrap` uses it for the quick-update / history bookkeeping, which is
+        defined on log likelihoods. `check_log_likelihood` uses it to compare a freshly computed value against the
+        log likelihood stored in a previous run's samples summary; without it, that check compares a stored log
+        likelihood against a value in the search's own FoM convention and every resume of a non-log-likelihood
+        search (e.g. `MultiStartAdam`, `LBFGS`, `Emcee`) fails its sanity check on an unchanged likelihood
+        function.
+
+        Parameters
+        ----------
+        figure_of_merit
+            The figure of merit returned by `call`, in this fitness's own convention.
+        parameters
+            The parameter vector the figure of merit was computed for, needed to evaluate the log priors that
+            `fom_is_log_likelihood=False` folded in.
+
+        Returns
+        -------
+        The log likelihood, on the same scale as `Sample.log_likelihood`.
+        """
+        if self.convert_to_chi_squared:
+            log_likelihood = -0.5 * figure_of_merit
+        else:
+            log_likelihood = figure_of_merit
+
+        if not self.fom_is_log_likelihood:
+            log_prior_list = np.array(self.model.log_prior_list_from_vector(vector=parameters, xp=np))
+            log_likelihood = log_likelihood - np.sum(log_prior_list)
+
+        return log_likelihood
+
     def call_wrap(self, parameters):
         """
         Wrapper around a JAX-jitted likelihood function that optionally stores
@@ -313,14 +352,9 @@ class Fitness:
         if self.use_jax_jit:
             figure_of_merit = float(figure_of_merit)
 
-        if self.convert_to_chi_squared:
-            log_likelihood = -0.5 * figure_of_merit
-        else:
-            log_likelihood = figure_of_merit
-
-        if not self.fom_is_log_likelihood:
-            log_prior_list = np.array(self.model.log_prior_list_from_vector(vector=parameters, xp=np))
-            log_likelihood -= np.sum(log_prior_list)
+        log_likelihood = self.log_likelihood_from(
+            figure_of_merit=figure_of_merit, parameters=parameters
+        )
 
         self.manage_quick_update(parameters=parameters, log_likelihood=log_likelihood)
 
@@ -608,16 +642,27 @@ class Fitness:
 
         parameters = max_log_likelihood_sample.parameter_lists_for_model(model=self.model)
 
-        log_likelihood_new = fitness(parameters=parameters)
+        # `fitness(...)` returns the figure of merit in this search's own convention, which is only the log
+        # likelihood when `fom_is_log_likelihood=True` and `convert_to_chi_squared=False`. The stored value is
+        # always a log likelihood (`Sample.log_likelihood`), so the fresh value is converted back onto that scale
+        # before comparison -- otherwise every resume of a log-posterior / chi-squared search fails this check on
+        # an unchanged likelihood function.
+        log_likelihood_new = self.log_likelihood_from(
+            figure_of_merit=fitness(parameters=parameters), parameters=parameters
+        )
 
         if not np.isclose(log_likelihood_old, log_likelihood_new):
             raise exc.SearchException(
                 f"""
-                Figure of merit sanity check failed. 
+                Log likelihood sanity check failed.
 
                 This means that the existing results of a model fit used a different
                 likelihood function compared to the one implemented now.
-                Old Figure of Merit = {log_likelihood_old}
-                New Figure of Merit = {log_likelihood_new}
+
+                Both values below are log likelihoods, converted out of this search's
+                figure-of-merit convention, so they are directly comparable.
+
+                Old Log Likelihood = {log_likelihood_old}
+                New Log Likelihood = {log_likelihood_new}
                 """
             )
