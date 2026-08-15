@@ -15,6 +15,10 @@ from autofit.mapper.prior.constant import Constant
 from autofit.mapper.prior.deferred import DeferredInstance
 from autofit.mapper.prior.tuple_prior import TuplePrior
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
+from autofit.mapper.prior_model.constraint import (
+    MODEL_CONSTRAINT,
+    declares_model_constraint,
+)
 from autofit.mapper.prior_model.util import gather_namespaces
 from autofit.tools.namer import namer
 
@@ -30,6 +34,17 @@ class Model(AbstractPriorModel):
     @property
     def name(self):
         return self.cls.__name__
+
+    @property
+    def has_model_constraint(self) -> bool:
+        """
+        Whether this component's class declares a model constraint.
+
+        Resolved from ``cls`` rather than cached on the instance, so a model
+        rebuilt or deserialised without going through ``__init__`` still reports
+        correctly.
+        """
+        return declares_model_constraint(self.cls)
 
     def __str__(self):
         prior_string = ", ".join(map(str, self.prior_tuples))
@@ -205,6 +220,17 @@ class Model(AbstractPriorModel):
         for key, value in kwargs.items():
             if not hasattr(self, key):
                 setattr(self, key, self._convert_value(value))
+
+        # Surface a class-declared model constraint at composition time, so a
+        # malformed declaration fails where the model is built rather than deep
+        # inside a jitted likelihood. Nothing is stored on the instance: the
+        # `__setattr__` above routes underscore-containing names into tuple
+        # priors, so the authoritative lookup stays on `cls`.
+        if MODEL_CONSTRAINT in vars(cls) and not declares_model_constraint(cls):
+            raise AssertionError(
+                f"{cls.__name__}.{MODEL_CONSTRAINT} must be callable; got "
+                f"{vars(cls)[MODEL_CONSTRAINT]!r}"
+            )
 
         # try:
         #     # noinspection PyTypeChecker

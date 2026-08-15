@@ -255,6 +255,43 @@ class AbstractMultiStartGradient(AbstractMLE):
         return alive, n_value_nan, n_grad_nan
 
     @staticmethod
+    def _constrained_lane_count(alive, grad_finite, constraint_violation):
+        """
+        Count the lanes sitting outside a declared model constraint.
+
+        This is the third failure mode, disjoint from the two above and invisible
+        to both. A lane can walk into a saturating region of the model — the
+        ``ell_comps`` magnitude clamp is the reference case — where the
+        likelihood is finite and the gradient is finite but carries **no
+        component along the saturated direction**. There is no restoring force,
+        so the lane can never leave, and because its figure of merit is finite
+        and flat it looks exactly like a converged one.
+
+        Detecting this by inspecting the gradient does not work. The clamp kills
+        only the radial derivative; the angle stays differentiable, so in general
+        position both ``ell_comps`` components carry a large non-zero gradient
+        while their radial projection is zero only to floating-point residue. A
+        component-wise ``== 0`` test finds nothing. The detector therefore reads
+        the model's own declared constraint (see
+        :mod:`autofit.mapper.prior_model.constraint`), which states the valid
+        region exactly rather than inferring it from the gradient.
+
+        Disjoint by construction, on the same "one lane, one bucket" rule as
+        :meth:`_nan_lane_counts`: a lane already counted as value-NaN or
+        gradient-NaN is not counted here as well.
+
+        Measurement only — this never gates a redraw and never changes stepping,
+        exactly like the gradient-NaN count above.
+
+        Pure NumPy and free of search state so it can be tested directly; ``_fit``
+        needs jax + optax + a JAX-traceable ``Analysis`` and cannot be driven from
+        the NumPy-only library suite.
+        """
+        violation = np.asarray(constraint_violation)
+        eligible = np.asarray(alive) & np.asarray(grad_finite).astype(bool)
+        return int(np.count_nonzero(eligible & (violation > 0.0)))
+
+    @staticmethod
     def _stop_reason_on_resume(stop_reason):
         """
         The ``stop_reason`` a resumed run should start from, given the one
@@ -334,6 +371,7 @@ class AbstractMultiStartGradient(AbstractMLE):
         best_fom: float,
         previous_fom: Optional[float],
         n_alive: int,
+        n_constrained: int = 0,
         estim_lr=None,
     ) -> str:
         """
@@ -364,6 +402,11 @@ class AbstractMultiStartGradient(AbstractMLE):
         n_alive
             Starts whose objective is currently finite, against ``n_starts`` —
             the population-health signal that a falling best-fom alone hides.
+        n_constrained
+            Starts currently outside a declared model constraint. Omitted when
+            zero, so the line is unchanged for models declaring no constraint.
+            These starts are counted in ``n_alive`` as well: they are finite and
+            differentiable, which is exactly why they are otherwise invisible.
         estim_lr
             Per-start self-estimated step scale, for the learning-rate-free rules
             that carry one (Prodigy's ``d``). ``None`` for the fixed-rate Adam
@@ -383,6 +426,9 @@ class AbstractMultiStartGradient(AbstractMLE):
             parts.append("best log_post — (no finite basin yet)")
 
         parts.append(f"alive {n_alive}/{self.n_starts}")
+
+        if n_constrained:
+            parts.append(f"constrained {n_constrained}/{self.n_starts}")
 
         if estim_lr is not None:
             lr = np.asarray(estim_lr, dtype=float)
@@ -557,9 +603,23 @@ class AbstractMultiStartGradient(AbstractMLE):
         #
         # ``_value_and_grad`` is deliberately left as a 2-tuple: the single-point
         # initial-draw path below jits it directly and unpacks two values.
+        # The declared model constraint rides the same fused call, for the same
+        # reason and at the same class of cost: it is a fixed handful of ops on
+        # the parameter vector (independent of likelihood cost) returning one
+        # more ``(n_starts,)`` array on a device->host sync that already happens.
+        # Nothing flows *up* through the likelihood — the constraint is a pure
+        # function of the vector, so it is evaluated beside
+        # ``fitness.call``, which is untouched.
+        has_constraint = bool(model.constrained_model_tuples())
+
         def _value_and_grad_finite(vector):
             fom, grad = _value_and_grad(vector)
-            return fom, grad, jnp.all(jnp.isfinite(grad))
+            violation = (
+                model.model_constraint_from_vector(vector, xp=jnp)
+                if has_constraint
+                else jnp.asarray(0.0)
+            )
+            return fom, grad, jnp.all(jnp.isfinite(grad)), violation
 
         _vmapped = jax.jit(jax.vmap(_value_and_grad_finite))
 
@@ -573,24 +633,28 @@ class AbstractMultiStartGradient(AbstractMLE):
                 foms_chunks = []
                 grads_chunks = []
                 grad_finite_chunks = []
+                violation_chunks = []
                 for lo, hi, pad in _chunk_slices(params.shape[0], batch_size):
                     chunk = params[lo:hi]
                     if pad:
                         chunk = jnp.concatenate(
                             [chunk, jnp.tile(chunk[-1:], (pad, 1))]
                         )
-                    foms, grads, grad_finite = _vmapped(chunk)
+                    foms, grads, grad_finite, violation = _vmapped(chunk)
                     if pad:
                         foms = foms[:-pad]
                         grads = grads[:-pad]
                         grad_finite = grad_finite[:-pad]
+                        violation = violation[:-pad]
                     foms_chunks.append(foms)
                     grads_chunks.append(grads)
                     grad_finite_chunks.append(grad_finite)
+                    violation_chunks.append(violation)
                 return (
                     jnp.concatenate(foms_chunks),
                     jnp.concatenate(grads_chunks),
                     jnp.concatenate(grad_finite_chunks),
+                    jnp.concatenate(violation_chunks),
                 )
 
         # The optax rule (resolved from optax / optax.contrib), guarded by
@@ -617,6 +681,9 @@ class AbstractMultiStartGradient(AbstractMLE):
                 search_internal.get("n_value_nan_lane_steps", 0)
             )
             n_grad_nan_lane_steps = int(search_internal.get("n_grad_nan_lane_steps", 0))
+            n_constrained_lane_steps = int(
+                search_internal.get("n_constrained_lane_steps", 0)
+            )
             stop_reason = search_internal.get("stop_reason", None)
 
             self.logger.info(
@@ -645,6 +712,7 @@ class AbstractMultiStartGradient(AbstractMLE):
             n_resurrections = 0
             n_value_nan_lane_steps = 0
             n_grad_nan_lane_steps = 0
+            n_constrained_lane_steps = 0
             stop_reason = None
 
             self.logger.info(
@@ -694,7 +762,7 @@ class AbstractMultiStartGradient(AbstractMLE):
                         self.logger.info(self._compile_message(batched=True))
                     awaiting_compile = False
 
-                foms, grads, grad_finite = batched_value_and_grad(params)
+                foms, grads, grad_finite, violation = batched_value_and_grad(params)
 
                 # Measurement only — this accounting never gates a redraw. A
                 # gradient-NaN lane is *not* resurrected here: doing so would
@@ -709,6 +777,12 @@ class AbstractMultiStartGradient(AbstractMLE):
                 )
                 n_value_nan_lane_steps += n_value_nan
                 n_grad_nan_lane_steps += n_grad_nan
+                n_constrained = self._constrained_lane_count(
+                    alive=alive,
+                    grad_finite=grad_finite,
+                    constraint_violation=violation,
+                )
+                n_constrained_lane_steps += n_constrained
 
                 foms_np = np.where(alive, np.asarray(foms), np.inf)
                 best_index = int(np.argmin(foms_np))
@@ -769,6 +843,7 @@ class AbstractMultiStartGradient(AbstractMLE):
                             best_fom=best_fom,
                             previous_fom=previous_logged_fom,
                             n_alive=int(alive.sum()),
+                            n_constrained=n_constrained,
                             estim_lr=estim_lr,
                         )
                     )
@@ -792,6 +867,7 @@ class AbstractMultiStartGradient(AbstractMLE):
                 "n_resurrections": n_resurrections,
                 "n_value_nan_lane_steps": n_value_nan_lane_steps,
                 "n_grad_nan_lane_steps": n_grad_nan_lane_steps,
+                "n_constrained_lane_steps": n_constrained_lane_steps,
                 "stop_reason": stop_reason,
             }
             self.paths.save_search_internal(obj=search_internal)
@@ -1036,6 +1112,9 @@ class AbstractMultiStartGradient(AbstractMLE):
             # legacy-``search_internal`` reason as ``n_resurrections``.
             "n_value_nan_lane_steps": int(
                 search_internal.get("n_value_nan_lane_steps", 0)
+            ),
+            "n_constrained_lane_steps": int(
+                search_internal.get("n_constrained_lane_steps", 0)
             ),
             "n_grad_nan_lane_steps": int(
                 search_internal.get("n_grad_nan_lane_steps", 0)

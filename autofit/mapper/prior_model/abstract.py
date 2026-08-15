@@ -833,6 +833,82 @@ class AbstractPriorModel(AbstractModel):
             xp=xp
         )
 
+    def constrained_model_tuples(self):
+        """
+        Every component in this model whose class declares a model constraint.
+
+        Returns
+        -------
+        [(path, model)]
+            Path/model pairs, including this model itself when it declares one.
+        """
+        from autofit.mapper.prior_model.prior_model import Model
+
+        tuples = [
+            (path, model)
+            for path, model in self.attribute_tuples_with_type(
+                Model, ignore_children=False
+            )
+            if model.has_model_constraint
+        ]
+        if isinstance(self, Model) and self.has_model_constraint:
+            tuples = [(("",), self)] + tuples
+        return tuples
+
+    def model_constraint_from_vector(self, vector, xp=np):
+        """
+        The largest constraint violation any component reports for this vector.
+
+        Zero means every declared constraint is satisfied. The value is traced,
+        so this composes with ``jit``, ``vmap`` and ``grad`` — which is the whole
+        point, since the exception-based path (:meth:`add_assertion`,
+        ``validate_ell_comps``) cannot run inside a trace at all. See
+        :mod:`autofit.mapper.prior_model.constraint`.
+
+        Components are instantiated individually rather than by building the
+        whole model, so a model declaring no constraints costs nothing.
+
+        Note that on the NumPy path a component's own ``__init__`` validation may
+        raise before its constraint is ever evaluated — that is the existing
+        concrete-scalar guard behaviour and is deliberately not suppressed here.
+        This method exists for the traced path, where those guards return early.
+
+        Parameters
+        ----------
+        vector
+            A physical parameter vector, as passed to
+            :meth:`instance_from_vector`.
+        xp
+            The array module, ``numpy`` or ``jax.numpy``.
+
+        Returns
+        -------
+        The maximum violation measure across all constrained components.
+        """
+        from autofit.mapper.prior_model.constraint import violation_for_instance
+
+        constrained = self.constrained_model_tuples()
+        if not constrained:
+            return xp.asarray(0.0)
+
+        arguments = dict(
+            map(
+                lambda prior_tuple, physical_unit: (prior_tuple.prior, physical_unit),
+                self.prior_tuples_ordered_by_id,
+                vector,
+            )
+        )
+
+        violation = xp.asarray(0.0)
+        for _, model in constrained:
+            instance = model.instance_for_arguments(
+                arguments,
+                ignore_assertions=True,
+                xp=xp,
+            )
+            violation = xp.maximum(violation, violation_for_instance(instance, xp=xp))
+        return violation
+
     def has(self, cls: Union[Type, Tuple[Type, ...]]) -> bool:
         """
         Parameters
