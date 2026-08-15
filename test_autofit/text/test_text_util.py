@@ -101,3 +101,115 @@ def test__search_summary_to_file(model):
     assert lines[4] == "Time Per Sample (seconds) = 0.1\n"
     assert lines[5] == "Log Likelihood Function Evaluation Time (seconds) = 1.0\n"
     results.close()
+
+
+def _gradient_samples(model, samples_info):
+    parameters = [[1.0, 2.0], [1.2, 2.2]]
+    log_likelihood_list = [1.0, 0.0]
+
+    return af.m.MockSamples(
+        model=model,
+        sample_list=af.Sample.from_lists(
+            parameter_lists=parameters,
+            log_likelihood_list=log_likelihood_list,
+            log_prior_list=[0.0, 0.0],
+            weight_list=log_likelihood_list,
+            model=model,
+        ),
+        samples_info=samples_info,
+    )
+
+
+def test__search_summary__nan_lane_step_counters(model):
+    """
+    The gradient searches report both non-finite failure modes, plus rates
+    normalised by lane-steps (``n_starts * total_steps``) -- raw counts are not
+    comparable between runs of different size.
+    """
+    samples = _gradient_samples(
+        model=model,
+        samples_info={
+            "total_samples": 10,
+            "time": None,
+            "n_starts": 8,
+            "total_steps": 100,
+            "n_resurrections": 40,
+            "n_value_nan_lane_steps": 40,
+            "n_grad_nan_lane_steps": 8,
+        },
+    )
+
+    summary = "".join(text_util.search_summary_from_samples(samples=samples))
+
+    assert "Resurrections = 40\n" in summary
+    assert "Value-NaN Lane-Steps = 40\n" in summary
+    assert "Gradient-NaN Lane-Steps = 8\n" in summary
+
+    # 40 / (8 * 100) and 8 / (8 * 100).
+    assert "Value-NaN Lane-Step Rate = 0.05\n" in summary
+    assert "Gradient-NaN Lane-Step Rate = 0.01\n" in summary
+
+
+def test__search_summary__nan_counters_absent_for_other_searches(model):
+    """
+    ``search_summary_from_samples`` is on EVERY search's summary path, so a
+    search without the counters -- Nautilus, which is jit-only and has no
+    gradient to be non-finite -- must be completely unaffected.
+    """
+    parameters = [[1.0, 2.0], [1.2, 2.2]]
+    log_likelihood_list = [1.0, 0.0]
+
+    # MockSamplesNest, not MockSamples: Nautilus produces a SamplesNest, and
+    # `total_accepted_samples` (the neighbouring duck-typed block) only exists
+    # there. The samples_info below is Nautilus's real key set -- see
+    # `NautilusSearch.samples_info_from`.
+    samples = af.m.MockSamplesNest(
+        model=model,
+        sample_list=af.Sample.from_lists(
+            parameter_lists=parameters,
+            log_likelihood_list=log_likelihood_list,
+            log_prior_list=[0.0, 0.0],
+            weight_list=log_likelihood_list,
+            model=model,
+        ),
+        samples_info={
+            "total_samples": 10,
+            "total_accepted_samples": 2,
+            "time": None,
+            "number_live_points": 1,
+            "log_evidence": 1.0,
+        },
+    )
+
+    summary = "".join(text_util.search_summary_from_samples(samples=samples))
+
+    assert "NaN" not in summary
+    assert "Resurrections" not in summary
+    assert "Lane-Step" not in summary
+
+    # The MCMC block it sits beside is untouched.
+    assert "Total Accepted Samples = 2\n" in summary
+
+
+def test__search_summary__nan_rates_omitted_when_no_lane_steps_taken(model):
+    """
+    A search that died before its first step has a zero denominator. The counts
+    still report; the rates are omitted rather than raising ZeroDivisionError.
+    """
+    samples = _gradient_samples(
+        model=model,
+        samples_info={
+            "total_samples": 10,
+            "time": None,
+            "n_starts": 8,
+            "total_steps": 0,
+            "n_resurrections": 0,
+            "n_value_nan_lane_steps": 0,
+            "n_grad_nan_lane_steps": 0,
+        },
+    )
+
+    summary = "".join(text_util.search_summary_from_samples(samples=samples))
+
+    assert "Value-NaN Lane-Steps = 0\n" in summary
+    assert "Rate" not in summary

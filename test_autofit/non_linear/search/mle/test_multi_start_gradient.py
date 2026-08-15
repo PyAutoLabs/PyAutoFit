@@ -383,6 +383,104 @@ def test__samples_info__stop_reason_max_steps_and_legacy_search_internal():
     assert legacy.samples_info["fom_history"] is None
 
 
+@pytest.mark.parametrize(
+    "foms, grad_finite, n_value_nan, n_grad_nan",
+    [
+        # Nothing wrong: every lane finite in value and gradient.
+        ([1.0, 2.0, 3.0], [True, True, True], 0, 0),
+        # Value-NaN only -- the lane death resurrect already triggers on.
+        ([1.0, np.nan, 3.0], [True, True, True], 1, 0),
+        ([np.inf, -np.inf, 3.0], [True, True, True], 2, 0),
+        # Gradient-NaN only: likelihood defined, but not differentiable. This
+        # is the frozen-zombie lane that nothing detected before.
+        ([1.0, 2.0, 3.0], [True, False, True], 0, 1),
+        # Both failure modes on *different* lanes: counted once each.
+        ([1.0, np.nan, 3.0], [True, True, False], 1, 1),
+        # Both on the SAME lane: one value-NaN, NOT one of each. A dead lane's
+        # gradient is non-finite too, so double-counting here would inflate the
+        # gradient counter on every ordinary death and bury the real signal.
+        ([1.0, np.nan, 3.0], [True, False, True], 1, 0),
+        ([np.nan, np.nan], [False, False], 2, 0),
+    ],
+)
+def test__nan_lane_counts__splits_value_and_gradient_failures(
+    foms, grad_finite, n_value_nan, n_grad_nan
+):
+    alive, value_nan, grad_nan = af.MultiStartAdam._nan_lane_counts(
+        foms=np.asarray(foms), grad_finite=np.asarray(grad_finite)
+    )
+
+    assert value_nan == n_value_nan
+    assert grad_nan == n_grad_nan
+
+    # The alive mask is returned so the caller does not re-test finiteness.
+    assert list(alive) == list(np.isfinite(np.asarray(foms)))
+
+    # The two counts partition the lanes they describe: neither can exceed the
+    # lane count, and together they never over-count it.
+    assert value_nan + grad_nan <= len(foms)
+
+
+def test__nan_lane_counts__accepts_jax_style_array_outputs():
+    """
+    ``grad_finite`` arrives from a jitted call as a device array of bools; the
+    helper must not assume a NumPy bool dtype (a 0/1 integer array is the
+    common surprise).
+    """
+    alive, value_nan, grad_nan = af.MultiStartAdam._nan_lane_counts(
+        foms=np.asarray([1.0, 2.0, np.nan]),
+        grad_finite=np.asarray([1, 0, 1]),
+    )
+
+    assert value_nan == 1
+    assert grad_nan == 1
+    assert list(alive) == [True, True, False]
+
+
+def test__samples_info__nan_lane_step_counters():
+    model = af.Model(example.Gaussian)
+
+    best_params = np.asarray(model.vector_from_unit_vector([0.5] * model.prior_count))
+    per_start_params = np.stack([best_params])
+
+    search = af.MultiStartAdam(n_starts=1, n_steps=300)
+
+    samples = search.samples_via_internal_from(
+        model=model,
+        search_internal={
+            "params": per_start_params,
+            "best_params": best_params,
+            "best_fom": -2.0,
+            "fom_history": np.asarray([-2.0]),
+            "total_steps": 300,
+            "n_resurrections": 7,
+            "n_value_nan_lane_steps": 7,
+            "n_grad_nan_lane_steps": 3,
+            "stop_reason": "max_steps",
+        },
+    )
+
+    assert samples.samples_info["n_value_nan_lane_steps"] == 7
+    assert samples.samples_info["n_grad_nan_lane_steps"] == 3
+
+    # A search_internal written before the NaN accounting existed has neither
+    # key. Resuming or re-reading one must degrade to zero, not KeyError.
+    legacy = search.samples_via_internal_from(
+        model=model,
+        search_internal={
+            "params": per_start_params,
+            "best_params": best_params,
+            "best_fom": -2.0,
+            "fom_history": np.asarray([-2.0]),
+            "total_steps": 300,
+            "n_resurrections": 0,
+        },
+    )
+
+    assert legacy.samples_info["n_value_nan_lane_steps"] == 0
+    assert legacy.samples_info["n_grad_nan_lane_steps"] == 0
+
+
 def test__variable_length_zero_weight_nan_rows_are_robust():
     """The multi-start searches write zero-weight, NaN-log-likelihood diagnostic
     rows for the non-best starts, and auto-convergence makes runs variable-length.
