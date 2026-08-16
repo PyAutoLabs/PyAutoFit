@@ -13,7 +13,7 @@ from autonerves.class_path import get_class
 from autonerves.dictable import to_dict, from_dict
 from autonerves.output import conditional_output, should_output
 from autofit.text import formatter
-from autofit.tools.util import open_
+from autofit.tools.util import open_, NumpyEncoder
 from autofit.non_linear.samples.samples import Samples
 
 from .abstract import AbstractPaths, _test_mode_segment
@@ -76,8 +76,12 @@ class DirectoryPaths(AbstractPaths):
         prefix
             A prefix to add to the path which is the name of the folder the file is saved in.
         """
+        # ``NumpyEncoder``: a stray ``np.float32`` (or any NumPy scalar that is
+        # not a ``float64``) would otherwise raise ``TypeError`` here, at the
+        # very end of a successful fit, throwing the whole run away at its
+        # output step. See the encoder's docstring for why float64 hid this.
         with open_(self._path_for_json(name, prefix), "w+") as f:
-            json.dump(object_dict, f, indent=4)
+            json.dump(object_dict, f, indent=4, cls=NumpyEncoder)
 
     def load_json(self, name, prefix: str = ""):
         with open_(self._path_for_json(name, prefix)) as f:
