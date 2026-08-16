@@ -1,11 +1,13 @@
 from typing import Optional
 
+from autofit import exc
 from autofit.database.sqlalchemy_ import sa
 
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.search.mle.abstract_mle import AbstractMLE
 from autofit.non_linear.analysis import Analysis
 from autofit.non_linear.fitness import Fitness
+from autofit.non_linear.clipper import AbstractClipper, ClipperNone
 from autofit.non_linear.initializer import AbstractInitializer
 from autofit.non_linear.samples.sample import Sample
 from autofit.non_linear.samples.samples import Samples
@@ -33,6 +35,7 @@ class AbstractBFGS(AbstractMLE):
         maxiter: int = 15000,
         maxls: int = 20,
         initializer: Optional[AbstractInitializer] = None,
+        clipper: Optional[AbstractClipper] = None,
         iterations_per_full_update: int = None,
         iterations_per_quick_update: int = None,
         silence: bool = False,
@@ -52,6 +55,15 @@ class AbstractBFGS(AbstractMLE):
             Maximum number of iterations.
         maxfun
             Maximum number of function evaluations.
+        clipper
+            Enforcement of prior support (see :mod:`autofit.non_linear.clipper`).
+            Unlike the multi-start gradient searches, which project the parameters
+            themselves after every update, this search declares the box to scipy
+            and lets scipy enforce it — ``L-BFGS-B`` supports box bounds natively.
+
+            Default ``ClipperNone``, under which no ``bounds=`` is passed at all
+            and behaviour is unchanged. Only bound-supporting methods accept a
+            real clipper; see ``_bounds_from``.
         """
 
         super().__init__(
@@ -59,6 +71,7 @@ class AbstractBFGS(AbstractMLE):
             path_prefix=path_prefix,
             unique_tag=unique_tag,
             initializer=initializer,
+            clipper=clipper,
             iterations_per_quick_update=iterations_per_quick_update,
             iterations_per_full_update=iterations_per_full_update,
             silence=silence,
@@ -78,6 +91,49 @@ class AbstractBFGS(AbstractMLE):
         self.maxls = maxls
 
         self.logger.debug(f"Creating {self.method} Search")
+
+    # The scipy methods that accept box bounds. Plain ``BFGS`` is deliberately
+    # absent: scipy does not reject bounds it cannot use, it *ignores* them behind
+    # a ``UserWarning`` and returns the unconstrained optimum. A user who asked for
+    # prior-support enforcement and received an unbounded fit plus a log line is
+    # exactly the silent-wrong-answer this class is meant to prevent, so
+    # ``_bounds_from`` raises instead.
+    _BOUND_SUPPORTING_METHODS = ("L-BFGS-B", "TNC", "SLSQP")
+
+    def _bounds_from(self, model):
+        """
+        The ``scipy.optimize.Bounds`` for ``model``, or ``None`` when no clipper is
+        configured (in which case no ``bounds=`` is passed at all and behaviour is
+        unchanged).
+
+        The conversion is not incidental. ``AbstractClipper.bounds_from_model``
+        returns ``(lower, upper)`` as two arrays, which is the shape ``project``
+        broadcasts against — but ``optimize.minimize`` reads a ``(lower, upper)``
+        tuple as a *sequence of ``(min, max)`` pairs*. For a two-parameter model
+        that is a valid-looking pair sequence, so scipy pins each parameter to a
+        constant and returns a wrong fit with no error and no warning; at every
+        other dimensionality it raises. Building an explicit ``Bounds`` is what
+        makes the intent unambiguous.
+        """
+        # Imported lazily, as everywhere else in autofit -- no module in the
+        # package pulls scipy in at import time.
+        from scipy import optimize
+
+        if isinstance(self.clipper, ClipperNone):
+            return None
+
+        if self.method not in self._BOUND_SUPPORTING_METHODS:
+            raise exc.SearchException(
+                f"A {type(self.clipper).__name__} was passed to a search using "
+                f"method '{self.method}', which does not support box bounds. "
+                f"SciPy would silently ignore the bounds and return an "
+                f"unconstrained fit. Use one of "
+                f"{', '.join(self._BOUND_SUPPORTING_METHODS)} (e.g. af.LBFGS) or "
+                f"leave the clipper as the default ClipperNone."
+            )
+
+        lower, upper = self.clipper.bounds_from_model(model)
+        return optimize.Bounds(lower, upper)
 
     @property
     def options(self):
@@ -115,7 +171,9 @@ class AbstractBFGS(AbstractMLE):
         A result object comprising the Samples object that inclues the maximum log likelihood instance and full
         chains used by the fit.
         """
-        from scipy import optimize
+        # Resolved once, before any stepping: an unsupported method should fail
+        # immediately rather than after the first chunk of iterations.
+        bounds = self._bounds_from(model=model)
 
         fitness = Fitness(
             model=model,
@@ -180,6 +238,16 @@ class AbstractBFGS(AbstractMLE):
                 options = dict(self.options)
                 options["maxiter"] = iterations
 
+                # ``bounds`` is ``None`` under the default ``ClipperNone``, and
+                # ``minimize(bounds=None)`` is the same call as omitting it, so the
+                # default path is unchanged.
+                #
+                # Only the JAX branch is actually *exposed* to the prior-support
+                # problem: ``UniformPrior.log_prior_from_value`` returns ``0.0``
+                # unconditionally on the NumPy path, with no bound test, so there
+                # is no hard wall to fall off there. Bounds are still passed on
+                # both branches — they are correct on both, and having them
+                # diverge by branch would be a trap of its own.
                 if analysis._use_jax:
 
                     search_internal = optimize.minimize(
@@ -188,6 +256,7 @@ class AbstractBFGS(AbstractMLE):
                         method=self.method,
                         options=options,
                         tol=self.tol,
+                        bounds=bounds,
                     )
                 else:
 
@@ -197,6 +266,7 @@ class AbstractBFGS(AbstractMLE):
                         method=self.method,
                         options=options,
                         tol=self.tol,
+                        bounds=bounds,
                     )
 
                 total_iterations += search_internal.nit

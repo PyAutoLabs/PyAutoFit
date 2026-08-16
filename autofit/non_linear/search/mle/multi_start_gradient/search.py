@@ -9,6 +9,7 @@ from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.search.mle.abstract_mle import AbstractMLE
 from autofit.non_linear.analysis import Analysis
 from autofit.non_linear.fitness import Fitness
+from autofit.non_linear.clipper import AbstractClipper, ClipperNone
 from autofit.non_linear.initializer import AbstractInitializer
 from autofit.non_linear.samples.sample import Sample
 from autofit.non_linear.samples.samples import Samples
@@ -44,6 +45,7 @@ class AbstractMultiStartGradient(AbstractMLE):
         convergence: Optional[MultiStartGradientConvergence] = None,
         iterations_per_log: int = 10,
         initializer: Optional[AbstractInitializer] = None,
+        clipper: Optional[AbstractClipper] = None,
         iterations_per_full_update: int = None,
         iterations_per_quick_update: int = None,
         silence: bool = False,
@@ -55,8 +57,11 @@ class AbstractMultiStartGradient(AbstractMLE):
 
         This search runs ``n_starts`` independent optimizations from broad,
         randomly drawn starting points, all in parallel via ``jax.vmap``, using a
-        fixed self-normalised optax update rule (Adam / ADABelief / Lion) on the
-        unconstrained (unit-cube) parameterization. A wide population of starts is
+        fixed self-normalised optax update rule (Adam / ADABelief / Lion). Starts
+        are *drawn* in the unit cube but are immediately mapped to **physical**
+        parameters (see ``_broad_starts``), and the rule steps in that physical
+        space — nothing constrains a step to the prior box, which is why a
+        ``clipper`` is available below. A wide population of starts is
         what lets the method escape the many wrong basins that trap every
         single-start, line-search or second-order optimizer on the kinked
         likelihoods this promotes from (see the Phase-3 GPU MAP-optimizer
@@ -111,6 +116,21 @@ class AbstractMultiStartGradient(AbstractMLE):
             The unit-cube bounds broad starts are drawn uniformly from. The
             interior default ``(0.15, 0.85)`` avoids the prior edges where many
             transforms (e.g. ``arctan2`` / ``sqrt`` at exactly 0) are singular.
+        clipper
+            Enforcement of prior support, applied to the parameters after every
+            update (see :mod:`autofit.non_linear.clipper`). Because the rule steps
+            in physical space against an objective that folds in the prior, a step
+            that leaves a hard-edged prior box makes the figure of merit ``-inf``;
+            the gradient there is the *finite* likelihood gradient, since
+            ``log_prior = -inf`` is constant outside the box and contributes
+            nothing, so ``apply_if_finite`` never fires and the lane keeps stepping
+            at full cost with its output discarded, for the rest of the run.
+            ``ClipperPriorBox`` projects such a lane back inside instead.
+
+            Default ``ClipperNone`` — a no-op, so behaviour is unchanged. Turning
+            enforcement on moves where the search converges and would shift every
+            stored multi-start benchmark, so the default flip is deliberately a
+            separate, re-baselined change.
         resurrect
             Restart-on-death. When ``True``, any start whose objective goes
             non-finite is redrawn each step (fresh params from the start band +
@@ -165,6 +185,7 @@ class AbstractMultiStartGradient(AbstractMLE):
             path_prefix=path_prefix,
             unique_tag=unique_tag,
             initializer=initializer,
+            clipper=clipper,
             iterations_per_quick_update=iterations_per_quick_update,
             iterations_per_full_update=iterations_per_full_update,
             silence=silence,
@@ -612,6 +633,11 @@ class AbstractMultiStartGradient(AbstractMLE):
         # ``fitness.call``, which is untouched.
         has_constraint = bool(model.constrained_model_tuples())
 
+        # Same short-circuit shape as ``has_constraint``: the default clipper is a
+        # no-op, and testing for it here keeps the projection out of the step loop
+        # entirely rather than applying an identity every step.
+        has_clipper = not isinstance(self.clipper, ClipperNone)
+
         def _value_and_grad_finite(vector):
             fom, grad = _value_and_grad(vector)
             violation = (
@@ -684,6 +710,7 @@ class AbstractMultiStartGradient(AbstractMLE):
             n_constrained_lane_steps = int(
                 search_internal.get("n_constrained_lane_steps", 0)
             )
+            n_clipped_lane_steps = int(search_internal.get("n_clipped_lane_steps", 0))
             stop_reason = search_internal.get("stop_reason", None)
 
             self.logger.info(
@@ -713,6 +740,7 @@ class AbstractMultiStartGradient(AbstractMLE):
             n_value_nan_lane_steps = 0
             n_grad_nan_lane_steps = 0
             n_constrained_lane_steps = 0
+            n_clipped_lane_steps = 0
             stop_reason = None
 
             self.logger.info(
@@ -816,6 +844,26 @@ class AbstractMultiStartGradient(AbstractMLE):
                 updates, opt_state = step_update(grads, opt_state, params, foms)
                 params = optax.apply_updates(params, updates)
 
+                # Prior-support enforcement, applied to the updated parameters
+                # before they are evaluated again. Skipped entirely rather than
+                # applied as a no-op under the default ``ClipperNone``, so that
+                # the default path is bit-identical and its compiled step is
+                # unchanged — the same short-circuit ``has_constraint`` makes for
+                # the declared-constraint measure above.
+                #
+                # ``project`` broadcasts the ``(n_params,)`` bounds against the
+                # ``(n_starts, n_params)`` batch, so no vmap is needed here.
+                if has_clipper:
+                    params, clipped_mask = self.clipper.project(
+                        vector=params, model=model, xp=jnp
+                    )
+                    # Per-LANE, not per-coordinate: a lane clipped in three
+                    # parameters at once is one clipped lane-step, matching how
+                    # the NaN and constrained counters above are read.
+                    n_clipped_lane_steps += int(
+                        np.count_nonzero(np.asarray(jnp.any(clipped_mask, axis=-1)))
+                    )
+
                 total_steps += 1
 
                 if not self.resurrect and self.convergence.check_if_converged(
@@ -868,6 +916,7 @@ class AbstractMultiStartGradient(AbstractMLE):
                 "n_value_nan_lane_steps": n_value_nan_lane_steps,
                 "n_grad_nan_lane_steps": n_grad_nan_lane_steps,
                 "n_constrained_lane_steps": n_constrained_lane_steps,
+                "n_clipped_lane_steps": n_clipped_lane_steps,
                 "stop_reason": stop_reason,
             }
             self.paths.save_search_internal(obj=search_internal)
