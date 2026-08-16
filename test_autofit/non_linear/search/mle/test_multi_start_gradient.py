@@ -278,6 +278,49 @@ def test__dict_round_trip__resurrect():
     assert restored.n_starts == 6
 
 
+def test__dict_round_trip__seed():
+    # The seed must survive serialisation, or a resumed member of a multi-seed
+    # study silently continues on the default draw.
+    restored = from_dict(to_dict(af.MultiStartAdam(seed=7, n_starts=6)))
+
+    assert isinstance(restored, af.MultiStartAdam)
+    assert restored.seed == 7
+
+
+def test__seed__default_is_bit_identical_to_the_historical_fixed_seeds():
+    # ``seed`` is additive: the default path must draw exactly what the
+    # hardcoded ``default_rng(0)`` / ``default_rng(1)`` drew before it existed,
+    # so no existing fit changes.
+    search = af.MultiStartAdam(seed=None)
+
+    assert search._seed_for(0) == 0
+    assert search._seed_for(1) == 1
+
+
+def test__seed__is_reproducible_and_varies_between_seeds():
+    def draw(seed, stream):
+        search = af.MultiStartAdam(seed=seed)
+        return np.random.default_rng(search._seed_for(stream)).uniform(size=8)
+
+    # Same seed reproduces; different seeds diverge. Without this the campaign's
+    # "at least two seeds per arm" is silently a single-seed study.
+    assert np.array_equal(draw(3, 0), draw(3, 0))
+    assert not np.array_equal(draw(3, 0), draw(4, 0))
+
+
+def test__seed__start_and_resurrect_streams_never_coincide():
+    # Guards the bug a naive ``seed + stream`` offset would introduce: seed 0's
+    # resurrection stream would be seed 1's starting stream, so nominally
+    # independent seeds would share draws and resurrection would replay the
+    # starting population.
+    def draw(seed, stream):
+        search = af.MultiStartAdam(seed=seed)
+        return np.random.default_rng(search._seed_for(stream)).uniform(size=8)
+
+    assert not np.array_equal(draw(0, 0), draw(0, 1))
+    assert not np.array_equal(draw(0, 1), draw(1, 0))
+
+
 def test__samples_via_internal_from():
     model = af.Model(example.Gaussian)
 
