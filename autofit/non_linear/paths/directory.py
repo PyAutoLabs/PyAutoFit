@@ -13,7 +13,7 @@ from autonerves.class_path import get_class
 from autonerves.dictable import to_dict, from_dict
 from autonerves.output import conditional_output, should_output
 from autofit.text import formatter
-from autofit.tools.util import open_, open_atomic
+from autofit.tools.util import open_, open_atomic, NumpyEncoder
 from autofit.non_linear.samples.samples import Samples
 
 from .abstract import AbstractPaths, _test_mode_segment
@@ -76,14 +76,21 @@ class DirectoryPaths(AbstractPaths):
         prefix
             A prefix to add to the path which is the name of the folder the file is saved in.
         """
-        # ``open_atomic``, not ``open_``: a plain "w+" truncates before it
-        # writes, so a serialisation failure here leaves a HALF-WRITTEN file
-        # where a valid one was -- and the next run of this search reads that
-        # while resuming and dies on it. Written to a sibling temp file and
-        # ``os.replace``d into place, a failed write leaves the previous file
-        # whole instead.
+        # Two guards, and they answer different halves of the same incident.
+        #
+        # ``NumpyEncoder`` stops a stray ``np.float32`` (or any NumPy scalar
+        # that is not a ``float64``) raising ``TypeError`` here at the very end
+        # of a successful fit -- see the encoder's docstring for why float64
+        # hid this for so long.
+        #
+        # ``open_atomic`` handles the write failing for ANY reason: a plain
+        # "w+" truncates before it writes, so a failure partway leaves a
+        # HALF-WRITTEN file where a valid one was, and the next run of this
+        # search reads that while resuming and dies on it. Written to a sibling
+        # temp file and ``os.replace``d into place, a failed write leaves the
+        # previous file whole instead.
         with open_atomic(self._path_for_json(name, prefix)) as f:
-            json.dump(object_dict, f, indent=4)
+            json.dump(object_dict, f, indent=4, cls=NumpyEncoder)
 
     def load_json(self, name, prefix: str = ""):
         with open_(self._path_for_json(name, prefix)) as f:

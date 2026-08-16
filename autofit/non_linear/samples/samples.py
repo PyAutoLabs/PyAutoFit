@@ -16,6 +16,7 @@ from autofit.mapper.model import ModelInstance
 from autofit.non_linear.test_mode import skip_checks
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.samples.sample import Sample
+from autofit.tools.util import NumpyEncoder
 
 from .summary import SamplesSummary
 from .interface import SamplesInterface, to_instance
@@ -334,8 +335,14 @@ class Samples(SamplesInterface, ABC):
         )
 
     def info_to_json(self, filename):
+        # ``NumpyEncoder`` for the same reason as ``DirectoryPaths.save_json``.
+        # ``samples_info`` is the search's own diagnostic channel -- step
+        # counters, timings, per-search settings -- so it is the dict most
+        # likely to carry a NumPy scalar straight out of a search's internals,
+        # and every new counter added to it is another chance to reintroduce
+        # the crash.
         with open(filename, "w") as outfile:
-            json.dump(self.samples_info, outfile)
+            json.dump(self.samples_info, outfile, cls=NumpyEncoder)
 
     @property
     def max_log_likelihood_sample(self) -> Sample:

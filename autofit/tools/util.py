@@ -13,6 +13,39 @@ import numpy as np
 from autonerves import conf
 
 
+class NumpyEncoder(json.JSONEncoder):
+    """
+    A ``json`` encoder that can serialise NumPy scalars and arrays.
+
+    ``json`` serialises ``np.float64`` without help, because it subclasses
+    Python's ``float``. **``np.float32`` does not subclass anything ``json``
+    knows**, so a single ``float32`` anywhere in an otherwise ordinary dict
+    raises ``TypeError: Object of type float32 is not JSON serializable``. The
+    same is true of ``np.int32``/``np.int64`` (not a Python ``int`` on every
+    platform) and ``np.bool_``.
+
+    That asymmetry is why this failed so rarely and so late: a run in float64
+    is fine, and a run in float32 is fine right up until the moment it writes
+    its results. It surfaces at the *end of a successful fit*, discarding the
+    whole computation at the output step.
+
+    Coercion belongs here rather than at each producer. The producers are
+    search-specific and new ones keep appearing -- every new diagnostic counter
+    or summary field is another chance to reintroduce this -- so the encoder is
+    the one place that closes the class rather than one instance of it.
+    """
+
+    def default(self, o):
+        if isinstance(o, np.ndarray):
+            return o.tolist()
+        if isinstance(o, np.generic):
+            # ``.item()`` returns the nearest Python scalar: float32/float64 ->
+            # float, any int width -> int, bool_ -> bool. Precision is not lost
+            # on the way out, because a Python float IS a double.
+            return o.item()
+        return super().default(o)
+
+
 def split_paths(func):
     """
     Split string paths if they are passed.

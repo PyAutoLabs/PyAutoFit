@@ -354,6 +354,15 @@ class AbstractBFGS(AbstractMLE):
 
         samples_info = {
             "total_iterations": total_iterations,
+            # Prior-support enforcement (PyAutoFit#1477). The name only, with
+            # deliberately NO ``n_clipped_lane_steps`` alongside it: this search
+            # is declarative, handing ``optimize.Bounds`` to scipy and letting
+            # scipy enforce, so ``Clipper.project`` is never called, no mask is
+            # produced and there is nothing to count. Writing a ``0`` here would
+            # read as "the clipper never fired" when it means "this search
+            # cannot know"; the summary renders the absent key as "not measured"
+            # instead.
+            "clipper": type(self.clipper).__name__,
             "time": self.timer.time if self.timer else None,
         }
 

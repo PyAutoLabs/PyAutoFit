@@ -213,3 +213,155 @@ def test__search_summary__nan_rates_omitted_when_no_lane_steps_taken(model):
 
     assert "Value-NaN Lane-Steps = 0\n" in summary
     assert "Rate" not in summary
+
+
+def test__search_summary__clipper_none_emits_nothing(model):
+    """
+    The default path must be untouched. A ``ClipperNone`` run reports no
+    clipping lines at all -- this file is read by tooling and sits in every
+    archived run's output, so the unclipped summary stays byte-identical.
+    """
+    samples = _gradient_samples(
+        model=model,
+        samples_info={
+            "total_samples": 10,
+            "time": None,
+            "n_starts": 8,
+            "total_steps": 100,
+            "n_resurrections": 0,
+            "n_value_nan_lane_steps": 0,
+            "n_grad_nan_lane_steps": 0,
+            "clipper": "ClipperNone",
+            "n_clipped_lane_steps": 0,
+        },
+    )
+
+    summary = "".join(text_util.search_summary_from_samples(samples=samples))
+
+    assert "Clipper" not in summary
+    assert "Clipped" not in summary
+
+
+def test__search_summary__clipper_counted_reports_count_and_rate(model):
+    """
+    ``MultiStartGradient`` enforces the constraint itself every step, so it
+    knows how often the clipper fired and reports the count and the rate.
+    """
+    samples = _gradient_samples(
+        model=model,
+        samples_info={
+            "total_samples": 10,
+            "time": None,
+            "n_starts": 8,
+            "total_steps": 100,
+            "n_resurrections": 0,
+            "n_value_nan_lane_steps": 0,
+            "n_grad_nan_lane_steps": 0,
+            "clipper": "ClipperPriorBox",
+            "n_clipped_lane_steps": 40,
+        },
+    )
+
+    summary = "".join(text_util.search_summary_from_samples(samples=samples))
+
+    assert "Clipper = ClipperPriorBox\n" in summary
+    assert "Clipped Lane-Steps = 40\n" in summary
+
+    # 40 / (8 * 100), the same lane-step denominator as the NaN rates.
+    assert "Clipped Lane-Step Rate = 0.05\n" in summary
+
+
+def test__search_summary__clipper_without_count_says_not_measured(model):
+    """
+    ``LBFGS`` is declarative -- it hands bounds to scipy and never calls
+    ``project``, so there is no mask and nothing to count. A ``0`` here would
+    read as "never fired" when it means "cannot know", so it must not appear.
+    """
+    samples = _gradient_samples(
+        model=model,
+        samples_info={
+            "total_samples": 10,
+            "time": None,
+            "clipper": "ClipperPriorBox",
+        },
+    )
+
+    summary = "".join(text_util.search_summary_from_samples(samples=samples))
+
+    assert "Clipper = ClipperPriorBox\n" in summary
+    assert "Clipped Lane-Steps = not measured (bounds enforced by scipy)\n" in summary
+    assert "Clipped Lane-Steps = 0" not in summary
+    assert "Clipped Lane-Step Rate" not in summary
+
+
+def test__search_summary__clipper_absent_for_other_searches(model):
+    """
+    A search predating the ``Clipper`` writes no ``clipper`` key, and must be
+    completely unaffected -- the same invariant the NaN counters hold.
+    """
+    samples = _gradient_samples(
+        model=model,
+        samples_info={
+            "total_samples": 10,
+            "time": None,
+            "n_starts": 8,
+            "total_steps": 100,
+            "n_resurrections": 0,
+            "n_value_nan_lane_steps": 0,
+            "n_grad_nan_lane_steps": 0,
+        },
+    )
+
+    summary = "".join(text_util.search_summary_from_samples(samples=samples))
+
+    assert "Clipper" not in summary
+    assert "Clipped" not in summary
+
+
+def test__search_summary__constrained_lane_steps_reported(model):
+    """
+    The trapped-lane counter (PyAutoFit#1475) reached ``samples_info`` when it
+    shipped but was never emitted, so the artefact a user reads to find out what
+    the search did did not report it.
+    """
+    samples = _gradient_samples(
+        model=model,
+        samples_info={
+            "total_samples": 10,
+            "time": None,
+            "n_starts": 8,
+            "total_steps": 100,
+            "n_resurrections": 0,
+            "n_value_nan_lane_steps": 0,
+            "n_grad_nan_lane_steps": 0,
+            "n_constrained_lane_steps": 667,
+        },
+    )
+
+    summary = "".join(text_util.search_summary_from_samples(samples=samples))
+
+    assert "Constrained Lane-Steps = 667\n" in summary
+
+
+def test__search_summary__constrained_absent_when_never_written(model):
+    """
+    A ``search_internal`` written before the trapped-lane counter existed has no
+    such key. A zero it never wrote must not be reported as a measured zero --
+    ``0`` and "not written" are different findings.
+    """
+    samples = _gradient_samples(
+        model=model,
+        samples_info={
+            "total_samples": 10,
+            "time": None,
+            "n_starts": 8,
+            "total_steps": 100,
+            "n_resurrections": 0,
+            "n_value_nan_lane_steps": 0,
+            "n_grad_nan_lane_steps": 0,
+        },
+    )
+
+    summary = "".join(text_util.search_summary_from_samples(samples=samples))
+
+    assert "Constrained" not in summary
