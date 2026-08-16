@@ -171,6 +171,8 @@ class AbstractBFGS(AbstractMLE):
         A result object comprising the Samples object that inclues the maximum log likelihood instance and full
         chains used by the fit.
         """
+        from scipy import optimize
+
         # Resolved once, before any stepping: an unsupported method should fail
         # immediately rather than after the first chunk of iterations.
         bounds = self._bounds_from(model=model)

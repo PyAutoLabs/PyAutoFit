@@ -327,6 +327,50 @@ class TestSearchWiring:
 
         assert af.LBFGS()._bounds_from(model=model) is None
 
+    def test__lbfgs_fit_runs_end_to_end_with_and_without_a_clipper(self):
+        """
+        A real `search.fit()`, not just `_bounds_from` in isolation.
+
+        The whole library suite passed while `_fit` had an undefined `optimize`,
+        because nothing in it ever executed an LBFGS fit -- the bug only surfaced
+        in a manual end-to-end run. This is the cheap smoke test that closes that
+        gap: it fits a 1D Gaussian on the NumPy path and asserts the clipped run
+        respects the box.
+        """
+        from autofit import example
+
+        xvalues = np.arange(60)
+        truth = example.Gaussian(centre=30.0, normalization=25.0, sigma=8.0)
+        data = np.asarray(truth.model_data_from(xvalues=xvalues))
+        noise_map = np.full(60, 1.0)
+
+        def analysis():
+            instance = example.Analysis(data=data, noise_map=noise_map)
+            instance._use_jax = False
+            return instance
+
+        def model():
+            built = af.Model(example.Gaussian)
+            # The truth (centre=30) is deliberately outside this box, so an
+            # enforced bound visibly changes the answer.
+            built.centre = af.UniformPrior(lower_limit=5.0, upper_limit=20.0)
+            built.normalization = af.UniformPrior(lower_limit=10.0, upper_limit=40.0)
+            built.sigma = af.UniformPrior(lower_limit=1.0, upper_limit=20.0)
+            return built
+
+        unbounded = af.LBFGS(maxiter=15).fit(model=model(), analysis=analysis())
+        clipped = af.LBFGS(maxiter=15, clipper=ClipperPriorBox()).fit(
+            model=model(), analysis=analysis()
+        )
+
+        unbounded_centre = unbounded.samples.max_log_likelihood(as_instance=False)[0]
+        clipped_centre = clipped.samples.max_log_likelihood(as_instance=False)[0]
+
+        assert clipped_centre <= 20.0
+        assert not np.isnan(clipped_centre)
+        # The unconstrained fit is free to chase the truth past the prior edge.
+        assert unbounded_centre > 20.0
+
     def test__non_bound_supporting_method_raises_rather_than_being_ignored(self):
         """
         SciPy does not reject bounds that ``BFGS`` cannot use -- it warns and returns
