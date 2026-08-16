@@ -91,6 +91,42 @@ def open_(filename, *flags):
 
 
 @contextmanager
+def open_atomic(filename, mode: str = "w+"):
+    """
+    Write ``filename`` so that it is either fully replaced or left untouched.
+
+    A plain ``open(path, "w+")`` **truncates first and writes second**. If the
+    write then fails partway -- a serialisation ``TypeError``, a full disk, a
+    killed process -- what is left on disk is a half-written file where a valid
+    one used to be. That truncated file is not inert: the next run of the same
+    search reads it while resuming and fails on it, so one crash propagates
+    into every subsequent run of that search until the output directory is
+    deleted by hand.
+
+    Writing to a temporary file in the *same directory* and then ``os.replace``
+    -ing it into place removes the window. ``os.replace`` is atomic on POSIX
+    and on Windows, and staying in one directory keeps it a rename within a
+    single filesystem, which is where that guarantee holds. On failure the
+    temporary file is removed and the original is still whole.
+    """
+    path = Path(filename)
+    os.makedirs(path.parent, exist_ok=True)
+
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+
+    try:
+        with open(tmp, mode) as f:
+            yield f
+    except BaseException:
+        # BaseException, not Exception: a KeyboardInterrupt mid-write leaves
+        # exactly the same debris and must not leak a .tmp file either.
+        tmp.unlink(missing_ok=True)
+        raise
+
+    os.replace(tmp, path)
+
+
+@contextmanager
 def suppress_stdout():
     with open(os.devnull, "w") as devnull:
         old_stdout = sys.stdout

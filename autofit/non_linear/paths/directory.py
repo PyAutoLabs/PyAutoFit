@@ -13,7 +13,7 @@ from autonerves.class_path import get_class
 from autonerves.dictable import to_dict, from_dict
 from autonerves.output import conditional_output, should_output
 from autofit.text import formatter
-from autofit.tools.util import open_, NumpyEncoder
+from autofit.tools.util import open_, open_atomic, NumpyEncoder
 from autofit.non_linear.samples.samples import Samples
 
 from .abstract import AbstractPaths, _test_mode_segment
@@ -76,11 +76,20 @@ class DirectoryPaths(AbstractPaths):
         prefix
             A prefix to add to the path which is the name of the folder the file is saved in.
         """
-        # ``NumpyEncoder``: a stray ``np.float32`` (or any NumPy scalar that is
-        # not a ``float64``) would otherwise raise ``TypeError`` here, at the
-        # very end of a successful fit, throwing the whole run away at its
-        # output step. See the encoder's docstring for why float64 hid this.
-        with open_(self._path_for_json(name, prefix), "w+") as f:
+        # Two guards, and they answer different halves of the same incident.
+        #
+        # ``NumpyEncoder`` stops a stray ``np.float32`` (or any NumPy scalar
+        # that is not a ``float64``) raising ``TypeError`` here at the very end
+        # of a successful fit -- see the encoder's docstring for why float64
+        # hid this for so long.
+        #
+        # ``open_atomic`` handles the write failing for ANY reason: a plain
+        # "w+" truncates before it writes, so a failure partway leaves a
+        # HALF-WRITTEN file where a valid one was, and the next run of this
+        # search reads that while resuming and dies on it. Written to a sibling
+        # temp file and ``os.replace``d into place, a failed write leaves the
+        # previous file whole instead.
+        with open_atomic(self._path_for_json(name, prefix)) as f:
             json.dump(object_dict, f, indent=4, cls=NumpyEncoder)
 
     def load_json(self, name, prefix: str = ""):
@@ -196,7 +205,11 @@ class DirectoryPaths(AbstractPaths):
         """
         filename = self.search_internal_path / "search_internal.dill"
 
-        with open_(filename, "wb") as f:
+        # Atomic for the same reason as ``save_json``, and it matters more
+        # here: ``search_internal`` is what a resumed run restores its step
+        # count and counters from, so a truncated dill does not merely fail to
+        # load -- it is the file the resume path most depends on.
+        with open_atomic(filename, "wb") as f:
             dill.dump(obj, f)
 
     def load_search_internal(self):

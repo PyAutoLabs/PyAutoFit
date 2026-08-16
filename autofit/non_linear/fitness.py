@@ -633,6 +633,34 @@ class Fitness:
             samples_summary = self.paths.load_samples_summary()
         except FileNotFoundError:
             return
+        except ValueError as e:
+            # A CORRUPT previous summary means the same thing as an ABSENT one
+            # for this check: there is no trustworthy old likelihood to compare
+            # against. Returning early is what the FileNotFoundError branch
+            # above already does for the no-previous-run case.
+            #
+            # `ValueError` is the catch because `json.JSONDecodeError`
+            # subclasses it -- which is exactly why this was missed by both the
+            # `FileNotFoundError` above and the `(FileNotFoundError, TypeError,
+            # KeyError)` guard on the multi-start resume path. A half-written
+            # file therefore aborted the whole run from inside an OPTIONAL
+            # sanity check -- and it stayed aborted on every subsequent run of
+            # the same search name, since nothing rewrites the file until a run
+            # gets far enough to finish.
+            #
+            # Warned rather than passed over in silence: an unreadable file is
+            # a real event, unlike a missing one, and the user is the only one
+            # who can decide whether the old results mattered.
+            logger.warning(
+                f"Could not read the previous samples summary while resuming "
+                f"({type(e).__name__}: {e}). It is missing or corrupt, most "
+                f"likely because an earlier run of this search was interrupted "
+                f"while writing its output. The likelihood-function sanity "
+                f"check is being SKIPPED for this run, and results are being "
+                f"recomputed. Delete the search's output directory if you want "
+                f"a guaranteed-clean start."
+            )
+            return
 
         try:
             max_log_likelihood_sample = samples_summary.max_log_likelihood_sample

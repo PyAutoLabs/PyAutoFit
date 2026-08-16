@@ -1,4 +1,5 @@
 import inspect
+import pickle
 from typing import Optional
 
 import numpy as np
@@ -717,7 +718,32 @@ class AbstractMultiStartGradient(AbstractMLE):
                 "Resuming MultiStartGradient search (previous samples found)."
             )
 
-        except (FileNotFoundError, TypeError, KeyError):
+        # ``EOFError``/``UnpicklingError``/``ValueError`` join the original
+        # three so that a CORRUPT ``search_internal`` starts a fresh run rather
+        # than killing this one. A dill truncated by an interrupted write is
+        # the same situation as an absent one -- there is no state to resume
+        # from -- but it raised out of this guard instead of falling into the
+        # fresh-start branch below, and it kept doing so on every rerun of the
+        # same search name, because nothing rewrites the file until a run
+        # finishes. ``save_search_internal`` is atomic now, so this is the
+        # belt to that braces: it also covers files left by older versions,
+        # killed processes and full disks.
+        except (
+            FileNotFoundError,
+            TypeError,
+            KeyError,
+            EOFError,
+            ValueError,
+            pickle.UnpicklingError,
+        ) as e:
+
+            if not isinstance(e, FileNotFoundError):
+                self.logger.warning(
+                    f"Could not restore the previous MultiStartGradient state "
+                    f"({type(e).__name__}: {e}); starting a fresh run. This "
+                    f"usually means an earlier run was interrupted while "
+                    f"writing its output."
+                )
 
             if not self.silence:
                 self.logger.info(self._compile_message(batched=False))
