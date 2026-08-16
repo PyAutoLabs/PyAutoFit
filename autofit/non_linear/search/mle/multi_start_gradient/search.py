@@ -1168,6 +1168,21 @@ class AbstractMultiStartGradient(AbstractMLE):
             "n_grad_nan_lane_steps": int(
                 search_internal.get("n_grad_nan_lane_steps", 0)
             ),
+            # Prior-support enforcement (PyAutoFit#1477). The clipper's NAME
+            # rather than a bool, so the summary can say which strategy ran and
+            # so a later strategy needs no schema change here.
+            #
+            # ``n_clipped_lane_steps`` is per-LANE, matching the counters above:
+            # a lane clipped in three parameters on one step is one clipped
+            # lane-step, which keeps all four directly comparable. It is
+            # restored from ``search_internal`` as a lifetime total, so a
+            # resumed run reports the whole run's clipping and not just the
+            # current process's share — the same reasoning as the ``.get``
+            # defaults above.
+            "clipper": type(self.clipper).__name__,
+            "n_clipped_lane_steps": int(
+                search_internal.get("n_clipped_lane_steps", 0)
+            ),
             # Auto-convergence outcome: whether the run stopped on the plateau
             # check ("converged") or exhausted the ``n_steps`` ceiling
             # ("max_steps"), the settings that produced it, and the global-best
