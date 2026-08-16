@@ -71,6 +71,8 @@ Tools
    Result
    InitializerBall
    InitializerPrior
+   ClipperNone
+   ClipperPriorBox
    AutoCorrelationsSettings
 
 **PyAutoFit** can perform a parallelized grid-search of non-linear searches, where a subset of parameters in the

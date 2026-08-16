@@ -2,6 +2,7 @@ from abc import ABC
 
 from autonerves import conf
 from autofit.non_linear.search.abstract_search import NonLinearSearch
+from autofit.non_linear.clipper import ClipperNone
 from autofit.non_linear.initializer import InitializerBall
 from autofit.non_linear.plot import (
     subplot_parameters,
@@ -12,7 +13,14 @@ from autofit.non_linear.plot import (
 
 class AbstractMLE(NonLinearSearch, ABC):
 
-    def __init__(self, initializer=None, **kwargs):
+    def __init__(self, initializer=None, clipper=None, **kwargs):
+        # ``clipper`` is resolved here, at the same tier and by the same
+        # ``or <default>`` pattern as ``initializer``, so every MLE search
+        # inherits it. The default is the no-op ``ClipperNone``: enforcing prior
+        # support changes where a search converges, which would shift every stored
+        # multi-start benchmark, so it is opt-in until that re-baseline is done.
+        self.clipper = clipper or ClipperNone()
+
         super().__init__(
             initializer=initializer
             or InitializerBall(lower_limit=0.49, upper_limit=0.51),

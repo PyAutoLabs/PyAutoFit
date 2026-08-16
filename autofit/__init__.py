@@ -80,6 +80,9 @@ from .non_linear.analysis.latent import Latent
 from .non_linear.analysis.analysis import Analysis
 from .non_linear.grid.grid_search import GridSearchResult
 from .non_linear.grid.sensitivity import Sensitivity
+from .non_linear.clipper import AbstractClipper
+from .non_linear.clipper import ClipperNone
+from .non_linear.clipper import ClipperPriorBox
 from .non_linear.initializer import InitializerBall
 from .non_linear.initializer import InitializerPrior
 from .non_linear.initializer import InitializerParamBounds
