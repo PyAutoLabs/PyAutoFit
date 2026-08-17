@@ -98,20 +98,30 @@ class AbstractClipper(ABC):
         """
 
     @abstractmethod
-    def project(self, vector, model, xp=np):
+    def project(self, vector, model, xp=np, scale=None):
         """
         Project ``vector`` onto the prior support.
 
         Parameters
         ----------
         vector
-            A physical parameter vector, either a single ``(n_params,)`` vector or
-            a batched ``(n_starts, n_params)`` array of them. Broadcasting handles
-            both, so no ``vmap`` is required of the caller.
+            A parameter vector, either a single ``(n_params,)`` vector or a
+            batched ``(n_starts, n_params)`` array of them. Broadcasting handles
+            both, so no ``vmap`` is required of the caller. Physical unless
+            ``scale`` is given, in which case it is in scaled coordinates.
         model
             The model whose priors define the support.
         xp
             The array module, ``numpy`` or ``jax.numpy``.
+        scale
+            The per-parameter step scale from a
+            :mod:`~autofit.non_linear.scaler`, when the caller is stepping in
+            ``phi = theta / scale`` rather than in physical parameters. The
+            **bounds** are divided by it, so the projection happens in the
+            caller's own coordinates and no round-trip through physical space is
+            needed. Scales are strictly positive, so dividing preserves the
+            ordering of each ``(lower, upper)`` pair and ``+/-inf`` stay
+            ``+/-inf``.
 
         Returns
         -------
@@ -134,7 +144,7 @@ class ClipperNone(AbstractClipper):
         n = model.prior_count
         return np.full(n, -np.inf), np.full(n, np.inf)
 
-    def project(self, vector, model, xp=np):
+    def project(self, vector, model, xp=np, scale=None):
         return vector, xp.zeros_like(vector, dtype=bool)
 
 
@@ -264,8 +274,21 @@ class ClipperPriorBox(AbstractClipper):
 
         return lower_inset, upper_inset
 
-    def project(self, vector, model, xp=np):
+    def project(self, vector, model, xp=np, scale=None):
         lower, upper = self.bounds_from_model(model)
+
+        if scale is not None:
+            # Divided AFTER the insets are applied, not before. The inset is
+            # relative to the box width, so scaling the raw limits first and
+            # insetting afterwards gives the identical box -- but the half-open
+            # `strict_epsilon` is ABSOLUTE, and dividing it by the scale would
+            # shrink the nudge for a large-scale coordinate until it no longer
+            # lands strictly inside a support that excludes its limit. Insetting
+            # in physical space and then mapping the finished bounds keeps the
+            # inset meaning what it says in the space the prior is declared in.
+            scale = np.asarray(scale, dtype=float)
+            lower = lower / scale
+            upper = upper / scale
 
         dtype = getattr(vector, "dtype", None)
         lower = xp.asarray(lower, dtype=dtype)

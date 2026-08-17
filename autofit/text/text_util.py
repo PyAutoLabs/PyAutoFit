@@ -14,7 +14,9 @@ def padding(item, target=6):
     return f"{prefix}{string}"
 
 
-def result_max_lh_info_from(max_log_likelihood_sample : List[float], max_log_likelihood : float, model) -> List[str]:
+def result_max_lh_info_from(
+    max_log_likelihood_sample: List[float], max_log_likelihood: float, model
+) -> List[str]:
     """
     Output the maximum log likelihood model only, for quick reference.
     """
@@ -37,8 +39,8 @@ def result_max_lh_info_from(max_log_likelihood_sample : List[float], max_log_lik
     paths = []
 
     for (_, prior), value in zip(
-            model.unique_path_prior_tuples,
-            max_log_likelihood_sample,
+        model.unique_path_prior_tuples,
+        max_log_likelihood_sample,
     ):
         for path in model.all_paths_for_prior(prior):
             paths.append((path, value))
@@ -150,9 +152,7 @@ def _clipper_summary_from(samples_info) -> [str]:
     line = [f"Clipper = {clipper}\n"]
 
     if "n_clipped_lane_steps" not in samples_info:
-        line.append(
-            "Clipped Lane-Steps = not measured (bounds enforced by scipy)\n"
-        )
+        line.append("Clipped Lane-Steps = not measured (bounds enforced by scipy)\n")
         return line
 
     n_clipped = int(samples_info["n_clipped_lane_steps"])
@@ -165,6 +165,35 @@ def _clipper_summary_from(samples_info) -> [str]:
         line.append(f"Clipped Lane-Step Rate = {n_clipped / lane_steps}\n")
 
     return line
+
+
+#: The scaler that rescales nothing. A run using it steps in physical parameters,
+#: the historical behaviour, and reports no scaling line — see
+#: ``_scaler_summary_from``.
+_SCALER_NONE = "ScalerNone"
+
+
+def _scaler_summary_from(samples_info) -> [str]:
+    """
+    The ``search.summary`` line naming the per-parameter step scaler, or none.
+
+    Same discipline as ``_clipper_summary_from``: ``ScalerNone`` and a search
+    predating the ``Scaler`` (no key at all) both emit **nothing**, so the default
+    path's summary is unchanged byte for byte.
+
+    There is no count to report. Unlike clipping, scaling has no per-step event —
+    it is a fixed change of variables applied once at fit start, so "how often did
+    it fire" is not a question with an answer. Its effect is read *indirectly*, in
+    the clipped lane-step rate above: a scaler that is doing its job drives that
+    rate down. The vector itself is written to ``model.info``, which is where a
+    reader who wants the actual numbers should look.
+    """
+    scaler = samples_info.get("scaler")
+
+    if scaler is None or scaler == _SCALER_NONE:
+        return []
+
+    return [f"Scaler = {scaler}\n"]
 
 
 def search_summary_from_samples(samples) -> [str]:
@@ -219,6 +248,7 @@ def search_summary_from_samples(samples) -> [str]:
             line.append(f"Gradient-NaN Lane-Step Rate = {n_grad_nan / lane_steps}\n")
 
     line += _clipper_summary_from(samples_info=samples_info)
+    line += _scaler_summary_from(samples_info=samples_info)
 
     if samples.time is not None:
         line.append(f"Time To Run = {dt.timedelta(seconds=float(samples.time))}\n")
@@ -229,10 +259,10 @@ def search_summary_from_samples(samples) -> [str]:
 
 
 def search_summary_to_file(
-        samples,
-        log_likelihood_function_time,
-        filename,
-        visualization_time=None,
+    samples,
+    log_likelihood_function_time,
+    filename,
+    visualization_time=None,
 ):
     summary = search_summary_from_samples(samples=samples)
     summary.append(
@@ -253,9 +283,7 @@ def search_summary_to_file(
         pass
 
     if visualization_time is not None:
-        summary.append(
-            f"Visualization Time (seconds) = {visualization_time}"
-        )
+        summary.append(f"Visualization Time (seconds) = {visualization_time}")
 
     frm.output_list_of_strings_to_file(file=filename, list_of_strings=summary)
 
