@@ -1,4 +1,5 @@
 import inspect
+from typing import NamedTuple
 
 import numpy as np
 import pytest
@@ -319,6 +320,86 @@ def test__seed__start_and_resurrect_streams_never_coincide():
 
     assert not np.array_equal(draw(0, 0), draw(0, 1))
     assert not np.array_equal(draw(0, 1), draw(1, 0))
+
+
+class _AdamLikeState(NamedTuple):
+    count: np.ndarray
+    mu: np.ndarray
+    nu: np.ndarray
+
+
+class _ProdigyLikeState(NamedTuple):
+    exp_avg: np.ndarray
+    exp_avg_sq: np.ndarray
+    grad_sum: np.ndarray
+    params0: np.ndarray
+    estim_lr: np.ndarray
+
+
+def test__reset_clipped_momentum__zeroes_only_the_clipped_coordinates():
+    # (2 starts, 3 params); only start 0's middle coordinate was clipped.
+    mask = np.array([[False, True, False], [False, False, False]])
+    state = _AdamLikeState(
+        count=np.array([7, 7]),
+        mu=np.ones((2, 3)),
+        nu=np.full((2, 3), 2.0),
+    )
+
+    out = af.MultiStartAdam._reset_clipped_momentum(
+        opt_state=state, clipped_mask=mask, jnp=np
+    )
+
+    assert out.mu.tolist() == [[1.0, 0.0, 1.0], [1.0, 1.0, 1.0]]
+    assert out.nu.tolist() == [[2.0, 0.0, 2.0], [2.0, 2.0, 2.0]]
+    # A lane keeps its momentum in every coordinate that was not clipped, and
+    # non-moment state is untouched.
+    assert out.count.tolist() == [7, 7]
+
+
+def test__reset_clipped_momentum__never_touches_prodigys_reference_point():
+    # ``params0`` and ``grad_sum`` carry the SAME shape as the moments, so a
+    # shape-matched reset would zero them. ``params0`` anchors Prodigy's
+    # learning-rate estimate: zeroing it corrupts the step size for the rest of
+    # the run rather than resetting momentum.
+    mask = np.array([[True, True, True]])
+    state = _ProdigyLikeState(
+        exp_avg=np.ones((1, 3)),
+        exp_avg_sq=np.ones((1, 3)),
+        grad_sum=np.full((1, 3), 5.0),
+        params0=np.full((1, 3), 9.0),
+        estim_lr=np.array([0.5]),
+    )
+
+    out = af.MultiStartProdigy._reset_clipped_momentum(
+        opt_state=state, clipped_mask=mask, jnp=np
+    )
+
+    assert out.exp_avg.tolist() == [[0.0, 0.0, 0.0]]
+    assert out.exp_avg_sq.tolist() == [[0.0, 0.0, 0.0]]
+    assert out.params0.tolist() == [[9.0, 9.0, 9.0]]
+    assert out.grad_sum.tolist() == [[5.0, 5.0, 5.0]]
+    assert out.estim_lr.tolist() == [0.5]
+
+
+def test__reset_clipped_momentum__recurses_through_optax_chain_tuples():
+    # optax.adam's state arrives wrapped in a chain tuple, so the reset has to
+    # descend through plain tuples as well as NamedTuples.
+    mask = np.array([[True, False]])
+    nested = (_AdamLikeState(count=np.array([1]), mu=np.ones((1, 2)), nu=np.ones((1, 2))),)
+
+    out = af.MultiStartAdam._reset_clipped_momentum(
+        opt_state=nested, clipped_mask=mask, jnp=np
+    )
+
+    assert out[0].mu.tolist() == [[0.0, 1.0]]
+
+
+def test__dict_round_trip__reset_momentum_on_clip():
+    restored = from_dict(to_dict(af.MultiStartAdam(reset_momentum_on_clip=True)))
+
+    assert restored.reset_momentum_on_clip is True
+    # Default stays off, so the clipping path is unchanged unless asked for.
+    assert af.MultiStartAdam().reset_momentum_on_clip is False
 
 
 def test__samples_via_internal_from():
