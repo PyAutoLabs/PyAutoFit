@@ -11,6 +11,7 @@ from autofit.non_linear.search.mle.abstract_mle import AbstractMLE
 from autofit.non_linear.analysis import Analysis
 from autofit.non_linear.fitness import Fitness
 from autofit.non_linear.clipper import AbstractClipper, ClipperNone
+from autofit.non_linear.scaler import AbstractScaler, ScalerNone
 from autofit.non_linear.initializer import AbstractInitializer
 from autofit.non_linear.samples.sample import Sample
 from autofit.non_linear.samples.samples import Samples
@@ -48,6 +49,7 @@ class AbstractMultiStartGradient(AbstractMLE):
         iterations_per_log: int = 10,
         initializer: Optional[AbstractInitializer] = None,
         clipper: Optional[AbstractClipper] = None,
+        scaler: Optional[AbstractScaler] = None,
         reset_momentum_on_clip: bool = False,
         iterations_per_full_update: int = None,
         iterations_per_quick_update: int = None,
@@ -134,6 +136,31 @@ class AbstractMultiStartGradient(AbstractMLE):
             enforcement on moves where the search converges and would shift every
             stored multi-start benchmark, so the default flip is deliberately a
             separate, re-baselined change.
+        scaler
+            A per-parameter step scale derived from the priors, applied as a
+            change of variables so the rule steps in ``phi = theta / scale`` while
+            the objective is still evaluated at the physical ``theta = scale *
+            phi`` (see :mod:`autofit.non_linear.scaler`).
+
+            It exists because this rule steps in **physical** space with a single
+            global step scale, while prior widths across one model routinely span
+            orders of magnitude (40x on the reference lens cell), so a step that
+            is sensible for the widest parameter is a wall-crossing for the
+            narrowest. Every other search family already handles this — the
+            nested samplers propose in the unit cube, Emcee is affine-invariant,
+            NUTS adapts a mass matrix, L-BFGS accumulates curvature — and this
+            family is the sole exception, because the Adam rules normalise by
+            *gradient* magnitude rather than *parameter* scale and Prodigy's
+            estimate is a single global scalar.
+
+            Default ``ScalerNone`` — a no-op that is skipped rather than applied
+            as a multiply by ones, so the default path and its compiled step are
+            both unchanged.
+
+            Complementary to ``clipper``, not a replacement for it: scaling makes
+            reaching a wall rarer, never impossible, and where the likelihood
+            genuinely prefers a value outside the prior only clipping can express
+            the resulting MAP.
         resurrect
             Restart-on-death. When ``True``, any start whose objective goes
             non-finite is redrawn each step (fresh params from the start band +
@@ -242,6 +269,12 @@ class AbstractMultiStartGradient(AbstractMLE):
         self.start_upper_limit = start_upper_limit
         self.resurrect = resurrect
         self.seed = seed
+        # Resolved here rather than on ``AbstractMLE`` beside ``clipper``,
+        # deliberately. The clipper is shared because LBFGS genuinely uses it
+        # (it hands the bounds to scipy); a scaler has no meaning for a search
+        # that does not own its step loop, and hanging an inert knob off LBFGS
+        # would be a knob that silently does nothing.
+        self.scaler = scaler or ScalerNone()
         self.reset_momentum_on_clip = reset_momentum_on_clip
         self.convergence = (
             convergence if convergence is not None else MultiStartGradientConvergence()
@@ -574,7 +607,7 @@ class AbstractMultiStartGradient(AbstractMLE):
                 return
 
             projected = fixed + self.n_starts * per_start
-            gb = 1024 ** 3
+            gb = 1024**3
             self.logger.warning(
                 f"{type(self).__name__} is set to evaluate all "
                 f"{self.n_starts} starts in one jax.vmap (batch_size=None). "
@@ -678,10 +711,49 @@ class AbstractMultiStartGradient(AbstractMLE):
         # entirely rather than applying an identity every step.
         has_clipper = not isinstance(self.clipper, ClipperNone)
 
+        # Per-parameter step scaling (see ``autofit.non_linear.scaler``). The
+        # step loop runs in ``phi = theta / scale``; everything OUTSIDE it —
+        # ``_broad_starts``, ``best_params``, ``search_internal`` — stays in
+        # physical parameters, so the only thing that ever sees ``phi`` is the
+        # optimizer. Same short-circuit as above: under the default ``ScalerNone``
+        # ``scale`` is ``None`` and no multiply is traced at all, so the compiled
+        # step is byte-for-byte what it was.
+        has_scaler = not isinstance(self.scaler, ScalerNone)
+        scale = self.scaler.scale_from_model(model=model) if has_scaler else None
+        scale_jnp = jnp.asarray(scale) if has_scaler else None
+
+        def _to_physical(vector):
+            return vector if scale_jnp is None else vector * scale_jnp
+
+        # The objective the OPTIMIZER differentiates. Composed as
+        # ``fitness.call(phi * scale)``, so what is optimised remains the
+        # PHYSICAL-space posterior evaluated at the transformed point, and JAX's
+        # chain rule produces the gradient with respect to ``phi`` for free —
+        # there is no manual gradient rescaling anywhere in this file, which is
+        # the entire reason the scale is applied here rather than to the update.
+        #
+        # Optimising the density OF ``phi`` instead would fold a Jacobian into the
+        # objective and move the MAP, and it would do so SILENTLY: every counter,
+        # every diagnostic and the wall time would all look healthy. For a
+        # constant diagonal map the Jacobian is a constant, so composing this way
+        # provably cannot move the answer — ``test_scaler.py`` pins that.
+        #
+        # ``_value_and_grad`` itself is deliberately left as the physical
+        # objective: ``_broad_starts`` below jits it directly to filter candidate
+        # draws, and those draws are, and stay, physical.
+        _value_and_grad_stepped = (
+            jax.value_and_grad(lambda phi: fitness.call(_to_physical(phi)))
+            if has_scaler
+            else _value_and_grad
+        )
+
         def _value_and_grad_finite(vector):
-            fom, grad = _value_and_grad(vector)
+            fom, grad = _value_and_grad_stepped(vector)
             violation = (
-                model.model_constraint_from_vector(vector, xp=jnp)
+                # Evaluated at the PHYSICAL vector: a declared model constraint is
+                # a statement about the model's parameters, not about whatever
+                # coordinates the optimizer happens to be stepping in.
+                model.model_constraint_from_vector(_to_physical(vector), xp=jnp)
                 if has_constraint
                 else jnp.asarray(0.0)
             )
@@ -703,9 +775,7 @@ class AbstractMultiStartGradient(AbstractMLE):
                 for lo, hi, pad in _chunk_slices(params.shape[0], batch_size):
                     chunk = params[lo:hi]
                     if pad:
-                        chunk = jnp.concatenate(
-                            [chunk, jnp.tile(chunk[-1:], (pad, 1))]
-                        )
+                        chunk = jnp.concatenate([chunk, jnp.tile(chunk[-1:], (pad, 1))])
                     foms, grads, grad_finite, violation = _vmapped(chunk)
                     if pad:
                         foms = foms[:-pad]
@@ -732,7 +802,15 @@ class AbstractMultiStartGradient(AbstractMLE):
         try:
             search_internal = self.paths.load_search_internal()
 
+            # ``search_internal["params"]`` is PHYSICAL, always — see the write
+            # site below for why — so it is mapped into the stepped coordinates
+            # here rather than being trusted to already be in them. That is what
+            # lets a run written without a scaler resume WITH one, and the other
+            # way round, instead of the file's meaning depending on a search knob
+            # that does not enter the identifier.
             params = jnp.asarray(search_internal["params"])
+            if has_scaler:
+                params = params / scale_jnp
             opt_state = optax.tree_utils.tree_get(search_internal, "opt_state")
             best_params = np.asarray(search_internal["best_params"])
             best_fom = float(search_internal["best_fom"])
@@ -792,17 +870,28 @@ class AbstractMultiStartGradient(AbstractMLE):
             if not self.silence:
                 self.logger.info(self._compile_message(batched=False))
 
+            # Drawn PHYSICAL and mapped into the stepped coordinates afterwards,
+            # so the draw band, the finite-gradient filter and the RNG stream are
+            # all untouched by scaling — the starting POPULATION is identical
+            # with and without it, which is what makes an A/B measure the
+            # stepping and nothing else.
             params = self._broad_starts(
                 model=model,
                 value_and_grad_single=jax.jit(_value_and_grad),
                 jnp=jnp,
             )
 
+            best_params = np.asarray(params[0])
+
+            if has_scaler:
+                params = params / scale_jnp
+
             # Per-start optimizer state: one independent state per start, so
             # learning-rate-free rules never share a global scalar estimate.
+            # Built AFTER the rescale, so a rule that seeds its state from the
+            # initial parameters (Prodigy anchors ``params0`` there) anchors it in
+            # the coordinates it will actually step in.
             opt_state = jax.vmap(optimizer.init)(params)
-
-            best_params = np.asarray(params[0])
             best_fom = np.inf
             fom_history = []
             alive_history = []
@@ -887,7 +976,14 @@ class AbstractMultiStartGradient(AbstractMLE):
                 best_index = int(np.argmin(foms_np))
                 if foms_np[best_index] < best_fom:
                     best_fom = float(foms_np[best_index])
+                    # Mapped back to PHYSICAL on capture, not on the way out.
+                    # ``best_params`` is read by ``samples_via_internal_from`` and
+                    # by the resume path, neither of which knows a scaler exists;
+                    # converting at every read instead of once here is how one of
+                    # them eventually gets missed.
                     best_params = np.asarray(params[best_index])
+                    if has_scaler:
+                        best_params = best_params * scale
 
                 fom_history.append(best_fom)
 
@@ -921,6 +1017,7 @@ class AbstractMultiStartGradient(AbstractMLE):
                         jax=jax,
                         jnp=jnp,
                         rng=resurrect_rng,
+                        scale=scale,
                     )
 
                 updates, opt_state = step_update(grads, opt_state, params, foms)
@@ -935,9 +1032,16 @@ class AbstractMultiStartGradient(AbstractMLE):
                 #
                 # ``project`` broadcasts the ``(n_params,)`` bounds against the
                 # ``(n_starts, n_params)`` batch, so no vmap is needed here.
+                #
+                # ``scale`` is handed through rather than the parameters being
+                # round-tripped to physical and back: the bounds are a constant
+                # ``(n_params,)`` vector divided once, whereas the round trip
+                # would multiply and divide the whole ``(n_starts, n_params)``
+                # batch every step and reintroduce floating-point drift into
+                # coordinates the clipper had just placed exactly on a bound.
                 if has_clipper:
                     params, clipped_mask = self.clipper.project(
-                        vector=params, model=model, xp=jnp
+                        vector=params, model=model, xp=jnp, scale=scale
                     )
                     # Per-LANE, not per-coordinate: a lane clipped in three
                     # parameters at once is one clipped lane-step, matching how
@@ -976,6 +1080,14 @@ class AbstractMultiStartGradient(AbstractMLE):
                     # logging step: it is an (n_starts,) device->host copy, which
                     # merely pulls forward the sync the next iteration's
                     # ``np.asarray(foms)`` would force anyway.
+                    #
+                    # Under a scaler this ``d`` is in SCALED units, because that
+                    # is the space the rule is stepping in. It is reported as the
+                    # rule's own estimate rather than converted, since there is no
+                    # single physical value to convert it to — one ``d`` now spans
+                    # a whole vector of physical step sizes, which is the point of
+                    # the feature. Do not compare ``d`` across a scaled and an
+                    # unscaled arm; compare the clip rate instead.
                     estim_lr = optax.tree_utils.tree_get(opt_state, "estim_lr")
 
                     self.logger.info(
@@ -998,8 +1110,20 @@ class AbstractMultiStartGradient(AbstractMLE):
             elif total_steps >= self.n_steps:
                 stop_reason = "max_steps"
 
+            # ``params`` is written back in PHYSICAL parameters even when the
+            # search stepped in scaled ones. The scaler does not enter the search
+            # identifier, so the same output directory can be written by a scaled
+            # run and read by an unscaled one; a file whose units depended on a
+            # knob that is invisible to the identifier would resume as a silently
+            # wrong population rather than as an error. ``samples_via_internal_from``
+            # reads this array directly for the per-start parameters too, and it
+            # has no scaler to consult. The scale vector rides along so a reader
+            # can see what was used without inferring it.
             search_internal = {
-                "params": np.asarray(params),
+                "params": (
+                    np.asarray(params) * scale if has_scaler else np.asarray(params)
+                ),
+                "scale": scale,
                 "opt_state": opt_state,
                 "best_params": best_params,
                 "best_fom": best_fom,
@@ -1030,7 +1154,9 @@ class AbstractMultiStartGradient(AbstractMLE):
             # this loop just built (carrying ``stop_reason``, ``converged`` and
             # ``fom_history``) is what ``_fit`` returns and what that final
             # update is computed from.
-            if not self._is_final_boundary(converged=converged, total_steps=total_steps):
+            if not self._is_final_boundary(
+                converged=converged, total_steps=total_steps
+            ):
                 self.perform_update(
                     model=model,
                     analysis=analysis,
@@ -1113,7 +1239,7 @@ class AbstractMultiStartGradient(AbstractMLE):
         return optimizer, step_update
 
     def _reinit_dead_starts(
-        self, params, opt_state, dead_idx, model, optimizer, jax, jnp, rng
+        self, params, opt_state, dead_idx, model, optimizer, jax, jnp, rng, scale=None
     ):
         """
         Redraw the dead starts (``dead_idx``) and reinitialise their per-start
@@ -1125,6 +1251,14 @@ class AbstractMultiStartGradient(AbstractMLE):
         and merged into the live state pytree with a boolean mask (``jnp.where``
         per leaf). ``np.asarray`` of a JAX array is read-only, so the redraw
         happens in an ``np.array`` copy.
+
+        ``params`` is in whatever coordinates the caller is stepping in. When
+        ``scale`` is given those are the scaled ones, so the redraw — which is
+        necessarily physical, since ``vector_from_unit_vector`` returns physical
+        parameters — is divided by it before it is written back into the row.
+        Redrawing into the wrong coordinates would place a resurrected lane at a
+        point the prior never proposed, and it would do so only on lanes that had
+        already died, which is exactly where nobody looks.
         """
         n = params.shape[0]
 
@@ -1133,9 +1267,10 @@ class AbstractMultiStartGradient(AbstractMLE):
             unit_vector = rng.uniform(
                 self.start_lower_limit, self.start_upper_limit, size=model.prior_count
             )
-            params_np[k] = np.asarray(
+            redrawn = np.asarray(
                 model.vector_from_unit_vector(unit_vector=list(unit_vector), xp=jnp)
             )
+            params_np[k] = redrawn if scale is None else redrawn / scale
         params = jnp.asarray(params_np)
 
         fresh_state = jax.vmap(optimizer.init)(params)
@@ -1338,10 +1473,16 @@ class AbstractMultiStartGradient(AbstractMLE):
             # current process's share — the same reasoning as the ``.get``
             # defaults above.
             "clipper": type(self.clipper).__name__,
+            # Per-parameter step scaling (PyAutoFit#1483), recorded by NAME for
+            # the same reasons as the clipper. It is recorded ALWAYS, including
+            # the ``ScalerNone`` default, because neither knob enters the search
+            # identifier: two arms differing only in the scaler write to the same
+            # output directory, and a result file that omitted the key when the
+            # feature was off would be indistinguishable from one written before
+            # the feature existed.
+            "scaler": type(self.scaler).__name__,
             "reset_momentum_on_clip": self.reset_momentum_on_clip,
-            "n_clipped_lane_steps": int(
-                search_internal.get("n_clipped_lane_steps", 0)
-            ),
+            "n_clipped_lane_steps": int(search_internal.get("n_clipped_lane_steps", 0)),
             # The seed this search's own draws used, so a result file says which
             # member of a multi-seed study produced it. ``None`` records the
             # default (historical fixed seeds) rather than being omitted, so a

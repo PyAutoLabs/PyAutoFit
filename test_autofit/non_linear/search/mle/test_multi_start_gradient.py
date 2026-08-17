@@ -385,7 +385,9 @@ def test__reset_clipped_momentum__recurses_through_optax_chain_tuples():
     # optax.adam's state arrives wrapped in a chain tuple, so the reset has to
     # descend through plain tuples as well as NamedTuples.
     mask = np.array([[True, False]])
-    nested = (_AdamLikeState(count=np.array([1]), mu=np.ones((1, 2)), nu=np.ones((1, 2))),)
+    nested = (
+        _AdamLikeState(count=np.array([1]), mu=np.ones((1, 2)), nu=np.ones((1, 2))),
+    )
 
     out = af.MultiStartAdam._reset_clipped_momentum(
         opt_state=nested, clipped_mask=mask, jnp=np
@@ -400,6 +402,25 @@ def test__dict_round_trip__reset_momentum_on_clip():
     assert restored.reset_momentum_on_clip is True
     # Default stays off, so the clipping path is unchanged unless asked for.
     assert af.MultiStartAdam().reset_momentum_on_clip is False
+
+
+def test__dict_round_trip__scaler():
+    restored = from_dict(to_dict(af.MultiStartAdam(scaler=af.ScalerPriorWidth())))
+
+    assert isinstance(restored.scaler, af.ScalerPriorWidth)
+    # Default is the no-op, so the step loop skips the change of variables
+    # entirely rather than multiplying by ones and recompiling a different step.
+    assert isinstance(af.MultiStartAdam().scaler, af.ScalerNone)
+
+
+def test__scaler_is_not_offered_by_searches_that_do_not_own_their_step_loop():
+    """
+    ``LBFGS`` takes a ``clipper`` (it hands the bounds to scipy) but must NOT take
+    a ``scaler``: it does not own its step loop, so the knob would silently do
+    nothing. A knob that accepts a value and ignores it is worse than no knob.
+    """
+    assert "clipper" in inspect.signature(af.LBFGS.__init__).parameters
+    assert "scaler" not in inspect.signature(af.LBFGS.__init__).parameters
 
 
 def test__samples_via_internal_from():
@@ -649,11 +670,11 @@ def test__variable_length_zero_weight_nan_rows_are_robust():
 @pytest.mark.parametrize(
     "converged, total_steps, is_final",
     [
-        (False, 50, False),   # ordinary intermediate boundary -> update here
+        (False, 50, False),  # ordinary intermediate boundary -> update here
         (False, 299, False),  # still short of the ceiling
-        (False, 300, True),   # ceiling reached
-        (False, 301, True),   # overshoot is still terminal
-        (True, 50, True),     # early convergence, well short of the ceiling
+        (False, 300, True),  # ceiling reached
+        (False, 301, True),  # overshoot is still terminal
+        (True, 50, True),  # early convergence, well short of the ceiling
         (True, 300, True),
     ],
 )
@@ -680,7 +701,7 @@ def test__is_final_boundary(converged, total_steps, is_final):
     "restored, expected",
     [
         ("converged", "converged"),  # must survive: the loop guard reads it
-        ("max_steps", None),         # stale — the run it described is over
+        ("max_steps", None),  # stale — the run it described is over
         (None, None),
         ("some_future_reason", None),
     ],
@@ -925,7 +946,7 @@ def test__samples_info__reports_a_cleared_stop_reason_as_unfinished():
 # pure Python and lives here, while the JAX measurement it consumes
 # (`Analysis.batched_memory_bytes`) is exercised in autofit_workspace_test.
 
-GB = 1024 ** 3
+GB = 1024**3
 
 # The 2026-07-30 release failure: XLA reported 85,898,814,480 bytes for a
 # 48-start interferometer jvp, i.e. 1,789,558,635 bytes per start.

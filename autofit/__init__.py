@@ -83,6 +83,9 @@ from .non_linear.grid.sensitivity import Sensitivity
 from .non_linear.clipper import AbstractClipper
 from .non_linear.clipper import ClipperNone
 from .non_linear.clipper import ClipperPriorBox
+from .non_linear.scaler import AbstractScaler
+from .non_linear.scaler import ScalerNone
+from .non_linear.scaler import ScalerPriorWidth
 from .non_linear.initializer import InitializerBall
 from .non_linear.initializer import InitializerPrior
 from .non_linear.initializer import InitializerParamBounds

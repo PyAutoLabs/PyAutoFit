@@ -483,9 +483,32 @@ class DirectoryPaths(AbstractPaths):
     def _save_model_info(self, model):
         """
         Save the model.info file, which summarises every parameter and prior.
+
+        A search that applies a per-parameter step scale
+        (:mod:`autofit.non_linear.scaler`) appends its scale vector to the bottom
+        of the same file. It goes in the FILE rather than into ``model.info`` the
+        property because the scale is a property of the *search*, which the model
+        knows nothing about — a search-dependent block cannot be rendered by a
+        model-only property, and splitting it into a second file would leave the
+        canonical "what is this model" artefact silently omitting the fact that
+        the search does not step in the units the file lists.
+
+        Guarded the same way ``_save_model_start_point``'s source is: a search
+        with no scaler, an older pickled search, or a scaler that declines to
+        describe itself all fall through to writing ``model.info`` alone.
         """
+        info = model.info
+
+        try:
+            scaler_info = self.search.scaler.info_from_model(model=model)
+        except (NotImplementedError, AttributeError):
+            scaler_info = ""
+
+        if scaler_info:
+            info += f"\n\n{scaler_info}"
+
         with open_(self.output_path / "model.info", "w+") as f:
-            f.write(model.info)
+            f.write(info)
 
         if should_output("model_graph") and hasattr(model, "graph_info"):
             with open_(self.output_path / "model.graph", "w+") as f:
