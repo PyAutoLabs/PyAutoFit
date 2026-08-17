@@ -160,7 +160,10 @@ def save_abc(pickler, obj):
     pickle._Pickler.save_type(pickler, obj)
 
 
-__version__ = "2026.7.23.1"
+# Last manual sync of the source stamp. Release wheels are stamped at build
+# time and the git tag is the release truth — deliberately never bumped per
+# release (PyAutoBuild#118/#120).
+__version__ = "2026.8.17.1"
 
 from autonerves import check_version
 
