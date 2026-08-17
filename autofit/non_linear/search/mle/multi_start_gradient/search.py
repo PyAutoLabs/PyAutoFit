@@ -43,10 +43,12 @@ class AbstractMultiStartGradient(AbstractMLE):
         start_lower_limit: float = 0.15,
         start_upper_limit: float = 0.85,
         resurrect: bool = False,
+        seed: Optional[int] = None,
         convergence: Optional[MultiStartGradientConvergence] = None,
         iterations_per_log: int = 10,
         initializer: Optional[AbstractInitializer] = None,
         clipper: Optional[AbstractClipper] = None,
+        reset_momentum_on_clip: bool = False,
         iterations_per_full_update: int = None,
         iterations_per_quick_update: int = None,
         silence: bool = False,
@@ -146,6 +148,41 @@ class AbstractMultiStartGradient(AbstractMLE):
             searchable at all. (Even so, on such landscapes a nested sampler
             still wins decisively — resurrection makes gradient MAP *viable*
             there, not competitive.)
+        seed
+            Seeds the two random draws this search owns: the broad starting
+            points (``_broad_starts``) and, when ``resurrect`` is on, the redraw
+            of dead lanes. Default ``None`` reproduces the historical fixed
+            seeds exactly, so an existing fit is bit-identical and this argument
+            is purely additive.
+
+            It exists because without it the search cannot be varied *or*
+            genuinely repeated: both draws were hardcoded, so every run of the
+            same model produced the **same** starting population no matter what
+            the caller seeded. Seeding ``random`` / ``numpy`` globally does not
+            reach them — that only perturbs the initializer — which makes a
+            multi-seed study silently a single-seed one. Note the scope: this
+            seeds *this search's* draws, not the whole framework (the
+            initializer and any sampler-owned generator are separate, still-open
+            sources of non-reproducibility).
+        reset_momentum_on_clip
+            Zero the optimizer's momentum on the coordinates a ``clipper`` just
+            clipped. Default ``False``, so the clipping path is unchanged unless
+            asked for.
+
+            It exists because projection alone leaves a lane holding the exact
+            velocity that carried it out of the prior box, so the next step
+            drives it into the same wall and it is re-projected onto the same
+            bound indefinitely — counted as alive, permanently pinned, and still
+            paying a full likelihood-and-gradient evaluation every step. The
+            reset is per-coordinate: a lane clipped in one parameter keeps its
+            momentum in all the others.
+
+            Note that a pinned lane is not automatically a failure. Where the
+            likelihood genuinely prefers a value outside the prior, sitting on
+            the bound is the correct MAP answer under the declared prior, and
+            this flag would then be discarding useful state. It is a knob for
+            the case where pinning is an artefact of momentum rather than a
+            statement about the data.
         convergence
             Auto-convergence (early-stopping) settings. When
             ``check_for_convergence`` is ``True`` (the default) the search stops
@@ -204,6 +241,8 @@ class AbstractMultiStartGradient(AbstractMLE):
         self.start_lower_limit = start_lower_limit
         self.start_upper_limit = start_upper_limit
         self.resurrect = resurrect
+        self.seed = seed
+        self.reset_momentum_on_clip = reset_momentum_on_clip
         self.convergence = (
             convergence if convergence is not None else MultiStartGradientConvergence()
         )
@@ -698,6 +737,11 @@ class AbstractMultiStartGradient(AbstractMLE):
             best_params = np.asarray(search_internal["best_params"])
             best_fom = float(search_internal["best_fom"])
             fom_history = list(search_internal["fom_history"])
+            # ``.get``: a ``search_internal`` written before the alive history
+            # existed has no such key, and a resumed run must not KeyError on
+            # it. An older run's curve is unrecoverable, so it resumes empty
+            # rather than being back-filled with a fabricated population.
+            alive_history = list(search_internal.get("alive_history", []))
             total_steps = int(search_internal["total_steps"])
             n_resurrections = int(search_internal.get("n_resurrections", 0))
             # ``.get`` with a default: a ``search_internal`` written before the
@@ -761,6 +805,7 @@ class AbstractMultiStartGradient(AbstractMLE):
             best_params = np.asarray(params[0])
             best_fom = np.inf
             fom_history = []
+            alive_history = []
             total_steps = 0
             n_resurrections = 0
             n_value_nan_lane_steps = 0
@@ -776,7 +821,7 @@ class AbstractMultiStartGradient(AbstractMLE):
 
         # Deterministic RNG for redrawing dead starts (only used when
         # ``resurrect`` is on); seeded independently of the broad-start draw.
-        resurrect_rng = np.random.default_rng(1)
+        resurrect_rng = np.random.default_rng(self._seed_for(1))
 
         stop_reason = self._stop_reason_on_resume(stop_reason)
 
@@ -846,6 +891,17 @@ class AbstractMultiStartGradient(AbstractMLE):
 
                 fom_history.append(best_fom)
 
+                # The size of the living population at this step. Recorded as a
+                # history because the cumulative lane counters above are
+                # survival INTEGRALS: a dead lane keeps adding to them every
+                # subsequent step, so the same death curve reads ~60% at 150
+                # steps and ~75% at 300 and two runs at different budgets cannot
+                # be compared on the scalar at all. The curve is the
+                # budget-independent quantity, and until now it existed only in
+                # the progress log at ``iterations_per_log`` cadence — visible
+                # to a human reading stdout, unavailable to any analysis.
+                alive_history.append(int(np.count_nonzero(alive)))
+
                 # Restart-on-death: redraw any start whose objective went
                 # non-finite (fresh params + reinitialised per-start optimizer
                 # state), leaving alive starts untouched. best_* is captured
@@ -889,6 +945,17 @@ class AbstractMultiStartGradient(AbstractMLE):
                     n_clipped_lane_steps += int(
                         np.count_nonzero(np.asarray(jnp.any(clipped_mask, axis=-1)))
                     )
+
+                    # Optionally zero the optimizer's momentum on the clipped
+                    # coordinates. Without it a clipped lane keeps the velocity
+                    # that pushed it out of the box, so it is re-projected onto
+                    # the same bound every step: alive in the counters, pinned
+                    # to the wall, and still spending a full likelihood-and-
+                    # gradient evaluation per step.
+                    if self.reset_momentum_on_clip:
+                        opt_state = self._reset_clipped_momentum(
+                            opt_state=opt_state, clipped_mask=clipped_mask, jnp=jnp
+                        )
 
                 total_steps += 1
 
@@ -937,6 +1004,7 @@ class AbstractMultiStartGradient(AbstractMLE):
                 "best_params": best_params,
                 "best_fom": best_fom,
                 "fom_history": np.asarray(fom_history),
+                "alive_history": np.asarray(alive_history),
                 "total_steps": total_steps,
                 "n_resurrections": n_resurrections,
                 "n_value_nan_lane_steps": n_value_nan_lane_steps,
@@ -1084,6 +1152,70 @@ class AbstractMultiStartGradient(AbstractMLE):
 
         return params, opt_state
 
+    # The optax moment accumulators — the "momentum" a clip should forget.
+    # Named explicitly rather than matched by shape, because shape matching is
+    # actively wrong here: Prodigy's ``params0`` and ``grad_sum`` carry the same
+    # ``(n_starts, n_params)`` shape as the moments, and ``params0`` is the
+    # reference point of its learning-rate estimate. Zeroing that would not
+    # reset momentum, it would corrupt the step-size estimate for the rest of
+    # the run. Anything not named here (``params0``, ``grad_sum``, ``estim_lr``,
+    # ``numerator_weighted``, ``count``) is deliberately left intact.
+    _MOMENTUM_FIELDS = frozenset({"mu", "nu", "exp_avg", "exp_avg_sq", "trace"})
+
+    @classmethod
+    def _reset_clipped_momentum(cls, opt_state, clipped_mask, jnp):
+        """Zero the optimizer moments wherever a coordinate was clipped.
+
+        ``clipped_mask`` is ``(n_starts, n_params)``, so the reset is
+        per-coordinate: a lane clipped in one parameter keeps its momentum in
+        every other parameter and only forgets the direction that took it out of
+        the box.
+        """
+
+        def rebuild(node):
+            fields = getattr(node, "_fields", None)
+            if fields is not None:
+                return type(node)(
+                    **{
+                        name: (
+                            jnp.where(clipped_mask, jnp.zeros_like(value), value)
+                            if name in cls._MOMENTUM_FIELDS
+                            and getattr(value, "shape", None) == clipped_mask.shape
+                            else rebuild(value)
+                        )
+                        for name, value in zip(fields, node)
+                    }
+                )
+            if isinstance(node, tuple):
+                return tuple(rebuild(child) for child in node)
+            if isinstance(node, list):
+                return [rebuild(child) for child in node]
+            return node
+
+        return rebuild(opt_state)
+
+    def _seed_for(self, stream: int):
+        """Seed material for one of this search's random draws.
+
+        ``stream`` identifies the draw: ``0`` the broad starting points, ``1``
+        the resurrection redraws. They must not share a stream — resurrection
+        would otherwise replay the starting population.
+
+        ``seed=None`` returns the bare stream index, which is exactly the
+        historical hardcoded seed at each site (``default_rng(0)`` /
+        ``default_rng(1)``), so the default path is bit-identical.
+
+        With a seed set, the pair is derived through ``SeedSequence`` rather
+        than by offsetting the seed. ``seed + stream`` looks equivalent and is
+        not: it makes seed 0's resurrection stream the same sequence as seed 1's
+        start stream, so nominally independent seeds in a multi-seed study share
+        draws. ``SeedSequence`` spreads each ``(seed, stream)`` pair over the
+        full state space instead.
+        """
+        if self.seed is None:
+            return stream
+        return np.random.SeedSequence([self.seed, stream])
+
     def _broad_starts(self, model, value_and_grad_single, jnp):
         """
         Draw ``n_starts`` broad starting points in the unit cube, map them to
@@ -1097,7 +1229,7 @@ class AbstractMultiStartGradient(AbstractMLE):
         cost per draw, which on a multi-band ``FactorGraphModel`` objective
         dominated the whole fit (~13 minutes for 16 draws, cache or no cache).
         """
-        rng = np.random.default_rng(0)
+        rng = np.random.default_rng(self._seed_for(0))
 
         starts = []
         max_tries = self.n_starts * 30
@@ -1206,9 +1338,16 @@ class AbstractMultiStartGradient(AbstractMLE):
             # current process's share — the same reasoning as the ``.get``
             # defaults above.
             "clipper": type(self.clipper).__name__,
+            "reset_momentum_on_clip": self.reset_momentum_on_clip,
             "n_clipped_lane_steps": int(
                 search_internal.get("n_clipped_lane_steps", 0)
             ),
+            # The seed this search's own draws used, so a result file says which
+            # member of a multi-seed study produced it. ``None`` records the
+            # default (historical fixed seeds) rather than being omitted, so a
+            # seeded and an unseeded run are distinguishable downstream instead
+            # of both reading as "no seed key".
+            "seed": self.seed,
             # Auto-convergence outcome: whether the run stopped on the plateau
             # check ("converged") or exhausted the ``n_steps`` ceiling
             # ("max_steps"), the settings that produced it, and the global-best
