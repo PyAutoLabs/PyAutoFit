@@ -60,6 +60,32 @@ is then merely under-scaled rather than mis-scaled, but the benefit shrinks. A
 diagonal learned from the observed gradient/step history is the natural successor
 if this proves too blunt.
 
+What "one scaled unit" does and does not mean
+---------------------------------------------
+
+:class:`ScalerPriorWidth` mixes ``width`` for uniform priors with ``sigma`` for
+Gaussian ones, so **one scaled unit does not carry a single consistent
+probabilistic interpretation** across coordinates. That is a real limitation and
+it is stated rather than papered over.
+
+It is acceptable because the goal here is an **engineering** one -- stop a step
+that suits a wide coordinate from crossing a narrow coordinate's wall -- and for
+that, order-of-magnitude commensurability is what matters. It is *not* a claim to
+prior-standardised coordinates.
+
+If genuinely prior-standardised coordinates are ever wanted, the unified
+definitions to reach for, in rough order of sophistication, are: the prior's
+actual **standard deviation**; a **robust central quantile width** (e.g. the
+inter-quantile range between the 15.9% and 84.1% points, which degrades
+gracefully for heavy-tailed and bounded priors alike); or the **local inverse-CDF
+derivative** ``dtheta/du`` evaluated at a reference point, which is the
+continuous generalisation of what the uniform and log-uniform rules already do.
+Each is a strictly better-defined quantity than the mixture above.
+
+None of them is implemented, deliberately. The simple width/sigma version is the
+one to measure first: if it does not move the clip rate, a more principled scale
+definition will not either, and the diagnosis behind the whole feature is wrong.
+
 Why a linear change of variables, and not the unit cube
 -------------------------------------------------------
 
@@ -101,14 +127,47 @@ Composition with ``Clipper``
 ----------------------------
 
 A ``Scaler`` and a :mod:`~autofit.non_linear.clipper` are **complementary, not
-alternatives**. Scaling treats the cause -- it reduces how often a lane reaches a
-wall. Clipping guarantees the invariant: scaling makes overshoot rarer, never
-impossible (a large gradient, bad curvature, or a grown step scale can still
-cross), and without clipping that failure is silent. And where the likelihood
-genuinely prefers a value outside the prior, **the clipped lane sitting on the
-bound is the correct MAP answer under the declared prior** -- only clipping can
-express that. ``AbstractClipper.project`` accepts the scale so it can clip in
-``phi`` against ``bounds / s``.
+alternatives**, and this stays true however well scaling works. Even if scaling
+drove the clip rate from 31% to 0.1%, projection would be retained as the
+last-line invariant.
+
+The reason is not hygiene, it is **constrained-optimizer semantics**. A search
+that advertises itself as optimising a posterior with hard prior support is
+solving a *constrained* problem, and a state outside that support is not an
+inconveniently poor candidate -- it is **infeasible**. Projection onto the box:
+
+- does not alter the constrained optimum;
+- makes that invariant explicit rather than incidental;
+- prevents silent invalid trajectories;
+- prevents prior exits from masking later pathologies;
+- makes the search diagnostics interpretable at all.
+
+Scaling treats the *cause* -- it reduces how often a lane reaches a wall -- and
+can only ever make overshoot rarer, never impossible: a large gradient, bad
+curvature, or a grown step scale can still cross. Without clipping that crossing
+is silent. And where the likelihood genuinely prefers a value outside the prior,
+**the clipped lane sitting on the bound is the correct MAP answer under the
+declared prior** -- only clipping can express it.
+
+``AbstractClipper.project`` accepts the scale so it can clip in ``phi`` against
+``bounds / s``.
+
+On the clipper's default
+------------------------
+
+Hard-support enforcement is the **intended** default for the gradient/MLE
+searches on those semantics. It is not the default yet, and the hesitation is
+empirical breadth rather than mathematics: everything measured so far is
+``MultiStartProdigy`` on a single lens cell, and ``MultiStartAdam`` /
+``MultiStartLion`` / ``MultiStartADABelief`` remain unmeasured -- which matters,
+because the fixed-rate rules are *more* exposed to the underlying problem, not
+less (Adam steps by roughly ``learning_rate`` in physical units in every
+coordinate; Lion, being sign-based, by exactly it).
+
+When the default does flip, it must not be sold as a long-budget accuracy
+improvement. It is not one: measured at 16x3000 the answer does not move at all,
+and at 105 steps the finite-budget gain was 114 nats. The case is correctness of
+the optimisation problem being solved.
 """
 
 import logging
