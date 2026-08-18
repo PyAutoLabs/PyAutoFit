@@ -179,10 +179,20 @@ class UniformPrior(Prior):
 
         This is used by certain non-linear searches (e.g. Emcee) in the log likelihood function evaluation.
 
-        For a UniformPrior this is always zero, provided the value is between the lower and upper limit.
+        For a UniformPrior this is zero inside ``[lower_limit, upper_limit]`` (the constant
+        ``-log(upper - lower)`` is dropped, see ``log_normalisation``) and ``-inf`` outside it,
+        on both the NumPy and JAX paths.
+
+        The bound test here is the only support enforcement in the search fitness path: since
+        the removal of ``assert_within_limits`` / ``PriorLimitException`` (shipped 2025.10.16.1),
+        ``instance_from_vector`` accepts out-of-support vectors without raising, so a
+        ``log_prior_from_value`` that skipped the test left the box entirely unenforced for
+        the NumPy-path searches that form a log posterior (Emcee, Zeus, Drawer, LBFGS) —
+        see PyAutoFit#1489. The ``-inf`` is what makes an out-of-box MCMC proposal a
+        rejected move.
         """
-        if xp is np:
-            return 0.0
+        if xp is np and np.ndim(value) == 0:
+            return 0.0 if self.lower_limit <= value <= self.upper_limit else -np.inf
         in_bounds = (value >= self.lower_limit) & (value <= self.upper_limit)
         return xp.where(in_bounds, xp.zeros_like(value), -xp.inf)
 

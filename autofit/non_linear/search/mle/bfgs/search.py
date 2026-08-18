@@ -244,11 +244,12 @@ class AbstractBFGS(AbstractMLE):
                 # ``minimize(bounds=None)`` is the same call as omitting it, so the
                 # default path is unchanged.
                 #
-                # Only the JAX branch is actually *exposed* to the prior-support
-                # problem: ``UniformPrior.log_prior_from_value`` returns ``0.0``
-                # unconditionally on the NumPy path, with no bound test, so there
-                # is no hard wall to fall off there. Bounds are still passed on
-                # both branches — they are correct on both, and having them
+                # Both branches are exposed to the prior-support problem:
+                # ``UniformPrior.log_prior_from_value`` returns ``-inf`` outside
+                # its bounds on the NumPy and JAX paths alike (PyAutoFit#1489
+                # restored the NumPy-side wall), so an unclipped step out of the
+                # box makes the objective non-finite on either branch. Bounds are
+                # passed on both — they are correct on both, and having them
                 # diverge by branch would be a trap of its own.
                 if analysis._use_jax:
 
