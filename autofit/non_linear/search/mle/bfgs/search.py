@@ -405,3 +405,15 @@ class LBFGS(AbstractBFGS):
     """
 
     method = "L-BFGS-B"
+
+    # SciPy 1.15 deprecated the L-BFGS-B ``disp`` / ``iprint`` options (removal
+    # slated for 1.18) — the solver no longer emits its Fortran-side verbose
+    # output, so passing them buys nothing but a DeprecationWarning per
+    # ``minimize`` call. The constructor still accepts both for API stability;
+    # they simply never reach scipy for this method.
+    @property
+    def options(self):
+        options = dict(super().options)
+        del options["disp"]
+        del options["iprint"]
+        return options

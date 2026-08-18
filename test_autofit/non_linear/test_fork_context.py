@@ -13,6 +13,16 @@ from autofit.non_linear.search.nest.dynesty.search.abstract import (
     prior_transform,
 )
 
+# pytest's own machinery keeps a background thread alive, so CPython 3.12+
+# flags every os.fork() here as fork-in-a-multi-threaded-process, and JAX
+# (itself multithreaded once imported) registers an equivalent RuntimeWarning
+# hook. The tests exercise the fork-pinned pool deliberately; the deadlock
+# caveat does not apply to these short-lived, likelihood-only workers.
+pytestmark = [
+    pytest.mark.filterwarnings("ignore:This process:DeprecationWarning"),
+    pytest.mark.filterwarnings(r"ignore:os\.fork\(\) was called:RuntimeWarning"),
+]
+
 pins_fork = (
     sys.platform != "darwin"
     and "fork" in multiprocessing.get_all_start_methods()

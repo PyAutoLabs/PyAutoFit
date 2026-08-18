@@ -327,15 +327,22 @@ class Fit(Base, fit_interface.Fit):
         lazy="joined",
         foreign_keys=[JSON.fit_id],
     )
+    # ``overlaps=``: ``HDU`` extends ``Array`` by joined-table inheritance, so
+    # ``Fit.arrays``/``Array.fit`` and ``Fit.hdus``/``HDU.fit`` all write the
+    # same ``array.fit_id`` column. The overlap is intentional (an HDU is an
+    # Array); the annotations carry exactly the names SQLAlchemy's SAWarning
+    # from ``configure_mappers()`` suggests.
     arrays: Mapped[List[Array]] = sa.orm.relationship(
         "Array",
         lazy="joined",
         foreign_keys=[Array.fit_id],
+        overlaps="fit",
     )
     hdus: Mapped[List[HDU]] = sa.orm.relationship(
         "HDU",
         lazy="joined",
         foreign_keys=[HDU.fit_id],
+        overlaps="arrays,fit",
     )
     fits: Mapped[List[Fits]] = sa.orm.relationship(
         "Fits",

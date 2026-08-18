@@ -28,9 +28,14 @@ def test__explicit_params():
     assert search.options["eps"] == 4.
     assert search.options["maxfun"] == 25000
     assert search.options["maxiter"] == 26000
-    assert search.options["iprint"] == -2
     assert search.options["maxls"] == 21
-    assert search.options["disp"] is True
+
+    # Accepted for API stability but never forwarded: scipy deprecated the
+    # L-BFGS-B ``disp`` / ``iprint`` options in 1.15.
+    assert search.iprint == -2
+    assert search.disp is True
+    assert "iprint" not in search.options
+    assert "disp" not in search.options
     assert isinstance(search.initializer, af.InitializerBall)
     assert search.initializer.lower_limit == 0.2
     assert search.initializer.upper_limit == 0.8
@@ -46,7 +51,9 @@ def test__explicit_params():
     assert search.options["eps"] == 1e-08
     assert search.options["maxfun"] == 15000
     assert search.options["maxiter"] == 15000
-    assert search.options["iprint"] == -1
     assert search.options["maxls"] == 20
-    assert search.options["disp"] is False
+    assert search.iprint == -1
+    assert search.disp is False
+    assert "iprint" not in search.options
+    assert "disp" not in search.options
     assert isinstance(search.initializer, af.InitializerBall)
