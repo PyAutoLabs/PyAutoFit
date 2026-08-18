@@ -169,6 +169,27 @@ class LinearTransform(AbstractDensityTransform):
 
 
 class LinearShiftTransform(LinearTransform):
+    """
+    Affine rescaling between a base variable and a physical variable.
+
+    ``shift`` and ``scale`` describe the **physical** space: going base →
+    physical (``inv_transform``) is ``x * scale + shift``, which is how e.g.
+    ``UniformPrior(lower, upper)`` maps a unit-interval base variable onto
+    ``[lower, upper]`` with ``shift=lower, scale=upper - lower``.
+
+    The Jacobian stored on the ``LinearTransform`` parent is therefore
+    ``DiagonalMatrix(1 / scale)`` — deliberately the *reciprocal* of the
+    intuitive physical scale — because ``transform`` runs in the opposite
+    direction, physical → base (``(x - shift) / scale``), and the parent
+    stores the Jacobian of ``transform``. Consistently, the change-of-variables
+    term for that direction is ``log_det = -log(scale)``.
+
+    Getting this reciprocal backwards was a contributing factor in the
+    historical LogUniform sign-convention bug (#1266); see the
+    ``composed_transform`` module docstring for the composition-order
+    convention this class participates in.
+    """
+
     def __init__(self, shift: float = 0, scale: float = 1):
         self.shift = float(shift)
         self.scale = float(scale)
