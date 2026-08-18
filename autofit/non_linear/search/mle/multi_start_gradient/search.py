@@ -22,6 +22,14 @@ from autofit.non_linear.search.mle.multi_start_gradient.convergence import (
 
 class AbstractMultiStartGradient(AbstractMLE):
 
+    # The clipper changes where a lane can sit and therefore the result, so two
+    # runs differing only in clipper must not share an output directory. This
+    # re-keys every existing multi-start identifier (stored results are orphaned
+    # on disk, not deleted). Scoped to the clipper-consuming searches only: the
+    # nested samplers and MCMC searches never touch the clipper and their
+    # identifiers must stay byte-identical (PyAutoFit#1493).
+    __identifier_fields__ = ("clipper",)
+
     # Name of the optax update rule, resolved lazily at fit time from ``optax``
     # then ``optax.contrib`` (so ``optax`` is only imported when a fit is
     # actually run — it is a JAX-only optional dependency). Subclasses set this

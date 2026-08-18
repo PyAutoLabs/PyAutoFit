@@ -17,6 +17,14 @@ import numpy as np
 
 class AbstractBFGS(AbstractMLE):
 
+    # Same contract as ``AbstractMultiStartGradient``: bounds handed to scipy
+    # change where the fit converges, so the clipper forks the identifier here
+    # too, re-keying existing (L)BFGS output directories (PyAutoFit#1493).
+    # ``Drawer`` deliberately does NOT declare this: it inherits the attribute
+    # from ``AbstractMLE`` but never consumes it, and a setting that cannot
+    # affect the result must not re-key stored results.
+    __identifier_fields__ = ("clipper",)
+
     method = None
 
     def __init__(
