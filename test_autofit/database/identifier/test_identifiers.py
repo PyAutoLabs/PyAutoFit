@@ -412,3 +412,107 @@ def test_dynesty_static():
 
 def test_integer_keys():
     assert str(Identifier({1: 1}))
+
+
+def test_nested_sampler_identifiers_unchanged_by_clipper():
+    """
+    The clipper entering the MLE search identifiers (PyAutoFit#1493) must not
+    re-key any nested sampler: these hash lists were captured on main before
+    the change and pin the archived nested-sampling results' directories.
+    """
+    assert Identifier(af.Nautilus()).hash_list == [
+        "Nautilus",
+        "n_live",
+        "3000",
+        "n_update",
+        "enlarge_per_dim",
+        "1.1",
+        "n_points_min",
+        "split_threshold",
+        "100",
+        "n_networks",
+        "4",
+        "n_like_new_bound",
+        "seed",
+        "n_shell",
+        "1",
+        "n_eff",
+        "500",
+    ]
+    assert Identifier(af.DynestyDynamic()).hash_list == [
+        "DynestyDynamic",
+        "bound",
+        "multi",
+        "sample",
+        "auto",
+        "enlarge",
+        "bootstrap",
+        "walks",
+        "5",
+        "facc",
+        "0.2",
+        "slices",
+        "5",
+        "fmove",
+        "0.9",
+        "max_move",
+        "100",
+    ]
+
+
+def test_mcmc_identifiers_unchanged_by_clipper():
+    assert Identifier(af.Emcee()).hash_list == [
+        "Emcee",
+        "nwalkers",
+        "50",
+    ]
+    assert Identifier(af.Zeus()).hash_list == [
+        "Zeus",
+        "nwalkers",
+        "50",
+        "tune",
+        "True",
+        "tolerance",
+        "0.05",
+        "patience",
+        "5",
+        "mu",
+        "1.0",
+        "light_mode",
+        "False",
+    ]
+
+
+def test_nested_samplers_have_no_clipper():
+    """
+    Tripwire for the hard constraint of PyAutoFit#1493: the clipper is resolved
+    on AbstractMLE and must stay there. Hoisting it to NonLinearSearch would put
+    it within reach of the nested samplers' identifier machinery and silently
+    re-key the nested-sampling archive; this fails loudly instead.
+    """
+    for search in [af.Nautilus(), af.DynestyStatic(), af.DynestyDynamic()]:
+        assert not hasattr(search, "clipper")
+
+
+@pytest.mark.parametrize("cls", [af.MultiStartAdam, af.LBFGS])
+def test_clipper_forks_mle_identifier(cls):
+    default = Identifier(cls())
+    assert Identifier(cls(clipper=af.ClipperNone())) == default
+    box = Identifier(cls(clipper=af.ClipperPriorBox()))
+    assert box != default
+    assert Identifier(cls(clipper=af.ClipperPriorBox(margin=1.0e-3))) != box
+
+
+def test_drawer_identifier_ignores_clipper():
+    """
+    Drawer inherits the clipper attribute from AbstractMLE but never consumes
+    it, so a setting that cannot affect its result must not re-key it.
+    """
+    assert Identifier(af.Drawer()).hash_list == [
+        "Drawer",
+        "total_draws",
+        "50",
+    ]
+    assert Identifier(af.Drawer(clipper=af.ClipperPriorBox())) == Identifier(
+        af.Drawer()
+    )
