@@ -22,6 +22,15 @@ work in unit-cube coordinates, and the MCMC samplers reject ``-inf`` proposals s
 the walker simply stays put. **Rejection is the restoring mechanism the gradient
 methods lack**, and a ``Clipper`` supplies it.
 
+(Historical correction, PyAutoFit#1489: the rejection sentence above was written
+while it was FALSE on the NumPy path — between release 2025.10.16.1, which removed
+``assert_within_limits`` / ``PriorLimitException``, and the strict
+``log_prior_from_value`` bounds restored for #1489, a NumPy-path ``UniformPrior``
+returned ``0.0`` outside its box, so there was no ``-inf`` for the MCMC samplers
+to reject and walkers escaped the declared support. It was true before
+2025.10.16.1, via exception-driven resampling, and is true again now via the
+strict priors. The gradient-method reasoning below was unaffected.)
+
 Two consumers, one source of truth
 ----------------------------------
 

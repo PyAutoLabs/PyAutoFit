@@ -312,7 +312,13 @@ class Fitness:
 
         if not self.fom_is_log_likelihood:
             log_prior_list = np.array(self.model.log_prior_list_from_vector(vector=parameters, xp=np))
-            log_likelihood = log_likelihood - np.sum(log_prior_list)
+            log_prior_sum = np.sum(log_prior_list)
+            # A non-finite prior sum marks a rejected out-of-support point (the strict
+            # priors return -inf outside their bounds, PyAutoFit#1489). The figure of
+            # merit there is -inf too, and subtracting -inf from -inf is NaN — keep the
+            # -inf so history / quick-update bookkeeping stays comparable.
+            if np.isfinite(log_prior_sum):
+                log_likelihood = log_likelihood - log_prior_sum
 
         return log_likelihood
 

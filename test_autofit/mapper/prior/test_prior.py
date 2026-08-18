@@ -175,6 +175,16 @@ class TestUniformPrior:
 
         assert log_prior == 0.0
 
+        # Outside the declared box the density is zero: -inf, so the searches
+        # that form a log posterior reject the sample (PyAutoFit#1489).
+        log_prior = gaussian_simple.log_prior_from_value(value=71.0)
+
+        assert log_prior == float("-inf")
+
+        log_prior = gaussian_simple.log_prior_from_value(value=-41.0)
+
+        assert log_prior == float("-inf")
+
 
 class TestLogUniformPrior:
     def test__simple_assumptions(self):
@@ -192,10 +202,12 @@ class TestLogUniformPrior:
         assert log_uniform_half.value_for(0.5) == pytest.approx(0.70710678118, 1.0e-4)
 
     def test__log_prior_from_value(self):
-        # LogUniformPrior log-density: -log(value), dropping the normalisation
-        # constant -log(log(upper / lower)). Consistent with UniformPrior's
-        # convention of returning 0.0 (dropping -log(b - a)).
-        log_uniform = af.LogUniformPrior(lower_limit=1e-8, upper_limit=1.0)
+        # LogUniformPrior log-density inside the support: -log(value), dropping
+        # the normalisation constant -log(log(upper / lower)). Consistent with
+        # UniformPrior's convention of returning 0.0 (dropping -log(b - a)).
+        # Outside [lower_limit, upper_limit] the density is zero: -inf
+        # (PyAutoFit#1489).
+        log_uniform = af.LogUniformPrior(lower_limit=1e-8, upper_limit=10.0)
 
         assert log_uniform.log_prior_from_value(value=1.0) == 0.0
         assert log_uniform.log_prior_from_value(value=2.0) == pytest.approx(
@@ -204,10 +216,11 @@ class TestLogUniformPrior:
         assert log_uniform.log_prior_from_value(value=4.0) == pytest.approx(
             -np.log(4.0), 1.0e-12
         )
+        assert log_uniform.log_prior_from_value(value=11.0) == float("-inf")
 
-        # The normalisation constant being dropped means the returned values
-        # do NOT depend on the (lower_limit, upper_limit) pair — only on `value`.
-        log_uniform = af.LogUniformPrior(lower_limit=50.0, upper_limit=100.0)
+        # Inside the support the dropped constant means the returned value does
+        # NOT depend on the (lower_limit, upper_limit) pair — only on `value`.
+        log_uniform = af.LogUniformPrior(lower_limit=0.5, upper_limit=100.0)
 
         assert log_uniform.log_prior_from_value(value=1.0) == 0.0
         assert log_uniform.log_prior_from_value(value=2.0) == pytest.approx(
@@ -216,6 +229,7 @@ class TestLogUniformPrior:
         assert log_uniform.log_prior_from_value(value=4.0) == pytest.approx(
             -np.log(4.0), 1.0e-12
         )
+        assert log_uniform.log_prior_from_value(value=0.4) == float("-inf")
 
     def test__log_prior_from_value__non_positive_returns_neg_inf(self):
         # Regression (PyAutoHeart #27 / release run 28784914443): Emcee's stretch
@@ -232,14 +246,13 @@ class TestLogUniformPrior:
             assert log_uniform.log_prior_from_value(value=-1.0) == float("-inf")
             assert log_uniform.log_prior_from_value(value=0.0) == float("-inf")
 
-        # Positive values are unchanged: the NumPy path stays unnormalised and
-        # unbounded, returning -log(value) regardless of (lower_limit, upper_limit).
+        # In-support values are unchanged, returning the unnormalised -log(value);
+        # values above upper_limit are now -inf like the rest of the excluded
+        # support (PyAutoFit#1489).
         assert log_uniform.log_prior_from_value(value=10.0) == pytest.approx(
             -np.log(10.0), 1.0e-12
         )
-        assert log_uniform.log_prior_from_value(value=1.0e4) == pytest.approx(
-            -np.log(1.0e4), 1.0e-12
-        )
+        assert log_uniform.log_prior_from_value(value=1.0e4) == float("-inf")
 
     def test__lower_limit_zero_or_below_raises_error(self):
         with pytest.raises(exc.PriorException):

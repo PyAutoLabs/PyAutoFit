@@ -123,21 +123,17 @@ class LogUniformPrior(Prior):
         used by ``UniformPrior.log_prior_from_value`` which drops ``-log(b - a)``
         to return ``0.0``.
 
-        Non-positive ``value`` (``value <= 0``) returns ``-inf``. Emcee's stretch
-        move proposes physical values that can leave the support and go
-        non-positive; ``-log`` of a non-positive value is ``NaN``, which propagates
-        into the summed figure-of-merit and crashes the search with
-        ``ValueError: Probability function returned NaN``. Returning ``-inf``
-        (zero density -> rejected move) keeps the figure-of-merit finite. The
-        "double where" pattern (a safe surrogate inside the ``log``) ensures no
+        Outside ``[lower_limit, upper_limit]`` the density is zero, so ``-inf`` is
+        returned — on both the NumPy and JAX paths. This bound test is the only
+        support enforcement in the search fitness path (see
+        ``UniformPrior.log_prior_from_value`` and PyAutoFit#1489): for MCMC an
+        out-of-box proposal becomes a rejected move. It also keeps the
+        figure-of-merit finite where Emcee's stretch move proposes a non-positive
+        value: ``-log`` of a non-positive value is ``NaN``, which would otherwise
+        crash the search with ``ValueError: Probability function returned NaN``.
+        The "double where" pattern (a safe surrogate inside the ``log``) ensures no
         ``log`` of a non-positive value is evaluated, avoiding NumPy
         ``RuntimeWarning``s.
-
-        The NumPy path is otherwise unnormalised and unbounded: for any positive
-        ``value`` it returns ``-log(value)`` regardless of ``[lower_limit,
-        upper_limit]`` (dropping the normalisation constant, matching
-        ``UniformPrior``'s convention of returning ``0.0``). The JAX path
-        additionally returns ``-inf`` outside ``[lower_limit, upper_limit]``.
 
         Parameters
         ----------
@@ -147,10 +143,9 @@ class LogUniformPrior(Prior):
         xp
             Array-module to dispatch on (``numpy`` or ``jax.numpy``). Default ``numpy``.
         """
-        if xp is np:
-            positive = value > 0.0
-            return xp.where(positive, -xp.log(xp.where(positive, value, 1.0)), -xp.inf)
         in_bounds = (value >= self.lower_limit) & (value <= self.upper_limit)
+        if xp is np:
+            return xp.where(in_bounds, -xp.log(xp.where(in_bounds, value, 1.0)), -xp.inf)
         return xp.where(in_bounds, -xp.log(value), -xp.inf)
 
     def log_normalisation(self, xp=np) -> float:

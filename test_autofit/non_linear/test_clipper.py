@@ -368,8 +368,13 @@ class TestSearchWiring:
 
         assert clipped_centre <= 20.0
         assert not np.isnan(clipped_centre)
-        # The unconstrained fit is free to chase the truth past the prior edge.
-        assert unbounded_centre > 20.0
+        # Since PyAutoFit#1489 the strict NumPy-path priors make the objective
+        # -inf outside the box, so even the clipper-less fit can no longer chase
+        # the truth past the prior edge — it hits an infinite wall instead of
+        # escaping. (This test previously asserted `unbounded_centre > 20.0`,
+        # pinning the pre-#1489 escape as the foil for the clipped run.)
+        assert unbounded_centre <= 20.0
+        assert not np.isnan(unbounded_centre)
 
     def test__non_bound_supporting_method_raises_rather_than_being_ignored(self):
         """
