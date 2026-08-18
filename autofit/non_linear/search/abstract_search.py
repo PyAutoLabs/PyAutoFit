@@ -134,6 +134,7 @@ def configure_handler(func):
             return func(self, *args, **kwargs)
         finally:
             root_logger.removeHandler(handler)
+            handler.close()
 
     return decorated
 
