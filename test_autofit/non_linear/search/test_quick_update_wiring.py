@@ -23,6 +23,14 @@ REQUIRED_KWARG = "iterations_per_quick_update"
 
 # path suffix -> why this construction site legitimately omits the kwarg.
 EXEMPT = {
+    "nest/nss/search.py": (
+        "af.NSS samples through inline JAX closures, never through Fitness -- "
+        "its Fitness exists only for AbstractNest.perform_update post-fit "
+        "work (latent samples, batch_size), so forwarding the cadence there "
+        "would wire it to a dead path. Quick updates fire through the "
+        "search's own outer loop instead: `iterations_per_quick_update` is "
+        "consumed directly in `_fit` via `_fire_quick_update`."
+    ),
     "mle/multi_start_gradient/search.py": (
         "MultiStartGradient differentiates `fitness.call` inside its own "
         "jit/vmap step loop, so the Python-side counter in `call_wrap` would run "
