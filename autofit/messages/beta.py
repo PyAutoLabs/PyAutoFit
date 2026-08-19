@@ -146,7 +146,7 @@ class BetaMessage(AbstractMessage):
         id_
             Identifier for the message. Default is None.
         """
-        if isinstance(alpha, (np.ndarray, float, int, list)):
+        if isinstance(alpha, (np.ndarray, np.generic, float, int, list)):
             xp = np
         else:
             import jax.numpy as jnp

@@ -80,8 +80,9 @@ class Analysis(ABC):
                     "|  Falling back to numpy. The fit will run, but JAX acceleration       |\n"
                     "|  (typically 10-100x for large lens models) is unavailable.           |\n"
                     "|                                                                      |\n"
-                    "|  To enable JAX, install on Python 3.11+ via your library's [jax]     |\n"
-                    "|  extra, e.g.:  pip install autolens[jax]                             |\n"
+                    "|  JAX is a default dependency; it is absent because this platform     |\n"
+                    "|  has no JAX wheels (e.g. Intel macOS) or it was uninstalled. On      |\n"
+                    "|  supported platforms, restore it with:  pip install jax              |\n"
                     "+----------------------------------------------------------------------+",
                     UserWarning,
                     stacklevel=2,

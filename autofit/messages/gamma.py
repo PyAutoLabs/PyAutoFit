@@ -29,7 +29,7 @@ class GammaMessage(AbstractMessage):
             log_norm=0.0,
             id_=None
     ):
-        if isinstance(alpha, (np.ndarray, float, int, list)):
+        if isinstance(alpha, (np.ndarray, np.generic, float, int, list)):
             xp = np
         else:
             import jax.numpy as jnp
