@@ -1,14 +1,15 @@
+from __future__ import annotations
+
 import logging
 import os
 from abc import ABC
 from pathlib import Path
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, Optional, Tuple, Union, TYPE_CHECKING
 
 import numpy as np
 import warnings
 
 from autofit import exc
-from autofit.database.sqlalchemy_ import sa
 from autofit.non_linear.fitness import Fitness
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.paths.null import NullPaths
@@ -16,6 +17,9 @@ from autofit.non_linear.search.nest.abstract_nest import AbstractNest
 from autofit.non_linear.samples.sample import Sample
 from autofit.non_linear.samples.nest import SamplesNest
 from autofit.non_linear.test_mode import is_test_mode
+
+if TYPE_CHECKING:
+    from autofit.database.sqlalchemy_ import sa
 
 logger = logging.getLogger(__name__)
 

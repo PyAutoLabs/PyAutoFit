@@ -1,9 +1,13 @@
-from typing import List, Union
+from __future__ import annotations
+
+from typing import List, Union, TYPE_CHECKING
 
 from autofit.non_linear.paths.abstract import AbstractPaths
 from autofit.non_linear.samples import Samples
-from autofit.database import Prior
 from autofit.non_linear.result import Result, Placeholder
+
+if TYPE_CHECKING:
+    from autofit.database import Prior
 from .job import JobResult
 from .result import GridSearchResult
 

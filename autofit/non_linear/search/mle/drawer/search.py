@@ -1,13 +1,17 @@
-import numpy as np
-from typing import Optional
+from __future__ import annotations
 
-from autofit.database.sqlalchemy_ import sa
+import numpy as np
+from typing import Optional, TYPE_CHECKING
+
 
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.fitness import Fitness
 from autofit.non_linear.search.mle.abstract_mle import AbstractMLE
 from autofit.non_linear.initializer import AbstractInitializer
 from autofit.non_linear.samples import Samples, Sample
+
+if TYPE_CHECKING:
+    from autofit.database.sqlalchemy_ import sa
 
 
 class Drawer(AbstractMLE):

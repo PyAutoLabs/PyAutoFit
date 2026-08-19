@@ -1,10 +1,11 @@
+from __future__ import annotations
+
 import inspect
 import pickle
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 import numpy as np
 
-from autofit.database.sqlalchemy_ import sa
 
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.search.mle.abstract_mle import AbstractMLE
@@ -18,6 +19,9 @@ from autofit.non_linear.samples.samples import Samples
 from autofit.non_linear.search.mle.multi_start_gradient.convergence import (
     MultiStartGradientConvergence,
 )
+
+if TYPE_CHECKING:
+    from autofit.database.sqlalchemy_ import sa
 
 
 class AbstractMultiStartGradient(AbstractMLE):

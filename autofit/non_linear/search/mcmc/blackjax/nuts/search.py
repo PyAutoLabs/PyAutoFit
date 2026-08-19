@@ -1,14 +1,15 @@
+from __future__ import annotations
+
 import logging
 import os
 import pickle
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 import numpy as np
 
 from autonerves import conf
 
-from autofit.database.sqlalchemy_ import sa
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.fitness import Fitness
 from autofit.non_linear.initializer import Initializer
@@ -18,6 +19,9 @@ from autofit.non_linear.search.mcmc.auto_correlations import AutoCorrelationsSet
 from autofit.non_linear.test_mode import is_test_mode
 from autofit.non_linear.samples.mcmc import SamplesMCMC
 from autofit.non_linear.samples.sample import Sample
+
+if TYPE_CHECKING:
+    from autofit.database.sqlalchemy_ import sa
 
 logger = logging.getLogger(__name__)
 
