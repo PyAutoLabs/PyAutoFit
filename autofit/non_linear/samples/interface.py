@@ -2,44 +2,73 @@ from abc import ABC, abstractmethod
 from functools import wraps
 from typing import Union, List, Tuple, Dict
 
+from autofit import exc
 from autofit.mapper.model import ModelInstance
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.mapper.prior_model.abstract import Path
 
 
-def to_instance(func):
+def to_instance(recover: str = "raise"):
     """
     Decorator for methods that return a vector of parameters, which can be converted to a model instance.
 
+    Constructor validation can become stricter after a result was written, so a stored
+    vector may be rejected via the narrow `FitException` contract when materialized.
+    The `recover` policy decides what happens then:
+
+    - "raise": raise a typed `SamplesException` (chained to the rejection). This is the
+      only honest option for vectors with no stored sample to substitute — e.g. the
+      marginalized methods, which synthesize each parameter independently — and for
+      `from_sample_index`, where the caller asked for one specific sample.
+    - "next_valid": call the object's `_next_valid_instance`, which substitutes the
+      best valid stored sample (see `Samples._next_valid_instance`).
+
     Parameters
     ----------
-    func
-        A method that returns a vector of parameters
+    recover
+        The recovery policy applied when the model rejects the vector with
+        `FitException` while building an instance.
 
     Returns
     -------
-    A wrapper that converts the vector to a model instance
+    A decorator whose wrapper converts the vector to a model instance
     """
 
-    @wraps(func)
-    def wrapper(
-        self,
-        *args,
-        as_instance: bool = True,
-        as_dict: bool = False,
-        **kwargs,
-    ) -> Union[List, Dict, ModelInstance]:
-        vector = func(self, *args, **kwargs)
+    def decorator(func):
+        @wraps(func)
+        def wrapper(
+            self,
+            *args,
+            as_instance: bool = True,
+            as_dict: bool = False,
+            **kwargs,
+        ) -> Union[List, Dict, ModelInstance]:
+            vector = func(self, *args, **kwargs)
 
-        if as_dict:
-            return {".".join(path[0]): value for path, value in zip(self.paths, vector)}
+            if as_dict:
+                return {
+                    ".".join(path[0]): value
+                    for path, value in zip(self.paths, vector)
+                }
 
-        if as_instance:
-            return self._instance_from_vector(vector)
+            if as_instance:
+                try:
+                    return self._instance_from_vector(vector)
+                except exc.FitException as error:
+                    if recover == "next_valid":
+                        return self._next_valid_instance(error)
+                    raise exc.SamplesException(
+                        f"The stored parameters returned by {func.__name__} cannot "
+                        f"be reconstructed as a model instance because the current "
+                        f"model rejected them (see the chained exception). Pass "
+                        f"as_instance=False to retrieve the raw values instead."
+                    ) from error
 
-        return vector
+            return vector
 
-    return wrapper
+        return wrapper
+
+    return decorator
 
 
 class SamplesInterface(ABC):
@@ -90,7 +119,7 @@ class SamplesInterface(ABC):
             self._names = self.model.all_names
         return self._names
 
-    @to_instance
+    @to_instance()
     def max_log_likelihood(self, as_instance: bool = True) -> List[float]:
         """
         The parameters of the maximum log likelihood sample of the `NonLinearSearch` returned as a model instance or

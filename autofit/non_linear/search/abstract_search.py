@@ -758,7 +758,7 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         if mode == 1:
             try:
                 samples_summary.max_log_likelihood()
-            except exc.FitException as error:
+            except (exc.FitException, exc.SamplesException) as error:
                 samples = self._test_mode_samples_after_rejected_fit(
                     samples=samples,
                     error=error,
@@ -786,7 +786,7 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
     def _test_mode_samples_after_rejected_fit(
         self,
         samples: Samples,
-        error: exc.FitException,
+        error: Exception,
     ) -> Samples:
         """Build valid representative samples after a mode-1 rejected result.
 

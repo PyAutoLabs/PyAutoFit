@@ -210,7 +210,7 @@ class SearchUpdater:
 
         try:
             instance = samples_summary.instance
-        except exc.FitException:
+        except (exc.FitException, exc.SamplesException):
             return samples, samples_summary, None, samples
 
         self._paths.save_samples_summary(samples_summary=samples_summary)

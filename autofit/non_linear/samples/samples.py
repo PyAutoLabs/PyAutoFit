@@ -70,15 +70,15 @@ class Samples(SamplesInterface, ABC):
     @property
     def instances(self):
         """
-        One model instance for each sample
+        One model instance for each stored sample the current model can still build.
+
+        Stored samples rejected via the narrow :class:`FitException` contract are
+        skipped (a warning is logged), so the list can be shorter than
+        ``sample_list``. Use ``valid_sample_instance_pairs`` when instances must
+        stay paired with their samples (e.g. weights).
         """
         return [
-            self.model.instance_from_vector(
-                sample.parameter_lists_for_paths(
-                    self.paths if sample.is_path_kwargs else self.names
-                ),
-            )
-            for sample in self.sample_list
+            instance for _, instance in self.valid_sample_instance_pairs()
         ]
 
     def valid_sample_instance_pairs(
@@ -405,19 +405,38 @@ class Samples(SamplesInterface, ABC):
         try:
             return self._instance_from_vector(vector)
         except exc.FitException as error:
-            last_error = error
+            return self._instance_from_next_valid_sample(
+                exclude_sample=sample,
+                sample_value=lambda candidate: candidate.log_likelihood,
+                quantity_name="likelihood",
+                last_error=error,
+            )
 
-        valid_sample_candidates = sorted(
-            (candidate for candidate in self.sample_list if candidate is not sample),
+    def _instance_from_next_valid_sample(
+        self,
+        exclude_sample: Sample,
+        sample_value,
+        quantity_name: str,
+        last_error: Exception,
+    ) -> ModelInstance:
+        """
+        The highest-``quantity_name`` stored sample, excluding ``exclude_sample``
+        (already rejected), that the current model can still reconstruct.
+
+        Raises ``SamplesException`` chained to the final rejection when no stored
+        sample survives.
+        """
+        candidates = sorted(
+            (candidate for candidate in self.sample_list if candidate is not exclude_sample),
             key=lambda candidate: (
                 float("-inf")
-                if np.isnan(candidate.log_likelihood)
-                else candidate.log_likelihood
+                if np.isnan(sample_value(candidate))
+                else sample_value(candidate)
             ),
             reverse=True,
         )
 
-        for candidate in valid_sample_candidates:
+        for candidate in candidates:
             candidate_vector = candidate.parameter_lists_for_paths(
                 self.paths if candidate.is_path_kwargs else self.names
             )
@@ -428,10 +447,11 @@ class Samples(SamplesInterface, ABC):
                 continue
 
             logger.warning(
-                "The maximum-likelihood stored sample can no longer be "
-                "reconstructed because the model rejected it with "
-                "FitException; using the highest-likelihood valid stored "
-                "sample instead."
+                "The maximum-%s stored sample can no longer be reconstructed "
+                "because the model rejected it with FitException; using the "
+                "highest-%s valid stored sample instead.",
+                quantity_name,
+                quantity_name,
             )
             return instance
 
@@ -439,6 +459,19 @@ class Samples(SamplesInterface, ABC):
             "None of the stored samples can be reconstructed as a valid model "
             "instance."
         ) from last_error
+
+    def _next_valid_instance(self, last_error: Exception) -> ModelInstance:
+        """
+        Recovery hook for the ``to_instance(recover="next_valid")`` policy,
+        currently used only by ``max_log_posterior``: substitute the
+        highest-posterior stored sample the current model can still build.
+        """
+        return self._instance_from_next_valid_sample(
+            exclude_sample=self.max_log_posterior_sample,
+            sample_value=lambda candidate: candidate.log_posterior,
+            quantity_name="posterior",
+            last_error=last_error,
+        )
 
     @property
     def max_log_posterior_sample(self) -> Sample:
@@ -459,14 +492,14 @@ class Samples(SamplesInterface, ABC):
             return 0
         return int(np.nanargmax(log_posterior_list))
 
-    @to_instance
+    @to_instance(recover="next_valid")
     def max_log_posterior(self) -> ModelInstance:
         """
         The parameters of the maximum log posterior sample of the `NonLinearSearch` returned as a model instance.
         """
         return self.parameter_lists[self.max_log_posterior_index]
 
-    @to_instance
+    @to_instance()
     def from_sample_index(self, sample_index: int) -> ModelInstance:
         """
         The parameters of an individual sample of the non-linear search, returned as a model instance.

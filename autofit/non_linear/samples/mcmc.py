@@ -133,7 +133,7 @@ class SamplesMCMC(SamplesPDF):
             total_samples=self.total_samples
         )
 
-    @to_instance
+    @to_instance()
     def median_pdf(self, as_instance: bool = True) -> [float]:
         """
         The median of the probability density function (PDF) of every parameter marginalized in 1D, returned
@@ -150,7 +150,7 @@ class SamplesMCMC(SamplesPDF):
 
         return self.max_log_likelihood(as_instance=False)
 
-    @to_instance
+    @to_instance()
     def values_at_sigma(self, sigma: float) -> [float]:
         """
         The value of every parameter marginalized in 1D at an input sigma value of its probability density function

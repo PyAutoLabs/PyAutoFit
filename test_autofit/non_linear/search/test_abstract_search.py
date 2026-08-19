@@ -640,7 +640,9 @@ class TestReducedModeRejectedFinalSample:
             child.instance.galaxies.value == pytest.approx(0.9) for child in result
         )
 
-    def test__normal_mode__fitexception_still_propagates(self, monkeypatch):
+    def test__normal_mode__reconstruction_failure_raises_samples_exception(
+        self, monkeypatch
+    ):
         monkeypatch.delenv("PYAUTO_TEST_MODE", raising=False)
         model, rejected_samples = _model_and_rejected_samples(_RejectsLowValue)
 
@@ -649,8 +651,10 @@ class TestReducedModeRejectedFinalSample:
             analysis=af.m.MockAnalysis(),
         )
 
-        with pytest.raises(af.exc.FitException):
+        with pytest.raises(af.exc.SamplesException) as error:
             result.samples_summary.instance
+
+        assert isinstance(error.value.__cause__, af.exc.FitException)
 
     def test__test_mode_1__non_fitexception_still_propagates(self, monkeypatch):
         monkeypatch.setenv("PYAUTO_TEST_MODE", "1")
