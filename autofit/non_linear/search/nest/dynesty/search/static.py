@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Optional, Union
+from typing import Dict, Optional, Union, TYPE_CHECKING
 
 
-from autofit.database.sqlalchemy_ import sa
 
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 
 from .abstract import AbstractDynesty, prior_transform
+
+if TYPE_CHECKING:
+    from autofit.database.sqlalchemy_ import sa
 
 class DynestyStatic(AbstractDynesty):
     __identifier_fields__ = (

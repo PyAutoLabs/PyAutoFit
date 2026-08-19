@@ -1,6 +1,10 @@
-from typing import Optional, List
+from __future__ import annotations
 
-from autofit.database.sqlalchemy_ import sa
+from typing import Optional, List, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from autofit.database.sqlalchemy_ import sa
+
 
 
 class SettingsSearch:

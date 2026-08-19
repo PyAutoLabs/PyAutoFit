@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Optional, Union, Tuple, List, Dict
 import psutil
 
 if TYPE_CHECKING:
+    from autofit.database.sqlalchemy_ import sa
     from autofit.non_linear.result import Result
 
 from autonerves import conf
@@ -23,7 +24,6 @@ from autonerves import conf
 from autonerves.output import should_output
 
 from autofit import exc
-from autofit.database.sqlalchemy_ import sa
 from autofit.graphical import (
     MeanField,
     AnalysisFactor,

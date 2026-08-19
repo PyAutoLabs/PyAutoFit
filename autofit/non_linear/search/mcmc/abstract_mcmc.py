@@ -1,11 +1,15 @@
-from typing import Optional
+from __future__ import annotations
+
+from typing import Optional, TYPE_CHECKING
 
 from autonerves import conf
-from autofit.database.sqlalchemy_ import sa
 from autofit.non_linear.search.abstract_search import NonLinearSearch
 from autofit.non_linear.initializer import Initializer, InitializerBall
 from autofit.non_linear.search.mcmc.auto_correlations import AutoCorrelationsSettings
 from autofit.non_linear.plot import corner_cornerpy
+
+if TYPE_CHECKING:
+    from autofit.database.sqlalchemy_ import sa
 
 class AbstractMCMC(NonLinearSearch):
 

@@ -1,7 +1,8 @@
-from typing import Optional
+from __future__ import annotations
+
+from typing import Optional, TYPE_CHECKING
 
 from autofit import exc
-from autofit.database.sqlalchemy_ import sa
 
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.search.mle.abstract_mle import AbstractMLE
@@ -13,6 +14,9 @@ from autofit.non_linear.samples.sample import Sample
 from autofit.non_linear.samples.samples import Samples
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from autofit.database.sqlalchemy_ import sa
 
 
 class AbstractBFGS(AbstractMLE):

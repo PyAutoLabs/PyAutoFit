@@ -1,10 +1,11 @@
+from __future__ import annotations
+
 import logging
-from typing import Dict, Optional
+from typing import Dict, Optional, TYPE_CHECKING
 
 import numpy as np
 import os
 
-from autofit.database.sqlalchemy_ import sa
 from autofit.mapper.model_mapper import ModelMapper
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.fitness import Fitness
@@ -15,6 +16,9 @@ from autofit.non_linear.search.mcmc.auto_correlations import AutoCorrelations
 from autofit.non_linear.samples.sample import Sample
 from autofit.non_linear.test_mode import is_test_mode
 from autofit.non_linear.samples.mcmc import SamplesMCMC
+
+if TYPE_CHECKING:
+    from autofit.database.sqlalchemy_ import sa
 
 logger = logging.getLogger(__name__)
 
