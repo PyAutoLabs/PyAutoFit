@@ -651,8 +651,10 @@ class AbstractMultiStartGradient(AbstractMLE):
             import optax.contrib  # noqa: F401  — makes optax.contrib rules resolvable
         except ImportError as e:
             raise ImportError(
-                f"{type(self).__name__} requires the optional `jax` and `optax` "
-                "dependencies. Install them with `pip install autofit[jax] optax`."
+                f"{type(self).__name__} requires the `jax` and `optax` "
+                "dependencies. These are installed by default except on platforms "
+                "without JAX wheels (e.g. Intel macOS); install them with "
+                "`pip install jax optax`."
             ) from e
 
         if not getattr(analysis, "_use_jax", False):

@@ -24,11 +24,16 @@ classifiers = [
 ]
 keywords = ["cli"]
 dependencies = [
-    # Floor, not a pin. Without one, pip backtracking the extras chain
-    # (autofit[jax] -> autonerves[jax]) may walk the release history to 2022:
-    # "version X does not provide the extra 'jax'" is a pip *warning*, not an
-    # error, so a pre-extras release is a legal solution. PyAutoLens#687.
+    # Floor, not a pin (PyAutoLens#687) — bump to the first release with JAX
+    # in autonerves' base dependencies once it exists (PyAutoLens#702), so
+    # backtracking cannot pair this autofit with a jax-optional autonerves.
     "autonerves>=2026.7.29.2",
+    # JAX-native gradient MAP searches (MultiStartAdam / MultiStartProdigy)
+    # import optax; jax itself comes from autonerves' base deps. Both are
+    # marker-gated for platforms with no jax wheels (Intel macOS) — optax
+    # depends on jax, so an unmarked optax would break resolution there.
+    # PyAutoLens#702.
+    'optax>=0.2.5; sys_platform != "darwin" or platform_machine == "arm64"',
     "array_api_compat",
     "anesthetic>=2.9.0",
     "corner==2.2.2",
@@ -68,7 +73,9 @@ local_scheme = "no-local-version"
 
 
 [project.optional-dependencies]
-jax = ["autonerves[jax]>=2026.7.29.2", "optax>=0.2.5"]
+# JAX moved into the base dependencies (PyAutoLens#702). Kept as a declared
+# no-op so `pip install autofit[jax]` keeps resolving (PyAutoLens#687).
+jax = []
 mcp = ["mcp"]
 optional = [
     "autofit[jax]",
