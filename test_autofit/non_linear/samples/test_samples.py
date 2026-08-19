@@ -205,6 +205,95 @@ def test__valid_sample_instance_pairs__does_not_hide_programming_errors():
         samples.valid_sample_instance_pairs()
 
 
+def test__instances__skips_historical_invalid_points():
+    samples = _guarded_samples(
+        parameter_lists=[[0.1], [0.9]],
+        log_likelihood_list=[2.0, 1.0],
+        weight_list=[0.5, 0.5],
+    )
+
+    instances = samples.instances
+
+    assert len(instances) == 1
+    assert instances[0].value == 0.9
+
+
+def test__max_log_posterior__historical_invalid_best_uses_next_valid_instance():
+    samples = _guarded_samples(
+        parameter_lists=[[0.1], [0.9]],
+        log_likelihood_list=[2.0, 1.0],
+        weight_list=[0.5, 0.5],
+    )
+
+    assert samples.max_log_posterior(as_instance=False) == [0.1]
+    assert samples.max_log_posterior().value == 0.9
+
+
+def test__max_log_posterior__all_invalid_fails_clearly():
+    samples = _guarded_samples(
+        parameter_lists=[[0.1], [0.2]],
+        log_likelihood_list=[2.0, 1.0],
+        weight_list=[0.5, 0.5],
+    )
+
+    with pytest.raises(
+        af.exc.SamplesException,
+        match="None of the stored samples can be reconstructed",
+    ):
+        samples.max_log_posterior()
+
+
+def test__from_sample_index__historical_invalid_raises_samples_exception():
+    samples = _guarded_samples(
+        parameter_lists=[[0.1], [0.9]],
+        log_likelihood_list=[2.0, 1.0],
+        weight_list=[0.5, 0.5],
+    )
+
+    assert samples.from_sample_index(sample_index=0, as_instance=False) == [0.1]
+    assert samples.from_sample_index(sample_index=1).value == 0.9
+
+    with pytest.raises(
+        af.exc.SamplesException,
+        match="from_sample_index",
+    ):
+        samples.from_sample_index(sample_index=0)
+
+
+def test__median_pdf__historical_invalid_raises_samples_exception():
+    samples = _guarded_samples(
+        parameter_lists=[[0.1], [0.2]],
+        log_likelihood_list=[2.0, 1.0],
+        weight_list=[0.5, 0.5],
+    )
+
+    assert samples.median_pdf(as_instance=False)[0] < 0.5
+
+    with pytest.raises(af.exc.SamplesException, match="median_pdf"):
+        samples.median_pdf()
+
+
+def test__to_instance__does_not_hide_programming_errors():
+    class _RaisesUnexpectedly:
+        def __init__(self, value):
+            raise ValueError("real bug")
+
+    model = af.Model(_RaisesUnexpectedly)
+    samples = af.SamplesPDF(
+        model=model,
+        sample_list=af.Sample.from_lists(
+            model=model,
+            parameter_lists=[[1.0]],
+            log_likelihood_list=[1.0],
+            log_prior_list=[0.0],
+            weight_list=[1.0],
+        ),
+    )
+
+    with pytest.raises(ValueError, match="real bug"):
+        samples.from_sample_index(sample_index=0)
+
+
 def test__draw_randomly_via_pdf__historical_invalid_draw_is_retried(monkeypatch):
     from autofit.non_linear.samples import pdf
 

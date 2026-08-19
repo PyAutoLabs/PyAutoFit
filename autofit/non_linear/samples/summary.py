@@ -55,7 +55,7 @@ class SamplesSummary(SamplesInterface):
     def median_pdf_sample(self):
         return self._median_pdf_sample
 
-    @to_instance
+    @to_instance()
     def median_pdf(self, as_instance: bool = True) -> List[float]:
         """
         The parameters of the maximum log likelihood sample of the `NonLinearSearch` returned as a model instance or
