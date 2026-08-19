@@ -2,7 +2,7 @@
 
 # Overview
 
-**PyAutoFit** requires Python 3.12 - 3.13 and supports the Linux, MacOS and Windows operating systems.
+**PyAutoFit** requires Python 3.12 or later and supports the Linux, MacOS and Windows operating systems.
 
 **PyAutoFit** can be installed via the Python distribution [Anaconda](https://www.anaconda.com/) or using
 [Pypi](https://pypi.org/) to `pip install` **PyAutoFit** into your Python distribution.
