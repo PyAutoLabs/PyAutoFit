@@ -27,7 +27,7 @@ dependencies = [
     # Floor, not a pin (PyAutoLens#687) — bump to the first release with JAX
     # in autonerves' base dependencies once it exists (PyAutoLens#702), so
     # backtracking cannot pair this autofit with a jax-optional autonerves.
-    "autonerves>=2026.7.29.2",
+    "autonerves>=2026.8.22.1",
     # JAX-native gradient MAP searches (MultiStartAdam / MultiStartProdigy)
     # import optax; jax itself comes from autonerves' base deps. Both are
     # marker-gated for platforms with no jax wheels (Intel macOS) — optax
