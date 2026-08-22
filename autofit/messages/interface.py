@@ -24,18 +24,29 @@ class MessageInterface(ABC):
     @property
     def shape(self) -> Tuple[int, ...]:
 
-        # JAX behaviour
-        if isinstance(self.broadcast, list):
-            return ()
+        # jnp.broadcast_arrays returns a list on jax <= 0.10 and a tuple on
+        # jax >= 0.11 (mirroring the NumPy 2 change to np.broadcast_arrays),
+        # so the container is matched on (list, tuple) and the broadcast shape
+        # read off its first element — every element already carries the
+        # common broadcast shape.
+        broadcast = self.broadcast
+        if isinstance(broadcast, (list, tuple)):
+            if not broadcast:
+                return ()
+            return np.shape(broadcast[0])
 
-        return self.broadcast.shape
+        return broadcast.shape
 
     @property
     def size(self) -> int:
+        if isinstance(self.broadcast, (list, tuple)):
+            return int(np.prod(self.shape, dtype=int))
         return self.broadcast.size
 
     @property
     def ndim(self) -> int:
+        if isinstance(self.broadcast, (list, tuple)):
+            return len(self.shape)
         return self.broadcast.ndim
 
     def __eq__(self, other):
