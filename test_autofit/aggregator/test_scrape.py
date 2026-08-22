@@ -1,7 +1,17 @@
+import importlib.util
+
 import pytest
 
 from autofit import SearchOutput
 from autofit.database.aggregator.scrape import _add_files
+
+
+# `astropy` ships via the `[optional]` extras. Envs installed without them
+# must skip rather than fail with `No module named 'astropy'`.
+requires_astropy = pytest.mark.skipif(
+    importlib.util.find_spec("astropy") is None,
+    reason="requires astropy (installed via the [optional] extras)",
+)
 
 
 class MockFit:
@@ -36,6 +46,7 @@ def make_fit(directory):
     return fit
 
 
+@requires_astropy
 def test_add_files(fit):
     assert fit.jsons["model"] == {
         "class_path": "autofit.example.model.Gaussian",
@@ -63,6 +74,7 @@ def test_add_files(fit):
     }
 
 
+@requires_astropy
 def test_add_recursive(fit):
     assert fit.jsons["directory.example"] == {
         "hello": "world",

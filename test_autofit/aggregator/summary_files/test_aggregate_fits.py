@@ -1,8 +1,20 @@
+import importlib.util
 from enum import Enum
 import pytest
 
 import autofit as af
 from pathlib import Path
+
+
+# `astropy` ships via the `[optional]` extras. Envs installed without them
+# must skip rather than fail with `No module named 'astropy'`.
+requires_astropy = pytest.mark.skipif(
+    importlib.util.find_spec("astropy") is None,
+    reason="requires astropy (installed via the [optional] extras)",
+)
+
+
+pytestmark = requires_astropy
 
 
 class FITSFit(Enum):

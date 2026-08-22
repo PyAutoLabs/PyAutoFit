@@ -1,9 +1,20 @@
+import importlib.util
+
 import numpy as np
 import pytest
 
 import autofit as af
 
 pytestmark = pytest.mark.filterwarnings("ignore::FutureWarning")
+
+# The regression test below runs a real `search.fit`, which imports the
+# `nautilus` sampler; it ships via the `[optional]` extras. Envs installed
+# without those extras must skip rather than fail with
+# `No module named 'nautilus'` — the other tests here only read config.
+requires_nautilus = pytest.mark.skipif(
+    importlib.util.find_spec("nautilus") is None,
+    reason="requires nautilus-sampler (installed via the [optional] extras)",
+)
 
 
 def test__explicit_params():
@@ -54,6 +65,7 @@ def test__test_mode():
     assert search.n_like_max == 1
 
 
+@requires_nautilus
 def test__single_core_builds_no_pool(monkeypatch):
     """
     number_of_cores=1 must not construct a multiprocessing pool: nautilus
