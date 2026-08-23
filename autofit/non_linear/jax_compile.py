@@ -9,10 +9,15 @@ logger = logging.getLogger(__name__)
 # How often a compile that is still running reports that it is still alive.
 DEFAULT_HEARTBEAT_SECONDS = 30.0
 
-# How long a first compile may run under CI before it dumps its own traceback.
-# Off by default off-CI: an interactive user watching a slow compile does not
-# want a traceback on stderr, they want the heartbeat above.
-DEFAULT_CI_DUMP_SECONDS = 300.0
+# How long a first compile may run under CI before it dumps its own traceback,
+# when the runner has not told us its own cap. Off by default off-CI: an
+# interactive user watching a slow compile does not want a traceback on stderr,
+# they want the heartbeat above.
+DEFAULT_CI_DUMP_SECONDS = 240.0
+
+# Fraction of the runner's per-script cap at which to dump. The dump is only
+# ever useful STRICTLY BEFORE the kill -- see `dump_traceback_seconds`.
+DUMP_FRACTION_OF_CAP = 0.8
 
 
 def _env_seconds(name, default):
@@ -60,8 +65,22 @@ def dump_traceback_seconds():
     runner -- the alternative, threading an environment variable through each
     workspace's `config/build/env_vars_*.yaml`, is more repos touched for the
     same effect, and the workspace scripts are user-facing documentation.
+
+    Under CI the default is derived from `BUILD_SCRIPT_TIMEOUT`, the per-script
+    cap the workspace runners and PyAutoHands both enforce. **A dump scheduled
+    at or after that cap never happens**: the runner SIGKILLs the process group
+    on expiry, and a killed process writes no traceback. The first CI use of
+    this watchdog hit exactly that -- a flat 300s default against a 300s smoke
+    cap produced heartbeats from 20 stalled runs and not one stack
+    (autolens_workspace_test#271). Dumping at a fraction of the cap leaves the
+    traceback time to reach stderr before the kill lands.
     """
-    default = DEFAULT_CI_DUMP_SECONDS if os.environ.get("CI") else 0.0
+    if not os.environ.get("CI"):
+        default = 0.0
+    else:
+        cap = _env_seconds("BUILD_SCRIPT_TIMEOUT", 0.0)
+        default = cap * DUMP_FRACTION_OF_CAP if cap > 0 else DEFAULT_CI_DUMP_SECONDS
+
     return _env_seconds("PYAUTOFIT_JAX_COMPILE_DUMP_SECS", default)
 
 
