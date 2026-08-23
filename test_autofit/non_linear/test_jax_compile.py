@@ -256,6 +256,7 @@ def test_the_heartbeat_interval_comes_from_the_environment(monkeypatch):
 
 def test_the_traceback_dump_defaults_on_under_ci_and_off_elsewhere(monkeypatch):
     monkeypatch.delenv("PYAUTOFIT_JAX_COMPILE_DUMP_SECS", raising=False)
+    monkeypatch.delenv("BUILD_SCRIPT_TIMEOUT", raising=False)
 
     monkeypatch.delenv("CI", raising=False)
     assert jax_compile.dump_traceback_seconds() == 0.0
@@ -270,6 +271,45 @@ def test_the_traceback_dump_defaults_on_under_ci_and_off_elsewhere(monkeypatch):
 
     monkeypatch.setenv("PYAUTOFIT_JAX_COMPILE_DUMP_SECS", "0")
     assert jax_compile.dump_traceback_seconds() == 0.0
+
+
+def test_the_dump_lands_strictly_before_the_runner_kills_the_process(monkeypatch):
+    monkeypatch.delenv("PYAUTOFIT_JAX_COMPILE_DUMP_SECS", raising=False)
+    monkeypatch.setenv("CI", "true")
+
+    # The defect this pins (autolens_workspace_test#271): a flat 300s default
+    # against a 300s smoke cap meant the runner's SIGKILL always beat the dump,
+    # so 20 stalled CI runs produced heartbeats and not one traceback. A killed
+    # process writes no stack, so the threshold MUST be under the cap.
+    for cap in ("300", "1800", "60"):
+        monkeypatch.setenv("BUILD_SCRIPT_TIMEOUT", cap)
+        assert jax_compile.dump_traceback_seconds() < float(cap)
+
+    monkeypatch.setenv("BUILD_SCRIPT_TIMEOUT", "300")
+    assert jax_compile.dump_traceback_seconds() == 240.0
+
+    monkeypatch.setenv("BUILD_SCRIPT_TIMEOUT", "1800")
+    assert jax_compile.dump_traceback_seconds() == 1440.0
+
+
+def test_an_unusable_runner_cap_falls_back_to_the_flat_ci_default(monkeypatch):
+    monkeypatch.delenv("PYAUTOFIT_JAX_COMPILE_DUMP_SECS", raising=False)
+    monkeypatch.setenv("CI", "true")
+
+    # No cap advertised, or a meaningless one: there is nothing to derive from,
+    # so use the flat default rather than computing a fraction of zero (which
+    # would silently disable the dump).
+    for cap in ("", "0", "not-a-number"):
+        monkeypatch.setenv("BUILD_SCRIPT_TIMEOUT", cap)
+        assert jax_compile.dump_traceback_seconds() == jax_compile.DEFAULT_CI_DUMP_SECONDS
+
+
+def test_an_explicit_dump_threshold_still_wins_over_the_derived_one(monkeypatch):
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.setenv("BUILD_SCRIPT_TIMEOUT", "1800")
+    monkeypatch.setenv("PYAUTOFIT_JAX_COMPILE_DUMP_SECS", "90")
+
+    assert jax_compile.dump_traceback_seconds() == 90.0
 
 
 def test_a_malformed_interval_falls_back_rather_than_raising(monkeypatch):
