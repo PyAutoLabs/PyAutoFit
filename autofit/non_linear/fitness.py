@@ -554,8 +554,15 @@ class Fitness:
         """
         import jax
 
+        # EXPERIMENT (autolens_workspace_test#271, jax-compile-stall phase 3):
+        # this was `jax.vmap(jax.jit(self.call))` -- vmap OF jit, the inverted
+        # ordering. `analysis/latent.py` uses jit(vmap(...)), the conventional
+        # one, and the scripts that stall are exactly the vmap-path ones while
+        # the _jit-only scripts in the same directories never stall. Swapped
+        # here so a re-timing sweep can A/B the stall rate against main.
+        # DO NOT MERGE without that evidence.
         return log_on_first_compile(
-            jax.vmap(jax.jit(self.call)),
+            jax.jit(jax.vmap(self.call)),
             "vectorized (vmap) likelihood function",
         )
 
