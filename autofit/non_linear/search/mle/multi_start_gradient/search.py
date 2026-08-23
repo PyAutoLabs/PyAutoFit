@@ -83,7 +83,11 @@ class AbstractMultiStartGradient(AbstractMLE):
         single-start, line-search or second-order optimizer on the kinked
         likelihoods this promotes from (see the Phase-3 GPU MAP-optimizer
         benchmark). The best-basin start is returned as the maximum-log-posterior
-        (MAP) point, with every start's final point retained as a diagnostic.
+        (MAP) point, with every start's final point retained as a diagnostic,
+        and each start's own best (position, figure-of-merit, step index)
+        preserved in ``search_internal`` (``lane_best_*``) for per-start basin
+        classification — a final point can leave its best basin late, die, or
+        pin to a bound after its best step.
 
         The method is JAX-native: it requires an ``Analysis`` whose
         ``log_likelihood_function`` is JAX-traceable (``use_jax=True``) and the
@@ -359,6 +363,42 @@ class AbstractMultiStartGradient(AbstractMLE):
         n_grad_nan = int(np.count_nonzero(alive & ~grad_finite))
 
         return alive, n_value_nan, n_grad_nan
+
+    @staticmethod
+    def _lane_best_update(
+        lane_best_params,
+        lane_best_foms,
+        lane_best_steps,
+        foms_np,
+        gather_physical,
+        step,
+    ):
+        """
+        Update the per-lane best records (in place) for one step.
+
+        Diagnostics only — never gates a redraw or a step, the same rule as
+        :meth:`_nan_lane_counts`. ``foms_np`` is the alive-masked
+        figure-of-merit vector (dead lanes carry ``inf``), so a dead lane can
+        never improve on its record. The comparison is strict, so a tie keeps
+        the EARLIEST best step — a plateaued lane does not creep its step
+        index forward.
+
+        ``gather_physical`` maps improved lane indices to their PHYSICAL
+        parameter rows and is called only when some lane improved — in
+        ``_fit`` it is the device->host copy (plus the scaler multiply), which
+        this laziness keeps off the no-improvement steps.
+
+        Pure NumPy and free of search state so it can be tested directly;
+        ``_fit`` itself needs jax + optax + a JAX-traceable ``Analysis`` and
+        cannot be driven from the NumPy-only library suite (same reasoning as
+        ``_nan_lane_counts`` above).
+        """
+        improved = foms_np < lane_best_foms
+        if improved.any():
+            improved_idx = np.flatnonzero(improved)
+            lane_best_params[improved_idx] = gather_physical(improved_idx)
+            lane_best_foms[improved_idx] = foms_np[improved_idx]
+            lane_best_steps[improved_idx] = step
 
     @staticmethod
     def _constrained_lane_count(alive, grad_finite, constraint_violation):
@@ -850,6 +890,33 @@ class AbstractMultiStartGradient(AbstractMLE):
             n_clipped_lane_steps = int(search_internal.get("n_clipped_lane_steps", 0))
             stop_reason = search_internal.get("stop_reason", None)
 
+            # ``.get``: a ``search_internal`` written before per-lane best
+            # tracking existed has none of these keys, and a resumed run must
+            # not KeyError on it. The old run's per-lane history is
+            # unrecoverable, so tracking re-seeds (params from the restored
+            # finals — PHYSICAL, like everything in the file — with ``inf``
+            # foms) rather than being back-filled, the same doctrine as
+            # ``alive_history`` above.
+            # ``np.array`` (copies), not ``np.asarray``: the update writes in
+            # place, and a zero-copy view would be READ-ONLY for a device
+            # array and would alias the loaded dict's own array for the
+            # legacy-fallback seed.
+            lane_best_params = np.array(
+                search_internal.get("lane_best_params", search_internal["params"])
+            )
+            lane_best_foms = np.array(
+                search_internal.get(
+                    "lane_best_foms", np.full(len(lane_best_params), np.inf)
+                ),
+                dtype=float,
+            )
+            lane_best_steps = np.array(
+                search_internal.get(
+                    "lane_best_steps", np.zeros(len(lane_best_params), dtype=int)
+                ),
+                dtype=int,
+            )
+
             self.logger.info(
                 "Resuming MultiStartGradient search (previous samples found)."
             )
@@ -896,6 +963,18 @@ class AbstractMultiStartGradient(AbstractMLE):
             )
 
             best_params = np.asarray(params[0])
+
+            # Per-lane best tracking (position, figure-of-merit, step index).
+            # Diagnostics only — never gates a redraw or a step, the same rule
+            # as the NaN-lane counters. Seeded here while ``params`` is still
+            # PHYSICAL (the scaler divide happens below), so the array is in
+            # the same units as ``best_params`` from step zero; ``inf`` foms
+            # mark "no finite evaluation captured yet". ``np.array`` (a copy),
+            # not ``np.asarray``: a zero-copy view of a device array is
+            # READ-ONLY and the update writes in place.
+            lane_best_params = np.array(params)
+            lane_best_foms = np.full(self.n_starts, np.inf)
+            lane_best_steps = np.zeros(self.n_starts, dtype=int)
 
             if has_scaler:
                 params = params / scale_jnp
@@ -999,6 +1078,23 @@ class AbstractMultiStartGradient(AbstractMLE):
                     if has_scaler:
                         best_params = best_params * scale
 
+                # Per-lane best capture, PHYSICAL for the same reason as
+                # ``best_params`` just above. The step index is the
+                # pre-increment ``total_steps``, which is exactly this step's
+                # index into ``fom_history`` — including across resumes.
+                self._lane_best_update(
+                    lane_best_params=lane_best_params,
+                    lane_best_foms=lane_best_foms,
+                    lane_best_steps=lane_best_steps,
+                    foms_np=foms_np,
+                    gather_physical=lambda idx: (
+                        np.asarray(params[idx]) * scale
+                        if has_scaler
+                        else np.asarray(params[idx])
+                    ),
+                    step=total_steps,
+                )
+
                 fom_history.append(best_fom)
 
                 # The size of the living population at this step. Recorded as a
@@ -1033,6 +1129,16 @@ class AbstractMultiStartGradient(AbstractMLE):
                         rng=resurrect_rng,
                         scale=scale,
                     )
+                    # A resurrected slot is a NEW start: its per-lane record
+                    # resets rather than conflating two starts' basins in one
+                    # slot (the record answers "which basin did this start
+                    # find", not "what is the best this slot ever held" — the
+                    # global ``best_*`` already keeps the latter). NaN params
+                    # + ``inf`` fom mark "no finite eval since redraw" without
+                    # paying a device->host copy of the fresh draws here.
+                    lane_best_params[dead_idx] = np.nan
+                    lane_best_foms[dead_idx] = np.inf
+                    lane_best_steps[dead_idx] = total_steps
 
                 updates, opt_state = step_update(grads, opt_state, params, foms)
                 params = optax.apply_updates(params, updates)
@@ -1141,6 +1247,11 @@ class AbstractMultiStartGradient(AbstractMLE):
                 "opt_state": opt_state,
                 "best_params": best_params,
                 "best_fom": best_fom,
+                # Per-lane bests, PHYSICAL like ``params``/``best_params``
+                # above; ``lane_best_steps`` indexes into ``fom_history``.
+                "lane_best_params": lane_best_params,
+                "lane_best_foms": lane_best_foms,
+                "lane_best_steps": lane_best_steps,
                 "fom_history": np.asarray(fom_history),
                 "alive_history": np.asarray(alive_history),
                 "total_steps": total_steps,
