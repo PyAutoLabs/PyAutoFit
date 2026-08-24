@@ -155,7 +155,9 @@ search = af.Emcee(number_of_cores=4)
 The results of a model-fit are plotted and inspected via the plot functions of `autofit.plot`, which wrap the
 in-built visualization libraries of the searches. These are fully described in the `plot` package of the workspace.
 
-For example, `corner_cornerpy` wraps `corner.py` and is used as follows.
+For example, `corner_cornerpy` wraps `corner.py` and is used as follows. Any keyword argument `corner.py`
+accepts can be passed straight through — they are forwarded to `corner.corner`, and a name `corner.py` does not
+recognise raises a `TypeError` naming it rather than being silently ignored.
 
 Checkout the `plot` package for a complete description of the plots that can be made for a given search.
 
