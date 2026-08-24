@@ -1350,13 +1350,20 @@ class AbstractMultiStartGradient(AbstractMLE):
                     # merely pulls forward the sync the next iteration's
                     # ``np.asarray(foms)`` would force anyway.
                     #
-                    # Under a scaler this ``d`` is in SCALED units, because that
-                    # is the space the rule is stepping in. It is reported as the
-                    # rule's own estimate rather than converted, since there is no
-                    # single physical value to convert it to — one ``d`` now spans
-                    # a whole vector of physical step sizes, which is the point of
-                    # the feature. Do not compare ``d`` across a scaled and an
-                    # unscaled arm; compare the clip rate instead.
+                    # Under a scaler OR a bijector this ``d`` is in whatever
+                    # coordinates the rule is stepping in (SCALED, or the
+                    # bijector's ``phi``), not physical units — and under a
+                    # bijector mixing ``identity`` and ``log`` coordinates it is
+                    # a single global scalar spanning units that are not even
+                    # the same KIND across coordinates (a linear step size for
+                    # one, a multiplicative log-step for another). It is
+                    # reported as the rule's own estimate rather than converted,
+                    # since there is no single physical value to convert it to
+                    # either way — this is Prodigy's own design (one global
+                    # ``d`` estimated from whole-tree norms), unmodified by
+                    # either knob and not something this feature attempts to
+                    # fix. Do not compare ``d`` across arms that step in
+                    # different coordinates; compare the clip rate instead.
                     estim_lr = optax.tree_utils.tree_get(opt_state, "estim_lr")
 
                     self.logger.info(
