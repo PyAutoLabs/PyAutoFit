@@ -62,11 +62,40 @@ The inset applied to keep a projected value strictly inside its support is keyed
 on **what kind of bound it is**, never on unguarded ``upper - lower`` arithmetic.
 That distinction is load-bearing rather than fussy — see
 :class:`ClipperPriorBox` for the three cases and why collapsing them breaks.
+
+Composition with a :mod:`~autofit.non_linear.bijector`
+--------------------------------------------------------
+
+``AbstractClipper.project`` also accepts a ``bijector``, alongside (never
+together with) ``scale``, so a search stepping in ``phi = bijector.forward
+(theta)`` can clip in that same space. Every bijector kind is elementwise
+**strictly monotone increasing**, so forward and clip commute: clipping
+``forward(theta)`` against ``forward(lower_inset)`` / ``forward(upper_inset)``
+gives exactly ``forward(clip(theta, lower_inset, upper_inset))``.
+
+**The physical inset is wrong for a ``log``-kind coordinate, and the error is
+not marginal.** The two-sided inset above is a *relative-to-physical-width*
+margin, ``lower + margin * (upper - lower)``. For
+``LogUniformPrior(1e-6, 1e6)`` with the default ``margin=1e-6`` that is
+``1e-6 + 1e-6 * (1e6 - 1e-6) ~ 1e-6 + 1.0 ~ 1.0`` — a PHYSICAL inset of order
+1, on a prior whose entire point is that it is uniform across twelve decades.
+Clipping (or mapping through a ``log`` bijector) against that bound fences off
+every ``lambda < 1``, silently, for a margin whose entire purpose is to be
+negligible. The bug is in the inset arithmetic, not in the bijector: a
+``log``-kind coordinate's natural margin is a fraction of its **log-ratio**,
+``margin * log(upper / lower)``, mapped back through ``exp`` — the same
+"physical width is not usable here" correction
+:class:`~autofit.non_linear.scaler.ScalerPriorWidth` already makes for its own
+``LogUniformPrior`` scale rule. ``ClipperPriorBox`` applies this whenever a
+``bijector`` reports a coordinate's kind as ``"log"`` (see
+:meth:`ClipperPriorBox._inset_from_model`); the plain, no-bijector
+``bounds_from_model`` path is unaffected — every existing caller keeps its
+current (physical) inset exactly.
 """
 
 import logging
 from abc import ABC, abstractmethod
-from typing import Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 
@@ -107,7 +136,7 @@ class AbstractClipper(ABC):
         """
 
     @abstractmethod
-    def project(self, vector, model, xp=np, scale=None):
+    def project(self, vector, model, xp=np, scale=None, bijector=None):
         """
         Project ``vector`` onto the prior support.
 
@@ -117,7 +146,8 @@ class AbstractClipper(ABC):
             A parameter vector, either a single ``(n_params,)`` vector or a
             batched ``(n_starts, n_params)`` array of them. Broadcasting handles
             both, so no ``vmap`` is required of the caller. Physical unless
-            ``scale`` is given, in which case it is in scaled coordinates.
+            ``scale`` or ``bijector`` is given, in which case it is in that
+            change of variables' coordinates.
         model
             The model whose priors define the support.
         xp
@@ -130,7 +160,15 @@ class AbstractClipper(ABC):
             caller's own coordinates and no round-trip through physical space is
             needed. Scales are strictly positive, so dividing preserves the
             ordering of each ``(lower, upper)`` pair and ``+/-inf`` stay
-            ``+/-inf``.
+            ``+/-inf``. Mutually exclusive with ``bijector``.
+        bijector
+            A resolved :class:`~autofit.non_linear.bijector.AbstractBijector`
+            (``.from_model`` already called), when the caller is stepping in
+            ``phi = bijector.forward(theta)``. The inset bounds are computed in
+            physical space (kind-aware — see the module docstring) and then
+            mapped through ``bijector.bounds_forward``, which commutes with
+            clipping because every bijector kind is monotone increasing.
+            Mutually exclusive with ``scale``.
 
         Returns
         -------
@@ -153,7 +191,7 @@ class ClipperNone(AbstractClipper):
         n = model.prior_count
         return np.full(n, -np.inf), np.full(n, np.inf)
 
-    def project(self, vector, model, xp=np, scale=None):
+    def project(self, vector, model, xp=np, scale=None, bijector=None):
         return vector, xp.zeros_like(vector, dtype=bool)
 
 
@@ -256,21 +294,65 @@ class ClipperPriorBox(AbstractClipper):
             np.array(upper_strict, dtype=bool),
         )
 
-    def bounds_from_model(self, model) -> Tuple[np.ndarray, np.ndarray]:
+    def _inset_from_model(
+        self, model, kinds: Optional[list] = None
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        The inset ``(lower, upper)`` box, in physical parameter order, aware of
+        an optional per-coordinate ``kinds`` list (from
+        :attr:`~autofit.non_linear.bijector.AbstractBijector.kinds`).
+
+        ``kinds=None`` (the default, and what :meth:`bounds_from_model` passes)
+        reproduces the original physical-relative-margin rule for every
+        two-sided finite coordinate, unchanged. Where ``kinds[i] == "log"`` the
+        margin is instead taken as a fraction of the LOG-ratio and mapped back
+        through ``exp`` — see the module docstring for why the physical margin
+        is wrong there (it is not a small correction: it can be O(1) against a
+        prior spanning many decades).
+        """
         lower, upper, lower_strict, upper_strict = self._limits_from_model(model)
 
         two_sided = np.isfinite(lower) & np.isfinite(upper)
 
-        # The width is evaluated ONLY where both bounds are finite. `np.where`
-        # alone would not be enough -- it evaluates both branches, so `inf - -inf`
-        # would still be computed and still be NaN. The finite substitution has to
-        # happen before the subtraction, not after it.
-        safe_lower = np.where(two_sided, lower, 0.0)
-        safe_upper = np.where(two_sided, upper, 0.0)
+        is_log = np.zeros(len(lower), dtype=bool)
+        if kinds is not None:
+            is_log = np.array([kind == "log" for kind in kinds], dtype=bool)
+            # A "log" kind is only ever assigned (by the bijector classes) to a
+            # coordinate with a strictly positive, two-sided-finite physical
+            # bound; this additional guard is defence-in-depth so a stray or
+            # malformed `kinds` entry can never reach `np.log` of a
+            # non-positive or non-finite value below.
+            is_log = is_log & two_sided & (lower > 0.0)
+
+        # PHYSICAL (linear-space) margin, for every two-sided finite coordinate
+        # that is NOT log-kind -- identical to the original rule. The width is
+        # evaluated ONLY where both bounds are finite and the coordinate is a
+        # linear target. `np.where` alone would not be enough -- it evaluates
+        # both branches, so `inf - -inf` would still be computed and still be
+        # NaN. The finite substitution has to happen before the subtraction,
+        # not after it.
+        linear_target = two_sided & ~is_log
+        safe_lower = np.where(linear_target, lower, 0.0)
+        safe_upper = np.where(linear_target, upper, 0.0)
         relative = self.margin * (safe_upper - safe_lower)
 
-        lower_inset = lower + np.where(two_sided, relative, 0.0)
-        upper_inset = upper - np.where(two_sided, relative, 0.0)
+        lower_inset = lower + np.where(linear_target, relative, 0.0)
+        upper_inset = upper - np.where(linear_target, relative, 0.0)
+
+        # LOG-space margin, for every log-kind coordinate: a fraction of the
+        # log-ratio, mapped back through `exp`. `safe_log_lower` /
+        # `safe_log_upper` substitute `1.0` for every non-log-kind coordinate
+        # so `np.log` is never evaluated outside its domain, the same
+        # before-the-call substitution `bounds_from_model` above already uses.
+        safe_log_lower = np.where(is_log, lower, 1.0)
+        safe_log_upper = np.where(is_log, upper, 1.0)
+        log_relative = self.margin * np.log(safe_log_upper / safe_log_lower)
+
+        log_lower_inset = np.log(safe_log_lower) + log_relative
+        log_upper_inset = np.log(safe_log_upper) - log_relative
+
+        lower_inset = np.where(is_log, np.exp(log_lower_inset), lower_inset)
+        upper_inset = np.where(is_log, np.exp(log_upper_inset), upper_inset)
 
         # Half-open bounds get an absolute nudge, since `relative` is identically
         # zero for them.
@@ -283,21 +365,45 @@ class ClipperPriorBox(AbstractClipper):
 
         return lower_inset, upper_inset
 
-    def project(self, vector, model, xp=np, scale=None):
-        lower, upper = self.bounds_from_model(model)
+    def bounds_from_model(self, model) -> Tuple[np.ndarray, np.ndarray]:
+        return self._inset_from_model(model, kinds=None)
 
-        if scale is not None:
-            # Divided AFTER the insets are applied, not before. The inset is
-            # relative to the box width, so scaling the raw limits first and
-            # insetting afterwards gives the identical box -- but the half-open
-            # `strict_epsilon` is ABSOLUTE, and dividing it by the scale would
-            # shrink the nudge for a large-scale coordinate until it no longer
-            # lands strictly inside a support that excludes its limit. Insetting
-            # in physical space and then mapping the finished bounds keeps the
-            # inset meaning what it says in the space the prior is declared in.
-            scale = np.asarray(scale, dtype=float)
-            lower = lower / scale
-            upper = upper / scale
+    def project(self, vector, model, xp=np, scale=None, bijector=None):
+        if scale is not None and bijector is not None:
+            raise ValueError(
+                f"{type(self).__name__}.project received both `scale` and "
+                "`bijector` -- they are two different changes of variables for "
+                "the same step, and a caller must pick exactly one (a search "
+                "already enforces this at construction; see "
+                "AbstractMultiStartGradient.__init__)."
+            )
+
+        if bijector is not None:
+            # Inset in PHYSICAL space, kind-aware, then mapped through the
+            # bijector -- never the other way round. Every kind is monotone
+            # increasing, so this commutes with clipping (see the module
+            # docstring), and computing the inset in physical space is what
+            # lets the log-kind correction above be expressed in terms even a
+            # non-bijector-aware caller (`bounds_from_model`) already
+            # understands.
+            lower, upper = self._inset_from_model(model, kinds=bijector.kinds)
+            lower, upper = bijector.bounds_forward(lower, upper)
+        else:
+            lower, upper = self.bounds_from_model(model)
+
+            if scale is not None:
+                # Divided AFTER the insets are applied, not before. The inset is
+                # relative to the box width, so scaling the raw limits first and
+                # insetting afterwards gives the identical box -- but the
+                # half-open `strict_epsilon` is ABSOLUTE, and dividing it by the
+                # scale would shrink the nudge for a large-scale coordinate
+                # until it no longer lands strictly inside a support that
+                # excludes its limit. Insetting in physical space and then
+                # mapping the finished bounds keeps the inset meaning what it
+                # says in the space the prior is declared in.
+                scale = np.asarray(scale, dtype=float)
+                lower = lower / scale
+                upper = upper / scale
 
         dtype = getattr(vector, "dtype", None)
         lower = xp.asarray(lower, dtype=dtype)
