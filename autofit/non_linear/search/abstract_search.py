@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from collections import Counter
 from functools import wraps
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, Union, Tuple, List, Dict
+from typing import TYPE_CHECKING, Any, Callable, Optional, Union, Tuple, List, Dict
 
 import psutil
 
@@ -783,6 +783,96 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
 
         return result
 
+    def _test_mode_valid_parameter_vector(
+        self,
+        model: AbstractPriorModel,
+        failure_prefix: str,
+        validate: Optional[Callable[[List[float]], Any]] = None,
+    ) -> Tuple[List[float], Any]:
+        """The first deterministically-drawn parameter vector the model accepts.
+
+        Test mode has no sampler, so it evaluates the model at a point it picks
+        itself — the prior medians.  A model whose components share priors and
+        carry an ordering assertion (``trap_0.release_timescale <
+        trap_1.release_timescale``, the standard idiom for breaking exchange
+        degeneracy) ties *exactly* there, so ``check_assertions`` rejects the
+        medians with :class:`FitException`.  A production search absorbs that by
+        resampling, and test mode must do the same rather than hard-fail on an
+        artifact of its own choice of point.
+
+        Try the prior medians first, then a deterministic sequence of prior
+        draws, returning the first candidate ``validate`` accepts.  The fixed
+        seed keeps smoke runs reproducible without touching the application's
+        global random state.
+
+        Parameters
+        ----------
+        model
+            The model the vector must be valid for.
+        failure_prefix
+            Opening of the :class:`FitException` message raised once the attempt
+            budget is spent; the attempt count is appended to it.
+        validate
+            Called with each candidate vector.  Raising `FitException` rejects
+            that candidate and moves on to the next draw; the return value is
+            handed back alongside the accepted vector, so a caller that must
+            build something in order to validate it does not build it twice.
+            Defaults to instantiating the vector.
+
+        Returns
+        -------
+        The accepted parameter vector, and whatever ``validate`` returned for it.
+
+        Raises
+        ------
+        FitException
+            If no candidate is accepted within
+            ``TEST_MODE_REPRESENTATIVE_MAX_ATTEMPTS`` attempts, chained to the
+            final rejection.
+        """
+        if validate is None:
+
+            def validate(candidate: List[float]):
+                return model.instance_from_vector(vector=candidate)
+
+        rng = np.random.default_rng(seed=0)
+        last_error = None
+
+        for attempt in range(TEST_MODE_REPRESENTATIVE_MAX_ATTEMPTS):
+            unit_vector = (
+                [0.5] * model.prior_count
+                if attempt == 0
+                else rng.random(model.prior_count).tolist()
+            )
+
+            try:
+                parameter_vector = [
+                    float(value)
+                    for value in model.vector_from_unit_vector(
+                        unit_vector=unit_vector,
+                    )
+                ]
+                validated = validate(parameter_vector)
+            except exc.FitException as candidate_error:
+                last_error = candidate_error
+                continue
+
+            if attempt > 0:
+                logger.warning(
+                    "TEST MODE: the prior medians are not a valid model "
+                    f"instance ({last_error.__cause__ or last_error!r}); using "
+                    f"deterministic prior draw {attempt} instead. A model whose "
+                    "components share priors and carry an ordering assertion "
+                    "ties at its medians, which a real search resamples past."
+                )
+
+            return parameter_vector, validated
+
+        raise exc.FitException(
+            f"{failure_prefix} after "
+            f"{TEST_MODE_REPRESENTATIVE_MAX_ATTEMPTS} attempts."
+        ) from last_error
+
     def _test_mode_samples_after_rejected_fit(
         self,
         samples: Samples,
@@ -808,56 +898,44 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             "a valid representative sample for result construction."
         )
 
-        rng = np.random.default_rng(seed=0)
-        last_error = error
         model = samples.model
 
-        for attempt in range(TEST_MODE_REPRESENTATIVE_MAX_ATTEMPTS):
-            unit_vector = (
-                [0.5] * model.prior_count
-                if attempt == 0
-                else rng.random(model.prior_count).tolist()
+        def validate(parameter_vector: List[float]):
+            """Every synthetic sample, not just the first, must reconstruct."""
+            sample_list = self._build_fake_samples(
+                model=model,
+                parameter_vector=parameter_vector,
+                log_likelihood=-1.0e99,
             )
 
-            try:
-                parameter_vector = [
-                    float(value)
-                    for value in model.vector_from_unit_vector(
-                        unit_vector=unit_vector,
-                    )
-                ]
-                sample_list = self._build_fake_samples(
-                    model=model,
-                    parameter_vector=parameter_vector,
-                    log_likelihood=-1.0e99,
+            for sample in sample_list:
+                model.instance_from_vector(
+                    vector=sample.parameter_lists_for_model(model)
                 )
 
-                for sample in sample_list:
-                    model.instance_from_vector(
-                        vector=sample.parameter_lists_for_model(model)
-                    )
-            except exc.FitException as candidate_error:
-                last_error = candidate_error
-                continue
+            return sample_list
 
-            samples_info = {
-                **(samples.samples_info or {}),
-                "total_iterations": 1,
-                "time": 0.0,
-                "log_evidence": -1.0e99,
-            }
-            samples_info.update(self._test_mode_samples_info())
+        _, sample_list = self._test_mode_valid_parameter_vector(
+            model=model,
+            failure_prefix=(
+                "TEST MODE 1 could not construct a valid representative result"
+            ),
+            validate=validate,
+        )
 
-            return samples.from_list_info_and_model(
-                model=model,
-                sample_list=sample_list,
-                samples_info=samples_info,
-            )
+        samples_info = {
+            **(samples.samples_info or {}),
+            "total_iterations": 1,
+            "time": 0.0,
+            "log_evidence": -1.0e99,
+        }
+        samples_info.update(self._test_mode_samples_info())
 
-        raise exc.FitException(
-            "TEST MODE 1 could not construct a valid representative result "
-            f"after {TEST_MODE_REPRESENTATIVE_MAX_ATTEMPTS} attempts."
-        ) from last_error
+        return samples.from_list_info_and_model(
+            model=model,
+            sample_list=sample_list,
+            samples_info=samples_info,
+        )
 
     def result_via_completed_fit(
         self,
@@ -996,16 +1074,25 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
 
         model.freeze()
 
-        unit_vector = [0.5] * model.prior_count
-        parameter_vector = [
-            float(v) for v in model.vector_from_unit_vector(
-                unit_vector=unit_vector,
-            )
-        ]
+        # The bypass has no sampler, so it chooses its own evaluation point and
+        # must choose one the model accepts. A model whose components share
+        # priors and carry an ordering assertion ties exactly at the prior
+        # medians, and `check_assertions` rejects that tie with `FitException`.
+        # The vector chosen here is also the one written into the fake samples
+        # below, so picking a valid one is what keeps
+        # `result.max_log_likelihood_instance` reconstructible — which is why
+        # mode 3 needs this too, not just mode 2's likelihood call
+        # (PyAutoFit #1519).
+        parameter_vector, instance = self._test_mode_valid_parameter_vector(
+            model=model,
+            failure_prefix=(
+                "TEST MODE could not find a parameter vector satisfying the "
+                "model's assertions"
+            ),
+        )
 
         log_likelihood = -1.0e99
         if call_likelihood:
-            instance = model.instance_from_vector(vector=parameter_vector)
             try:
                 log_likelihood = float(
                     analysis.log_likelihood_function(instance)

@@ -476,6 +476,125 @@ class TestBypassToleratesFitException:
             search.fit(model=af.Model(af.m.MockClassx2), analysis=_BrokenAnalysis())
 
 
+class _ConstantLikelihoodAnalysis(af.m.MockAnalysis):
+    """`MockAnalysis` maps its likelihood over the model, which returns a list
+    for the collections below; the bypass wants a single float."""
+
+    def log_likelihood_function(self, instance):
+        return 1.0
+
+
+class _Ordered:
+    """A one-parameter component; two of them plus an ordering assertion is the
+    standard idiom for breaking an exchange degeneracy."""
+
+    def __init__(self, value=1.0):
+        self.value = value
+
+
+def _tied_assertion_model():
+    """Identical priors either side of an ordering assertion — so the two
+    parameters tie *exactly* at the prior medians the bypass evaluates at."""
+    model = af.Collection(
+        first=af.Model(_Ordered, value=af.UniformPrior(0.1, 10.0)),
+        second=af.Model(_Ordered, value=af.UniformPrior(0.1, 10.0)),
+    )
+    model.add_assertion(model.first.value < model.second.value)
+    return model
+
+
+def _impossible_assertion_model():
+    """Disjoint priors ordered the wrong way round: no draw can satisfy it."""
+    model = af.Collection(
+        first=af.Model(_Ordered, value=af.UniformPrior(5.0, 10.0)),
+        second=af.Model(_Ordered, value=af.UniformPrior(0.1, 1.0)),
+    )
+    model.add_assertion(model.first.value < model.second.value)
+    return model
+
+
+class TestBypassToleratesAssertionTies:
+    """
+    The bypass has no sampler, so it evaluates the model at a point it picks
+    itself — the prior medians. A model whose components share priors and carry
+    an ordering assertion (e.g. PyAutoCTI trap models with
+    `trap_0.release_timescale < trap_1.release_timescale`) ties exactly there,
+    so `check_assertions` rejects it and the run hard-fails on an artifact of
+    the bypass's own choice of point. A real search resamples past this
+    (PyAutoFit #1519).
+
+    Mode 3 is affected as well as mode 2. It never calls the likelihood, but the
+    vector the bypass *stores* is the one `result.max_log_likelihood_instance`
+    reconstructs, and `SamplesSummary.max_log_likelihood` raises rather than
+    falling back to another stored sample — every fake sample is the same point
+    scaled uniformly, which preserves the tie anyway.
+    """
+
+    @pytest.mark.parametrize("mode", ["2", "3"])
+    def test__tied_assertion__fit_completes_and_result_instance_reconstructs(
+        self, monkeypatch, mode
+    ):
+        monkeypatch.setenv("PYAUTO_TEST_MODE", mode)
+
+        result = af.DynestyStatic(
+            name=f"bypass_assertion_tie_{mode}",
+            unique_tag=f"bypass_assertion_tie_{mode}_test",
+        ).fit(model=_tied_assertion_model(), analysis=_ConstantLikelihoodAnalysis())
+
+        # The result must be constructible, not just the fit survivable: the
+        # stored vector is re-instantiated here, assertions and all.
+        instance = result.max_log_likelihood_instance
+
+        assert instance.first.value < instance.second.value
+
+    def test__tied_assertion__chosen_point_is_deterministic_across_modes(
+        self, monkeypatch
+    ):
+        values = []
+
+        for mode in ("2", "3"):
+            monkeypatch.setenv("PYAUTO_TEST_MODE", mode)
+            result = af.DynestyStatic(
+                name=f"bypass_assertion_seed_{mode}",
+                unique_tag=f"bypass_assertion_seed_{mode}_test",
+            ).fit(model=_tied_assertion_model(), analysis=_ConstantLikelihoodAnalysis())
+            instance = result.max_log_likelihood_instance
+            values.append([instance.first.value, instance.second.value])
+
+        # A fixed seed, so smoke runs stay reproducible and the two modes agree.
+        assert values[0] == pytest.approx(values[1])
+
+    @pytest.mark.parametrize("mode", ["2", "3"])
+    def test__unsatisfiable_assertion__bounded_failure_is_clear(
+        self, monkeypatch, mode
+    ):
+        from autofit.non_linear.search import abstract_search
+
+        monkeypatch.setenv("PYAUTO_TEST_MODE", mode)
+        monkeypatch.setattr(
+            abstract_search,
+            "TEST_MODE_REPRESENTATIVE_MAX_ATTEMPTS",
+            2,
+        )
+
+        with pytest.raises(
+            af.exc.FitException,
+            match=(
+                "could not find a parameter vector satisfying the model's "
+                "assertions after 2 attempts"
+            ),
+        ) as error:
+            af.DynestyStatic(
+                name=f"bypass_assertion_impossible_{mode}",
+                unique_tag=f"bypass_assertion_impossible_{mode}_test",
+            ).fit(
+                model=_impossible_assertion_model(),
+                analysis=_ConstantLikelihoodAnalysis(),
+            )
+
+        assert isinstance(error.value.__cause__, af.exc.FitException)
+
+
 class _RejectsLowValue:
     def __init__(self, value):
         if value < 0.75:
