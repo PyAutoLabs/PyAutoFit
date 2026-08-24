@@ -242,9 +242,9 @@ class SamplesMCMC(SamplesPDF):
     @property
     def tree_depths(self) -> Optional[dict]:
         """
-        A histogram (`{tree_depth: count}`) of the NUTS trajectory tree depths reached across all chains and
-        samples, where available (e.g. `BlackJAXNUTS`). `None` for searches that do not populate this
-        diagnostic.
+        A histogram of the NUTS trajectory tree depths reached across all chains and samples, as a dict
+        mapping tree depth to count, where available (e.g. ``BlackJAXNUTS``). ``None`` for searches that
+        do not populate this diagnostic.
         """
         return self.samples_info.get("tree_depth_histogram")
 
