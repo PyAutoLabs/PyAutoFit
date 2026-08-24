@@ -83,6 +83,12 @@ from .non_linear.clipper import ClipperPriorBox
 from .non_linear.scaler import AbstractScaler
 from .non_linear.scaler import ScalerNone
 from .non_linear.scaler import ScalerPriorWidth
+from .non_linear.bijector import AbstractBijector
+from .non_linear.bijector import BijectorNone
+from .non_linear.bijector import BijectorAuto
+from .non_linear.bijector import BijectorLogit
+from .non_linear.bijector import BijectorPerPath
+from .non_linear.bijector import BijectorDiagonal
 from .non_linear.initializer import InitializerBall
 from .non_linear.initializer import InitializerPrior
 from .non_linear.initializer import InitializerParamBounds
