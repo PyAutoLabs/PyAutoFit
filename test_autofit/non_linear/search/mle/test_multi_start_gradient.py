@@ -423,6 +423,33 @@ def test__scaler_is_not_offered_by_searches_that_do_not_own_their_step_loop():
     assert "scaler" not in inspect.signature(af.LBFGS.__init__).parameters
 
 
+def test__dict_round_trip__bijector():
+    restored = from_dict(to_dict(af.MultiStartAdam(bijector=af.BijectorAuto())))
+
+    assert isinstance(restored.bijector, af.BijectorAuto)
+    # Default is the no-op, so the step loop skips the change of variables
+    # entirely rather than tracing an identity `jnp.where` selection.
+    assert isinstance(af.MultiStartAdam().bijector, af.BijectorNone)
+
+
+def test__scaler_and_bijector_together__raises_at_construction():
+    """
+    They are two different changes of variables for the same step; letting both
+    be non-default would mean silently picking one over the other rather than
+    surfacing the conflict.
+    """
+    with pytest.raises(ValueError):
+        af.MultiStartAdam(scaler=af.ScalerPriorWidth(), bijector=af.BijectorAuto())
+
+    # Either alone is fine.
+    af.MultiStartAdam(scaler=af.ScalerPriorWidth())
+    af.MultiStartAdam(bijector=af.BijectorAuto())
+
+
+def test__bijector_is_not_offered_by_searches_that_do_not_own_their_step_loop():
+    assert "bijector" not in inspect.signature(af.LBFGS.__init__).parameters
+
+
 def test__samples_via_internal_from():
     model = af.Model(example.Gaussian)
 
@@ -488,6 +515,42 @@ def test__samples_via_internal_from():
     )
     assert samples.samples_info["fom_history"] == pytest.approx([-4.0, -8.0, best_fom])
     assert all(isinstance(x, float) for x in samples.samples_info["fom_history"])
+
+    # Scaler/bijector are recorded ALWAYS (including their no-op defaults),
+    # since neither enters the search identifier.
+    assert samples.samples_info["scaler"] == "ScalerNone"
+    assert samples.samples_info["bijector"] == "BijectorNone"
+    assert samples.samples_info["bijector_kinds"] is None
+
+
+def test__samples_info__bijector_kinds_are_read_from_search_internal_not_live_state():
+    """
+    ``bijector_kinds`` must come from the persisted ``search_internal["bijector"]``
+    rather than from ``self.bijector.kinds`` directly -- the latter would raise
+    (unresolved) or read stale state in a process that loaded a
+    ``search_internal`` without ever calling ``_fit``.
+    """
+    model = af.Model(example.Gaussian)
+    best_params = np.asarray(model.vector_from_unit_vector([0.5] * model.prior_count))
+    per_start_params = np.stack([best_params])
+
+    search = af.MultiStartAdam(n_starts=1, n_steps=1, bijector=af.BijectorAuto())
+
+    samples = search.samples_via_internal_from(
+        model=model,
+        search_internal={
+            "params": per_start_params,
+            "best_params": best_params,
+            "best_fom": -2.0,
+            "total_steps": 1,
+            "n_resurrections": 0,
+            "fom_history": np.asarray([-2.0]),
+            "bijector": ["identity", "identity", "identity"],
+        },
+    )
+
+    assert samples.samples_info["bijector"] == "BijectorAuto"
+    assert samples.samples_info["bijector_kinds"] == ["identity", "identity", "identity"]
 
 
 def test__samples_info__stop_reason_max_steps_and_legacy_search_internal():
