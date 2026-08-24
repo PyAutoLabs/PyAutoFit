@@ -1,4 +1,29 @@
-from autofit.non_linear.plot.plot_util import skip_in_test_mode, output_figure
+from autofit.non_linear.plot.plot_util import (
+    skip_in_test_mode,
+    output_figure,
+    checked_kwargs,
+)
+
+
+def _line_kwargs(kwargs, defaults):
+    """
+    Merge caller ``kwargs`` into the trace-line defaults these plots draw with.
+
+    The traces are plain matplotlib lines, so a caller's ``**kwargs`` are
+    ``Line2D`` properties. Validating against the artist's own setters (aliases
+    included) means a mistyped property is named here rather than surfacing as a
+    ``Line2D.set()`` error from deep inside matplotlib.
+    """
+    from matplotlib.artist import ArtistInspector
+    from matplotlib.lines import Line2D
+
+    inspector = ArtistInspector(Line2D)
+    accepts = set(inspector.get_setters())
+    accepts |= {alias for aliases in inspector.aliasd.values() for alias in aliases}
+
+    settings = dict(defaults)
+    settings.update(checked_kwargs(kwargs, accepts=accepts, target="matplotlib"))
+    return settings
 
 
 @skip_in_test_mode
@@ -12,6 +37,8 @@ def subplot_parameters(
     **kwargs,
 ):
     import matplotlib.pyplot as plt
+
+    line_kwargs = _line_kwargs(kwargs, {"c": "k"})
 
     model = samples.model
     parameter_lists = samples.parameters_extract
@@ -28,9 +55,9 @@ def subplot_parameters(
             parameters = parameters[int(len(parameters) / 2) :]
 
         if use_log_y:
-            plt.semilogy(iteration_list, parameters, c="k")
+            plt.semilogy(iteration_list, parameters, **line_kwargs)
         else:
-            plt.plot(iteration_list, parameters, c="k")
+            plt.plot(iteration_list, parameters, **line_kwargs)
 
         plt.xlabel("Iteration", fontsize=16)
         plt.ylabel(model.parameter_labels_with_superscripts_latex[i], fontsize=16)
@@ -58,6 +85,8 @@ def log_likelihood_vs_iteration(
 ):
     import matplotlib.pyplot as plt
 
+    line_kwargs = _line_kwargs(kwargs, {"c": "k"})
+
     log_likelihood_list = samples.log_likelihood_list
     iteration_list = range(len(log_likelihood_list))
 
@@ -68,9 +97,9 @@ def log_likelihood_vs_iteration(
     plt.figure(figsize=(12, 12))
 
     if use_log_y:
-        plt.semilogy(iteration_list, log_likelihood_list, c="k")
+        plt.semilogy(iteration_list, log_likelihood_list, **line_kwargs)
     else:
-        plt.plot(iteration_list, log_likelihood_list, c="k")
+        plt.plot(iteration_list, log_likelihood_list, **line_kwargs)
 
     plt.xlabel("Iteration", fontsize=16)
     plt.ylabel("Log Likelihood", fontsize=16)
@@ -118,10 +147,12 @@ def figure_of_merit_vs_iteration(
 
     import matplotlib.pyplot as plt
 
+    line_kwargs = _line_kwargs(kwargs, {"c": "k"})
+
     iteration_list = range(len(fom_history))
 
     plt.figure(figsize=(12, 12))
-    plt.plot(iteration_list, fom_history, c="k")
+    plt.plot(iteration_list, fom_history, **line_kwargs)
 
     plt.xlabel("Step", fontsize=16)
     plt.ylabel("Global-Best Figure of Merit (-2 ln posterior)", fontsize=16)

@@ -14,6 +14,18 @@ The plotting API is **functional**: import ``autofit.plot`` and call a plot func
 
    aplt.corner_cornerpy(samples=result.samples)
 
+Every plot function forwards its ``**kwargs`` to the library it wraps (``corner.py``, ``anesthetic``,
+``matplotlib``), so the wrapped library's own options are available directly:
+
+.. code-block:: python
+
+   aplt.corner_cornerpy(samples=result.samples, bins=5, show_titles=True)
+
+Values **PyAutoFit** computes — the parameter labels, the sample weights, and the plot range that keeps
+``corner.py`` from raising "no dynamic range" on a converged parameter — act as defaults a keyword argument
+overrides. A name the wrapped library does not accept raises a ``TypeError`` naming it, rather than being
+silently ignored.
+
 **Examples / Tutorials:**
 
 - `readthedocs: non-linear search example <https://pyautofit.readthedocs.io/en/latest/cookbooks/search.html>`_

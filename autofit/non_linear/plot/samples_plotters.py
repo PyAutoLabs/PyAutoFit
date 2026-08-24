@@ -4,7 +4,12 @@ import numpy as np
 
 from autonerves import conf
 
-from autofit.non_linear.plot.plot_util import skip_in_test_mode, output_figure
+from autofit.non_linear.plot.plot_util import (
+    skip_in_test_mode,
+    output_figure,
+    accepted_kwarg_names,
+    checked_kwargs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,12 +55,28 @@ def corner_cornerpy(samples, path=None, filename="corner", format="show", **kwar
     pylab.rcParams.update(params)
 
     import corner
+    from corner.core import hist2d as corner_hist2d
 
-    corner.corner(
-        data=data,
-        weight_list=samples.weight_list,
+    settings = dict(
+        weights=samples.weight_list,
         labels=samples.model.parameter_labels_with_superscripts_latex,
         range=_corner_range_from(data),
     )
+
+    # ``hist2d``'s named parameters are a documented corner pass-through, so they
+    # stay valid; ``x`` / ``y`` are its positional sample arrays, not options.
+    accepts = accepted_kwarg_names(corner.corner, corner_hist2d) - {"x", "y"}
+
+    for key, value in checked_kwargs(
+        kwargs, accepts=accepts, reserved=("data",), target="corner.corner"
+    ).items():
+        # ``None`` against a value PyAutoFit computes means "use the default" —
+        # notably for ``range``, where blanking it would hand ``corner`` back the
+        # degenerate columns ``_corner_range_from`` exists to widen.
+        if value is None and key in settings:
+            continue
+        settings[key] = value
+
+    corner.corner(data=data, **settings)
 
     output_figure(path=path, filename=filename, format=format)
