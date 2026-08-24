@@ -82,3 +82,12 @@ def test__log_plot_exception__never_swallows_a_rejected_kwarg():
 
     with pytest.raises(PlotKwargsError):
         plot()
+
+
+def test__plot_kwargs_error__is_importable_from_the_public_plot_module():
+    # A caller told their kwarg "raises PlotKwargsError" needs to be able to
+    # catch it without reaching into `autofit.non_linear`.
+    import autofit.plot as aplt
+
+    assert aplt.PlotKwargsError is PlotKwargsError
+    assert issubclass(aplt.PlotKwargsError, TypeError)
