@@ -7,6 +7,7 @@ import warnings
 
 if TYPE_CHECKING:
     from autofit.non_linear.analysis.analysis import Analysis
+    from autofit.non_linear.initializer import InitializerParamStartPoints
 
 from autofit import exc
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
@@ -122,6 +123,76 @@ class AbstractResult(ABC):
     @property
     def max_log_likelihood_instance(self):
         return self.instance
+
+    @property
+    def start_point(self) -> "InitializerParamStartPoints":
+        """
+        A convenience wrapper around `InitializerParamStartPoints.from_result(self)`, using the defaults
+        (`point="max_log_likelihood"`, `n_points=1`, `jitter=0.0`).
+
+        Unlike `model_centred` (and its siblings below), this does **not** modify any priors: it reads the
+        previous result's inferred parameter values and maps them, by path, onto a `{Prior: float}` starting
+        point for a search's `initializer`. The model this result was fit with (`self.model`) keeps its
+        original priors completely untouched -- only a separate initializer object is built.
+
+        For the multi-chain / jittered / warm-started-onto-a-different-model case, use
+        `start_point_from(...)` instead.
+
+        Returns
+        -------
+        An initializer whose single starting point is this result's maximum log likelihood sample.
+        """
+        from autofit.non_linear.initializer import InitializerParamStartPoints
+
+        return InitializerParamStartPoints.from_result(self)
+
+    def start_point_from(
+        self,
+        point: str = "max_log_likelihood",
+        n_points: int = 1,
+        jitter: float = 0.0,
+        seed: int = 0,
+        model: Optional[AbstractPriorModel] = None,
+    ) -> "InitializerParamStartPoints":
+        """
+        As `start_point`, but exposing the full `InitializerParamStartPoints.from_result` interface: multiple
+        starting points (e.g. one per chain of a multi-chain search), physical-space jitter around each, and/or
+        mapping onto a different (but path-compatible) target `model`.
+
+        Like `start_point`, this never modifies priors -- it only ever reads values off `self.samples` and
+        writes a `{Prior: float}` (or per-point list thereof) starting-point dictionary. Contrast with
+        `model_centred` / `model_centred_absolute` / `model_centred_relative` / `model_centred_max_lh_bounded`
+        above, which construct a *new model* with rewritten (e.g. `GaussianPrior`) priors.
+
+        Parameters
+        ----------
+        point
+            Which point of `self.samples` to draw the starting values from: `"max_log_likelihood"` (the
+            default) or `"median_pdf"`.
+        n_points
+            The number of starting points to generate (e.g. one per NUTS chain).
+        jitter
+            Physical-space jitter magnitude applied around each starting point (see
+            `InitializerParamStartPoints.from_result` for the exact definition).
+        seed
+            Seed for the deterministic jitter draws.
+        model
+            The model the start point(s) are mapped onto. If `None`, `self.model` is used.
+
+        Returns
+        -------
+        An initializer that draws its `n_points` starting vectors, in order, from this result.
+        """
+        from autofit.non_linear.initializer import InitializerParamStartPoints
+
+        return InitializerParamStartPoints.from_result(
+            self,
+            model=model,
+            point=point,
+            n_points=n_points,
+            jitter=jitter,
+            seed=seed,
+        )
 
     @property
     def model_centred(self) -> AbstractPriorModel:
