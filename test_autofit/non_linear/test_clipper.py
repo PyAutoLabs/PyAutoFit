@@ -69,16 +69,24 @@ class TestBoundsExtraction:
         assert not np.isnan(lower).any()
         assert not np.isnan(upper).any()
 
-    def test__log_gaussian_prior__lower_bound_is_declared_by_the_clipper(self):
+    def test__log_gaussian_prior__lower_bound_is_declared_by_the_prior(self):
         """
-        LogGaussianPrior reports (-inf, inf) because its TransformedMessage is never
-        given limits, yet ``log_prior_from_value`` is -inf for value <= 0. The
-        clipper declares the real (0, inf) support, strictly, so the projected value
+        LogGaussianPrior declares its own (0, inf) support and flags the lower bound
+        strict, so the clipper reads it like any other prior and the projected value
         lands *above* zero rather than on it.
+
+        This test used to assert ``prior.lower_limit == -np.inf`` and the clipper
+        supplied the real bound itself via an ``isinstance`` switch. That was a
+        workaround for PyAutoFit#1526: the prior was telling every consumer, not just
+        this one, that a strictly positive parameter could go negative. The bounds
+        assertions below are unchanged by the fix — that equivalence is the point.
         """
         prior = af.LogGaussianPrior(mean=0.0, sigma=1.0)
 
-        assert prior.lower_limit == -np.inf
+        assert prior.lower_limit == 0.0
+        assert prior.upper_limit == np.inf
+        assert prior.lower_limit_strict is True
+        assert prior.upper_limit_strict is False
 
         model = _model(alpha=prior)
         lower, upper = ClipperPriorBox(strict_epsilon=1.0e-12).bounds_from_model(

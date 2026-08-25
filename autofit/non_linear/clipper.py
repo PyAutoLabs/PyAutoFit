@@ -99,8 +99,6 @@ from typing import Optional, Tuple
 
 import numpy as np
 
-from autofit.mapper.prior.log_gaussian import LogGaussianPrior
-
 logger = logging.getLogger(__name__)
 
 
@@ -225,7 +223,9 @@ class ClipperPriorBox(AbstractClipper):
       ``(0, inf)``) — inset by an *absolute* ``strict_epsilon``. A relative margin
       is identically zero here, there being no finite width, so it would clip
       exactly onto ``0.0``, where the support is strict and ``log_prior`` is
-      ``-inf``. Only an absolute nudge lands strictly inside.
+      ``-inf``. Only an absolute nudge lands strictly inside. Which bounds are
+      exclusive is read off the prior's ``lower_limit_strict`` /
+      ``upper_limit_strict``, never inferred from its type.
 
     Parameters
     ----------
@@ -249,23 +249,20 @@ class ClipperPriorBox(AbstractClipper):
         The raw ``(lower, upper, lower_strict, upper_strict)`` arrays for ``model``,
         in physical parameter order.
 
-        Limits are read off ``prior.lower_limit`` / ``prior.upper_limit``, which
-        resolves for **every** prior type without a type switch: ``Prior.__getattr__``
-        delegates to the prior's message, and ``AbstractMessage`` defaults both to
-        ``±inf``. ``UniformPrior`` and ``LogUniformPrior`` shadow them with their
-        own attributes, ``TruncatedGaussianPrior`` picks up real limits from
-        ``TruncatedNormalMessage``, and ``GaussianPrior`` correctly falls through
-        to ``±inf``.
+        Limits are read off ``prior.lower_limit`` / ``prior.upper_limit``, and
+        strictness off ``prior.lower_limit_strict`` / ``prior.upper_limit_strict``.
+        Both resolve for **every** prior type without a type switch: ``UniformPrior``
+        and ``LogUniformPrior`` shadow the limits with their own attributes,
+        ``LogGaussianPrior`` declares its ``(0, inf)`` support and flags the lower
+        bound strict, ``TruncatedGaussianPrior`` picks up real limits from
+        ``TruncatedNormalMessage``, and ``GaussianPrior`` falls through
+        ``Prior.__getattr__`` to its message's ``±inf``.
 
-        ``LogGaussianPrior`` is the one prior that read gets *wrong*, and silently.
-        Its message is a ``TransformedMessage``, which defaults its limits to
-        ``±inf`` and is never passed any — yet
-        ``LogGaussianPrior.log_prior_from_value`` returns ``-inf`` for
-        ``value <= 0``. Left uncorrected, the clipper would report that coordinate
-        as unbounded and fail to protect precisely the mechanism it exists to fix,
-        so its ``(0, inf)`` support is declared here. Declaring it on the prior
-        itself is the cleaner fix, but it would change a class the EP machinery and
-        the nested samplers also read, so it is deliberately kept local.
+        This clipper used to declare ``LogGaussianPrior``'s support itself, because
+        that prior reported ``(-inf, inf)`` while ``log_prior_from_value`` returned
+        ``-inf`` for ``value <= 0``. That was a workaround for a defect in the prior,
+        fixed in PyAutoFit#1526: any consumer of ``lower_limit`` — not just this one —
+        was being told a strictly positive parameter could go negative.
 
         The ``strict`` flags mark bounds the support *excludes* (``value > limit``
         rather than ``value >= limit``); only those need the absolute inset.
@@ -275,12 +272,8 @@ class ClipperPriorBox(AbstractClipper):
         for prior in model.priors_ordered_by_id:
             low = float(prior.lower_limit)
             high = float(prior.upper_limit)
-            low_strict = False
-            high_strict = False
-
-            if isinstance(prior, LogGaussianPrior):
-                low = 0.0
-                low_strict = True
+            low_strict = bool(prior.lower_limit_strict)
+            high_strict = bool(prior.upper_limit_strict)
 
             lower.append(low)
             upper.append(high)
