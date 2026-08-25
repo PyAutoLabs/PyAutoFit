@@ -271,3 +271,83 @@ def test__from_mode_matches_mean_and_variance(cls, mean, variance):
     message = cls.from_mode(np.asarray(mean), np.asarray(variance))
     assert float(message.mean) == pytest.approx(mean, rel=1e-6)
     assert float(message.variance) == pytest.approx(variance, rel=1e-6)
+
+
+# === P6: the reported support matches the actual support ===
+
+
+def interior_probes(prior):
+    """
+    Points that lie strictly inside the prior's *reported* ``limits``.
+
+    Every one of them must have finite log prior. If a prior reports a box wider
+    than its true support, some point in here falls in the gap and the density
+    there is -inf -- which is precisely the shape of PyAutoFit#1526, where
+    ``LogGaussianPrior`` reported (-inf, inf) for a support of (0, inf).
+    """
+    lo, hi = prior.limits
+    probes = []
+
+    if np.isfinite(lo) and np.isfinite(hi):
+        width = hi - lo
+        probes += [lo + 0.25 * width, lo + 0.5 * width, lo + 0.75 * width]
+        probes += [lo + 1e-9 * width, hi - 1e-9 * width]
+    elif np.isfinite(lo):
+        probes += [lo + 1e-9, lo + 1.0, lo + 1e3]
+    elif np.isfinite(hi):
+        probes += [hi - 1e-9, hi - 1.0, hi - 1e3]
+    else:
+        probes += [-1e6, -1.0, 0.0, 1.0, 1e3]
+
+    return probes
+
+
+@pytest.mark.parametrize("prior", all_priors(), ids=prior_id)
+def test__log_prior_is_finite_everywhere_inside_the_reported_limits(prior):
+    """
+    The general form of PyAutoFit#1526. A prior that reports a bound it does not
+    actually have hands every consumer a licence to evaluate where the density is
+    zero -- and for a strictly positive parameter, ``log(0)`` or a division by it
+    is the failure that follows.
+    """
+    for value in interior_probes(prior):
+        assert np.isfinite(
+            prior.log_prior_from_value(value)
+        ), f"{prior} reports limits {prior.limits} but log_prior({value}) is not finite"
+
+
+@pytest.mark.parametrize("prior", all_priors(), ids=prior_id)
+def test__log_prior_is_minus_inf_outside_the_reported_limits(prior):
+    """
+    The converse: the reported box must not be *narrower* than the support either.
+    """
+    lo, hi = prior.limits
+
+    if np.isfinite(lo):
+        assert prior.log_prior_from_value(lo - 1.0) == -np.inf
+    if np.isfinite(hi):
+        assert prior.log_prior_from_value(hi + 1.0) == -np.inf
+
+
+@pytest.mark.parametrize("prior", all_priors(), ids=prior_id)
+def test__strictness_flags_agree_with_the_density_at_the_bounds(prior):
+    """
+    A bound flagged strict must have zero density on it; a bound not flagged strict
+    must have finite density on it. This is what lets a consumer clip onto a bound
+    without a per-type switch -- ``ClipperPriorBox`` insets only the strict ones.
+    """
+    lo, hi = prior.limits
+
+    if np.isfinite(lo):
+        at_lower = prior.log_prior_from_value(lo)
+        if prior.lower_limit_strict:
+            assert at_lower == -np.inf
+        else:
+            assert np.isfinite(at_lower)
+
+    if np.isfinite(hi):
+        at_upper = prior.log_prior_from_value(hi)
+        if prior.upper_limit_strict:
+            assert at_upper == -np.inf
+        else:
+            assert np.isfinite(at_upper)

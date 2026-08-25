@@ -21,6 +21,20 @@ class Prior(Variable, ABC, ArithmeticMixin):
 
     _ids = itertools.count()
 
+    #: Whether the support *excludes* the corresponding limit itself, i.e. whether
+    #: the bound is ``value > limit`` rather than ``value >= limit``.
+    #:
+    #: Most priors are inclusive at their limits: ``UniformPrior.log_prior_from_value``
+    #: is finite exactly on the bound. ``LogGaussianPrior`` is not — its support is the
+    #: open ``(0, inf)`` — and a consumer that clips onto an exclusive bound lands on a
+    #: point of zero density. These flags let such a consumer tell the two apart without
+    #: a per-type ``isinstance`` switch (see ``non_linear.clipper.ClipperPriorBox``).
+    #:
+    #: Class attributes, deliberately: they are a property of the prior *family*, never
+    #: of an instance, so they stay out of ``__dict__`` and out of the identifier.
+    lower_limit_strict = False
+    upper_limit_strict = False
+
     def __init__(self, message, id_=None):
         """
         An object used to mappers a unit value to an attribute value for a specific
@@ -347,10 +361,16 @@ class Prior(Variable, ABC, ArithmeticMixin):
     def limits(self) -> Tuple[float, float]:
         """The (lower, upper) bounds of this prior.
 
-        Returns (-inf, inf) by default. Subclasses with finite bounds
-        (e.g. UniformPrior) override this.
+        Derived from ``lower_limit`` / ``upper_limit`` rather than stated
+        separately, so the two cannot disagree. They used to: this property
+        returned a hardcoded ``(-inf, inf)`` for every prior that did not
+        override it, which was right for ``GaussianPrior`` and wrong for
+        ``LogGaussianPrior``, whose support is ``(0, inf)``.
+
+        Use ``lower_limit_strict`` / ``upper_limit_strict`` to tell whether the
+        support includes the bounds returned here.
         """
-        return (float("-inf"), float("inf"))
+        return (float(self.lower_limit), float(self.upper_limit))
 
     def gaussian_prior_model_for_arguments(self, arguments):
         """Look up this prior in an arguments dict and return the mapped value.
