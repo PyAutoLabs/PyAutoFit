@@ -95,7 +95,19 @@ class MessageInterface(ABC):
     @classmethod
     def natural_logpdf(cls, eta, t, log_base, log_partition, xp=np):
         eta_t = xp.multiply(eta, t).sum(0)
-        return xp.nan_to_num(log_base + eta_t - log_partition, nan=-xp.inf)
+        # Only NaN is replaced. ``nan=-inf`` maps an out-of-support NaN (e.g.
+        # ``log`` of a negative value under a transformed message) to zero
+        # density, which is intended -- but ``nan_to_num``'s DEFAULT ``neginf``
+        # replaces a genuine ``-inf`` with ``-1.8e308``, turning a zero-density
+        # point into a finite one. That is the opposite of the intent, and it
+        # matters: ``isfinite`` is what ``optax.apply_if_finite`` and
+        # ``non_linear.clipper`` branch on to detect a lane leaving the support.
+        return xp.nan_to_num(
+            log_base + eta_t - log_partition,
+            nan=-xp.inf,
+            neginf=-xp.inf,
+            posinf=xp.inf,
+        )
 
     def numerical_logpdf_gradient(
         self, x: np.ndarray, eps: float = 1e-6
