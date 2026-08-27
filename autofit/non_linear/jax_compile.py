@@ -84,9 +84,23 @@ def dump_traceback_seconds():
     return _env_seconds("PYAUTOFIT_JAX_COMPILE_DUMP_SECS", default)
 
 
+# The two halves of a first call. They are separately nameable, and a heartbeat
+# that cannot tell them apart reports the wrong one: before this existed a
+# stalled run logged `still compiling ... 1770s elapsed` while its stack sat in
+# `jax.block_until_ready`, and every marker written off that log calls this an
+# "XLA compile stall" (autolens_workspace_test#271).
+COMPILING = "compiling"
+MATERIALIZING = "materializing"
+
+
 class _Heartbeat:
     """
-    Log that a compile is still running, on an interval, until stopped.
+    Log that a first call is still running, on an interval, until stopped.
+
+    The message names which half it is in. A phase-blind heartbeat is worse
+    than none for the case it exists to diagnose: it is *positive evidence*
+    for the wrong diagnosis, and three quarantines were written against
+    exactly that.
 
     Without this a long compile is indistinguishable from a stopped one: the
     process emits the "compiling..." line and then nothing at all until it
@@ -101,15 +115,42 @@ class _Heartbeat:
         self.description = description
         self.start_time = start
         self.interval = heartbeat_seconds() if interval is None else interval
+        self.phase = COMPILING
+        self.compiled_in = None
         self._stop = threading.Event()
         self._thread = None
 
+    def materializing(self, compiled_in):
+        """
+        Move to the execution half, having compiled in `compiled_in` seconds.
+
+        `compiled_in` is written BEFORE `phase` so the beat thread can never
+        observe `MATERIALIZING` with no compile time to report. Both are plain
+        attribute assignments, which are atomic under the GIL; the ordering is
+        the whole synchronisation and it is deliberate.
+        """
+        self.compiled_in = compiled_in
+        self.phase = MATERIALIZING
+
     def _beat(self):
         while not self._stop.wait(self.interval):
-            logger.info(
-                f"JAX jit still compiling {self.description}, "
-                f"{time.time() - self.start_time:.0f}s elapsed..."
-            )
+            elapsed = time.time() - self.start_time
+
+            if self.phase == COMPILING:
+                logger.info(
+                    f"JAX jit still compiling {self.description}, "
+                    f"{elapsed:.0f}s elapsed..."
+                )
+            else:
+                # The compile time rides on every beat rather than only on the
+                # summary line, because a stalled run never reaches a summary
+                # line -- the runner SIGKILLs it. Whatever the last beat to
+                # reach stderr was, it carries the split.
+                logger.info(
+                    f"JAX jit compiled {self.description} in "
+                    f"{self.compiled_in:.1f}s and is still waiting for the "
+                    f"result to materialize, {elapsed:.0f}s elapsed..."
+                )
 
     def start(self):
         if self.interval <= 0:
@@ -191,6 +232,23 @@ class _TracebackWatchdog:
         self._armed = False
 
 
+def _block_until_ready(result):
+    """
+    Wait for `result` to materialize, if JAX is installed.
+
+    Separated from the wrapper for two reasons: the execution half is the one
+    that hangs, so it has to be substitutable in a test that must not depend on
+    JAX being installed; and keeping the broad `except` around the import alone
+    stops it swallowing failures from the wait itself.
+    """
+    try:
+        import jax
+    except Exception:
+        return
+
+    jax.block_until_ready(result)
+
+
 def log_on_first_compile(func, description):
     """
     Wrap `func` so that its first invocation reports the JAX compilation it
@@ -211,11 +269,19 @@ def log_on_first_compile(func, description):
     2. `jax.block_until_ready(result)` -- execution, since JAX dispatches
        asynchronously.
 
-    One summary line covering both cannot say which half a stalled run is stuck
-    in, and that ambiguity is why the same intermittent stall has been
-    quarantined three times across the test workspaces without a diagnosis. A
-    heartbeat reports liveness while either half is in flight, and a
-    `faulthandler` watchdog dumps a traceback if the whole thing overruns.
+    Both are reported AS THEY FINISH, never in one line at the end. A stalled
+    run is killed by the runner's cap and reaches no end, so a summary emitted
+    there describes only the runs that did not stall -- which is how the same
+    intermittent stall was quarantined five times across the test workspaces
+    under the name "XLA compile stall" while its stack sat in
+    `jax.block_until_ready`, the *execution* half, with compilation long since
+    finished (autolens_workspace_test#271, PyAutoFit#1528).
+
+    So: the compile half is logged the instant `func` returns; the heartbeat
+    then names the materialize half it has moved into and repeats the compile
+    time on every beat; and a `faulthandler` watchdog dumps a traceback if the
+    whole thing overruns. A run killed at any point after tracing has already
+    said on stderr which half it was in, and how long the other one took.
 
     The one-shot flag lives in a closure rather than on an object because the
     callers cache these wrappers on attributes that are stripped for pickling; a
@@ -254,16 +320,23 @@ def log_on_first_compile(func, description):
             result = func(*args, **kwargs)
             compiled_at = time.time()
 
+            # Reported HERE, not once both halves are done. A stalled run never
+            # reaches the end of this function, so a split emitted after the
+            # wait characterises only the healthy case -- which is why the logs
+            # from 20 stalled runs could not say that compilation had in fact
+            # finished in ~16s. Emitted before the wait, it says so.
+            heartbeat.materializing(compiled_at - start)
+            logger.info(
+                f"JAX jit compilation of {description}: traced, lowered and "
+                f"compiled in {compiled_at - start:.1f} seconds; waiting for "
+                f"the result to materialize..."
+            )
+
             # JAX dispatches asynchronously, so `result` may be a future that is
             # not yet materialized. Block once, on this first call only, so the
             # duration logged below is the wait the user actually sat through
             # rather than the dispatch latency.
-            try:
-                import jax
-
-                jax.block_until_ready(result)
-            except Exception:
-                pass
+            _block_until_ready(result)
 
             materialized_at = time.time()
         finally:
@@ -272,9 +345,8 @@ def log_on_first_compile(func, description):
             state["compiled"] = True
 
         logger.info(
-            f"JAX jit compilation of {description}: traced, lowered and "
-            f"compiled in {compiled_at - start:.1f} seconds, result "
-            f"materialized in {materialized_at - compiled_at:.1f} seconds."
+            f"JAX jit compilation of {description}: result materialized in "
+            f"{materialized_at - compiled_at:.1f} seconds."
         )
 
         logger.info(
