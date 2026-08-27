@@ -394,7 +394,12 @@ class VariableData(Dict[Variable, np.ndarray]):
         return all(VariableData.var_all(self).values())
 
     def any(self) -> bool:
-        return any(VariableData.var_all(self).values())
+        # ``var_any``, not ``var_all``: this reduces "is ANY element True",
+        # and dispatching it through ``var_all`` made it "is there a variable
+        # whose elements are ALL True". For a partially-violating array that
+        # answered False, so ``OptimisationState.valid`` accepted parameter
+        # vectors with some components outside their limits.
+        return any(VariableData.var_any(self).values())
 
     def det(self) -> float:
         return VariableData.var_det(self).reduce(operator.mul)

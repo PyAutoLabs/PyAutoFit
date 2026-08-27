@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from typing import Optional
 
 import numpy as np
 
@@ -117,10 +117,6 @@ class TruncatedGaussianPrior(Prior):
             "lower_limit": self.lower_limit,
             "upper_limit": self.upper_limit
         }
-
-    @property
-    def limits(self) -> Tuple[float, float]:
-        return self.lower_limit, self.upper_limit
 
     @property
     def parameter_string(self) -> str:
