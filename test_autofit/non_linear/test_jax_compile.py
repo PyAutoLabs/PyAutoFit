@@ -218,12 +218,139 @@ def test_the_compile_wait_and_the_execution_wait_are_reported_separately(caplog)
 
     messages = [record.getMessage() for record in caplog.records]
 
-    # One summary line covering both waits cannot say which half a stalled run
-    # is stuck in -- the ambiguity this whole module exists to remove.
-    assert any(
-        "traced, lowered and compiled in" in m and "result materialized in" in m
-        for m in messages
-    )
+    compiled = [i for i, m in enumerate(messages) if "traced, lowered and compiled in" in m]
+    materialized = [i for i, m in enumerate(messages) if "result materialized in" in m]
+
+    assert compiled and materialized
+
+    # Two lines, in order -- not one line carrying both. The order is the
+    # assertion that matters: it is what lets a run that is killed between them
+    # be read as "compiled, then stuck in execution".
+    assert compiled[0] < materialized[0]
+
+
+def test_the_compile_half_is_reported_before_the_execution_half_is_waited_on(caplog):
+    """
+    The defect this pins: the split used to be logged once BOTH halves finished,
+    so a stalled run -- which never finishes the second -- reported neither, and
+    twenty of them could not say that compilation had in fact completed.
+    """
+    blocked = threading.Event()
+    reached = threading.Event()
+
+    def never_returns(_result):
+        reached.set()
+        blocked.wait(timeout=10)
+
+    wrapped = log_on_first_compile(lambda: None, "vectorized (vmap) likelihood function")
+
+    with caplog.at_level(logging.INFO, logger=LOGGER):
+        with mock.patch.object(jax_compile, "_block_until_ready", never_returns):
+            worker = threading.Thread(target=wrapped, daemon=True)
+            worker.start()
+            assert reached.wait(timeout=5)
+
+            # Still inside the execution half, exactly where a stalled CI run
+            # sits when the runner kills it.
+            messages = [record.getMessage() for record in caplog.records]
+            assert any("traced, lowered and compiled in" in m for m in messages)
+            assert not any("result materialized in" in m for m in messages)
+
+            blocked.set()
+            worker.join(timeout=5)
+
+    assert not worker.is_alive()
+
+
+def test_the_heartbeat_names_the_half_it_is_actually_in(caplog):
+    """
+    A phase-blind heartbeat logged `still compiling ... 1770s elapsed` while the
+    process sat in `jax.block_until_ready`. Every marker written off that log
+    calls this an "XLA compile stall"; it is not one.
+    """
+    blocked = threading.Event()
+    reached = threading.Event()
+
+    def never_returns(_result):
+        reached.set()
+        blocked.wait(timeout=10)
+
+    wrapped = log_on_first_compile(lambda: None, "vectorized (vmap) likelihood function")
+
+    with caplog.at_level(logging.INFO, logger=LOGGER):
+        with mock.patch.object(jax_compile, "heartbeat_seconds", return_value=0.05):
+            with mock.patch.object(jax_compile, "_block_until_ready", never_returns):
+                worker = threading.Thread(target=wrapped, daemon=True)
+                worker.start()
+                assert reached.wait(timeout=5)
+                time.sleep(0.25)
+
+                beats = [
+                    m
+                    for m in (r.getMessage() for r in caplog.records)
+                    if "elapsed..." in m
+                ]
+
+                blocked.set()
+                worker.join(timeout=5)
+
+    assert beats
+
+    # Every beat emitted while parked in the execution half must say so, and
+    # none may still claim to be compiling.
+    stuck = [m for m in beats if "waiting for the result to materialize" in m]
+    assert stuck
+    assert not any("still compiling" in m for m in beats[-len(stuck):])
+
+
+def test_a_heartbeat_in_the_execution_half_carries_the_compile_time(caplog):
+    """
+    A stalled run is SIGKILLed and reaches no summary line, so the compile/execute
+    split has to ride on the beats themselves to survive to the captured tail.
+    """
+    blocked = threading.Event()
+    reached = threading.Event()
+
+    def never_returns(_result):
+        reached.set()
+        blocked.wait(timeout=10)
+
+    def slow_compile():
+        time.sleep(0.2)
+
+    wrapped = log_on_first_compile(slow_compile, "vectorized (vmap) likelihood function")
+
+    with caplog.at_level(logging.INFO, logger=LOGGER):
+        with mock.patch.object(jax_compile, "heartbeat_seconds", return_value=0.05):
+            with mock.patch.object(jax_compile, "_block_until_ready", never_returns):
+                worker = threading.Thread(target=wrapped, daemon=True)
+                worker.start()
+                assert reached.wait(timeout=5)
+                time.sleep(0.2)
+
+                blocked.set()
+                worker.join(timeout=5)
+
+    # "is still waiting" is the beat; the wrapper's own hand-off line says
+    # "waiting" without the "is still", and carries no elapsed counter.
+    stuck = [
+        m
+        for m in (r.getMessage() for r in caplog.records)
+        if "is still waiting for the result to materialize" in m
+    ]
+
+    assert stuck
+    assert all("compiled vectorized (vmap) likelihood function in" in m for m in stuck)
+
+
+def test_the_execution_half_is_skipped_without_jax_and_does_not_raise():
+    """
+    `_block_until_ready` exists to be substitutable, but its real body must stay
+    a no-op when JAX is absent -- the library suite is numpy-only, and losing the
+    wait is a lost diagnostic, never a failed fit.
+    """
+    with mock.patch.dict("sys.modules", {"jax": None}):
+        jax_compile._block_until_ready(object())
 
 
 def test_the_split_is_not_reported_when_the_first_call_raises(caplog):
