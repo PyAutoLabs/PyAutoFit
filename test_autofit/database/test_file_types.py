@@ -3,6 +3,14 @@ import pytest
 
 from autofit.database import JSON
 from autofit import database as db
+
+# `astropy` ships via the `[optional]` extras; skip the module there
+# rather than fail collection with `No module named 'astropy'`.
+pytest.importorskip(
+    "astropy",
+    reason="requires astropy (installed via the [optional] extras)",
+)
+
 from astropy.io import fits
 
 

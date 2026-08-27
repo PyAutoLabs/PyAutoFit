@@ -1,15 +1,17 @@
+from __future__ import annotations
+
 import shutil
-from typing import Optional, Union
+from typing import Optional, Union, TYPE_CHECKING
 
 from autonerves.output import conditional_output, should_output
-from autofit.database.sqlalchemy_ import sa
 from .abstract import AbstractPaths
 import numpy as np
 
-from autofit.database.model import Fit
 from autonerves.dictable import to_dict, from_dict
-from autofit.database.aggregator.info import Info
 from autofit.non_linear.samples.summary import SamplesSummary
+
+if TYPE_CHECKING:
+    from autofit.database.model import Fit
 
 
 class DatabasePaths(AbstractPaths):
@@ -108,6 +110,8 @@ class DatabasePaths(AbstractPaths):
         """
         Remove files from both the symlinked folder and the output directory
         """
+        from autofit.database.aggregator.info import Info
+
         self.session.commit()
         Info(self.session).write()
 
@@ -234,6 +238,9 @@ class DatabasePaths(AbstractPaths):
 
     @property
     def fit(self) -> Fit:
+        from autofit.database.model import Fit
+        from autofit.database.sqlalchemy_ import sa
+
         if self._fit is None:
             try:
                 self._fit = (
@@ -340,6 +347,8 @@ class DatabasePaths(AbstractPaths):
             self.save_json("info", info)
         self.save_json("search", to_dict(self.search))
         self.save_json("model", to_dict(self.model))
+
+        from autofit.database.aggregator.info import Info
 
         self.session.commit()
         Info(self.session).write()

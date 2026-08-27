@@ -1,9 +1,10 @@
+from __future__ import annotations
+
 from abc import ABC
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 import warnings
 
 from autonerves import conf
-from autofit.database.sqlalchemy_ import sa
 from autofit.non_linear.search.abstract_search import NonLinearSearch
 from autofit.non_linear.initializer import (
     InitializerPrior,
@@ -11,6 +12,9 @@ from autofit.non_linear.initializer import (
     InitializerParamBounds,
 )
 from autofit.non_linear.plot import corner_anesthetic
+
+if TYPE_CHECKING:
+    from autofit.database.sqlalchemy_ import sa
 
 
 class AbstractNest(NonLinearSearch, ABC):

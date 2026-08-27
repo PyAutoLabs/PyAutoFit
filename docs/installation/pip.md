@@ -3,9 +3,10 @@
 # Installation with pip
 
 :::{note}
-**PyAutoFit** requires **Python 3.12 or later**. If you are on Python
-3.9, 3.10, or 3.11, `pip install autofit` will fail with a "no matching
-distribution" error. Upgrade Python to 3.12+ before installing.
+**PyAutoFit** requires **Python 3.12 or later**. On Python 3.9, 3.10 or 3.11,
+`pip install autofit` stops with an error telling you to upgrade — it will not
+quietly install an older release instead. Upgrade Python to 3.12+ before
+installing.
 :::
 
 We strongly recommend that you install **PyAutoFit** in a
@@ -16,14 +17,16 @@ The latest version of **PyAutoFit** is installed via pip as follows (specifying 
 the installation has clean dependencies):
 
 ```bash
-pip install autofit[jax]
+pip install autofit
 ```
 
-The `[jax]` extra installs \[**JAX**\](<https://docs.jax.dev/en/latest/notebooks/thinking_in_jax.html>) (and
-`optax`), which **PyAutoFit** uses for gradient-based searches and GPU acceleration. **JAX is not installed by
-default** — a plain `pip install autofit` gives a fully working install that runs on NumPy, without JAX
-acceleration. The extra installs CPU-only JAX; for GPU support, follow the official
+This installs \[**JAX**\](<https://docs.jax.dev/en/latest/notebooks/thinking_in_jax.html>) (and `optax`) by
+default, which **PyAutoFit** uses for gradient-based searches and GPU acceleration (the older
+`pip install autofit[jax]` command still works and installs the same thing). The default install is CPU-only
+JAX; for GPU support, follow the official
 \[JAX installation guide\](<https://jax.readthedocs.io/en/latest/installation.html>) **before** installing.
+On Intel (x86_64) macOS, where JAX publishes no wheels, the install automatically excludes JAX and runs on
+the slower NumPy path — a warning is printed at import to make this clear.
 
 If this raises no errors **PyAutoFit** is installed! If there is an error check out
 the [troubleshooting section](https://pyautofit.readthedocs.io/en/latest/installation/troubleshooting.html).
@@ -45,16 +48,26 @@ python3 welcome.py
 
 ## Legacy Python versions
 
-We dropped support for Python 3.9, 3.10, and 3.11 in release `2026.4.5.3`
-(April 2026). Pre-`2026.4.5.3` releases on PyPI have been yanked, so they
-will not install via the standard `pip install autofit` command.
+We dropped support for Python 3.9, 3.10 and 3.11 in release `2026.7.29.2`
+(July 2026) — the first release published declaring `Requires-Python >=3.12`.
 
-If you have an existing project that requires a pre-`2026.4.5.3` version,
-you can still install it explicitly by pinning the version, e.g.:
+Raising that floor does not retract what is already published. Releases at or
+below `2026.7.29.1` were published declaring `>=3.9`, and PyPI metadata is
+immutable, so they remain valid candidates forever. Left alone, `pip install
+autofit` on an older Python did not fail — it walked back to `2026.7.29.1` and
+installed a months-old stack without JAX, reporting nothing.
+
+Release `2026.7.29.1.post1` exists to stop that. It contains no code, declares
+`Requires-Python <3.12`, and raises an error when pip tries to build it, so an
+unsupported Python gets an explanation instead of a stale install.
+
+If you need a historical release, pin it exactly — that still resolves on older
+Pythons:
 
 ```bash
 pip install autofit==2025.10.6.1
 ```
 
-Yanked releases remain available for explicit pins; only resolver-driven
-fallback is blocked.
+One gap remains: `pip install --only-binary=:all: autofit` skips source
+distributions entirely, so it steps past `2026.7.29.1.post1` and installs the
+old wheel silently. If you use that flag, pin the version you want.

@@ -106,7 +106,7 @@ class NormalMessage(AbstractMessage):
             An optional unique identifier used to track the message in larger probabilistic graphs or models.
         """
 
-        if isinstance(mean, (np.ndarray, float, int, list)):
+        if isinstance(mean, (np.ndarray, np.generic, float, int, list)):
             xp = np
         else:
             import jax.numpy as jnp

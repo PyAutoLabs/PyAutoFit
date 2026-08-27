@@ -423,6 +423,33 @@ def test__scaler_is_not_offered_by_searches_that_do_not_own_their_step_loop():
     assert "scaler" not in inspect.signature(af.LBFGS.__init__).parameters
 
 
+def test__dict_round_trip__bijector():
+    restored = from_dict(to_dict(af.MultiStartAdam(bijector=af.BijectorAuto())))
+
+    assert isinstance(restored.bijector, af.BijectorAuto)
+    # Default is the no-op, so the step loop skips the change of variables
+    # entirely rather than tracing an identity `jnp.where` selection.
+    assert isinstance(af.MultiStartAdam().bijector, af.BijectorNone)
+
+
+def test__scaler_and_bijector_together__raises_at_construction():
+    """
+    They are two different changes of variables for the same step; letting both
+    be non-default would mean silently picking one over the other rather than
+    surfacing the conflict.
+    """
+    with pytest.raises(ValueError):
+        af.MultiStartAdam(scaler=af.ScalerPriorWidth(), bijector=af.BijectorAuto())
+
+    # Either alone is fine.
+    af.MultiStartAdam(scaler=af.ScalerPriorWidth())
+    af.MultiStartAdam(bijector=af.BijectorAuto())
+
+
+def test__bijector_is_not_offered_by_searches_that_do_not_own_their_step_loop():
+    assert "bijector" not in inspect.signature(af.LBFGS.__init__).parameters
+
+
 def test__samples_via_internal_from():
     model = af.Model(example.Gaussian)
 
@@ -488,6 +515,42 @@ def test__samples_via_internal_from():
     )
     assert samples.samples_info["fom_history"] == pytest.approx([-4.0, -8.0, best_fom])
     assert all(isinstance(x, float) for x in samples.samples_info["fom_history"])
+
+    # Scaler/bijector are recorded ALWAYS (including their no-op defaults),
+    # since neither enters the search identifier.
+    assert samples.samples_info["scaler"] == "ScalerNone"
+    assert samples.samples_info["bijector"] == "BijectorNone"
+    assert samples.samples_info["bijector_kinds"] is None
+
+
+def test__samples_info__bijector_kinds_are_read_from_search_internal_not_live_state():
+    """
+    ``bijector_kinds`` must come from the persisted ``search_internal["bijector"]``
+    rather than from ``self.bijector.kinds`` directly -- the latter would raise
+    (unresolved) or read stale state in a process that loaded a
+    ``search_internal`` without ever calling ``_fit``.
+    """
+    model = af.Model(example.Gaussian)
+    best_params = np.asarray(model.vector_from_unit_vector([0.5] * model.prior_count))
+    per_start_params = np.stack([best_params])
+
+    search = af.MultiStartAdam(n_starts=1, n_steps=1, bijector=af.BijectorAuto())
+
+    samples = search.samples_via_internal_from(
+        model=model,
+        search_internal={
+            "params": per_start_params,
+            "best_params": best_params,
+            "best_fom": -2.0,
+            "total_steps": 1,
+            "n_resurrections": 0,
+            "fom_history": np.asarray([-2.0]),
+            "bijector": ["identity", "identity", "identity"],
+        },
+    )
+
+    assert samples.samples_info["bijector"] == "BijectorAuto"
+    assert samples.samples_info["bijector_kinds"] == ["identity", "identity", "identity"]
 
 
 def test__samples_info__stop_reason_max_steps_and_legacy_search_internal():
@@ -1006,3 +1069,161 @@ def test__batch_size_within_budget__degenerate_inputs(
     fixed, per_start, n_starts, budget, expected
 ):
     assert batch_size_within_budget(fixed, per_start, n_starts, budget) == expected
+
+
+# --- Per-lane best preservation (PyAutoFit#1514) ------------------------------
+#
+# Same contract as the _nan_lane_counts tests above: the update rule is pure
+# NumPy and tested directly; the _fit loop that drives it (and its resume /
+# resurrection seams) is JAX and is pinned by source-level wiring guards.
+
+
+def test__lane_best_update__captures_improvements_and_leaves_the_rest():
+    lane_best_params = np.full((3, 2), np.nan)
+    lane_best_foms = np.array([np.inf, 10.0, 5.0])
+    lane_best_steps = np.array([0, 3, 4])
+
+    physical = np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
+
+    af.MultiStartAdam._lane_best_update(
+        lane_best_params=lane_best_params,
+        lane_best_foms=lane_best_foms,
+        lane_best_steps=lane_best_steps,
+        # lane 0: first finite eval; lane 1: improves; lane 2: worsens.
+        foms_np=np.array([100.0, 7.0, 9.0]),
+        gather_physical=lambda idx: physical[idx],
+        step=8,
+    )
+
+    assert lane_best_foms.tolist() == [100.0, 7.0, 5.0]
+    assert lane_best_params[0].tolist() == [1.0, 2.0]
+    assert lane_best_params[1].tolist() == [3.0, 4.0]
+    # the unimproved lane's record is untouched, NaN params included.
+    assert np.isnan(lane_best_params[2]).all()
+    assert lane_best_steps.tolist() == [8, 8, 4]
+
+
+def test__lane_best_update__dead_lanes_never_improve():
+    # ``foms_np`` arrives alive-masked (dead lanes carry inf), so a dead lane
+    # can never beat any record — including an inf one (inf < inf is False).
+    lane_best_params = np.zeros((2, 1))
+    lane_best_foms = np.array([3.0, np.inf])
+    lane_best_steps = np.array([2, 0])
+
+    af.MultiStartAdam._lane_best_update(
+        lane_best_params=lane_best_params,
+        lane_best_foms=lane_best_foms,
+        lane_best_steps=lane_best_steps,
+        foms_np=np.array([np.inf, np.inf]),
+        gather_physical=lambda idx: pytest.fail("no lane improved"),
+        step=9,
+    )
+
+    assert lane_best_foms.tolist() == [3.0, np.inf]
+    assert lane_best_steps.tolist() == [2, 0]
+
+
+def test__lane_best_update__ties_keep_the_earliest_step():
+    # Strict comparison: a plateaued lane does not creep its best-step index
+    # forward, so "steps after best" stays an honest waste measure.
+    lane_best_params = np.array([[7.0]])
+    lane_best_foms = np.array([5.0])
+    lane_best_steps = np.array([4])
+
+    af.MultiStartAdam._lane_best_update(
+        lane_best_params=lane_best_params,
+        lane_best_foms=lane_best_foms,
+        lane_best_steps=lane_best_steps,
+        foms_np=np.array([5.0]),
+        gather_physical=lambda idx: pytest.fail("a tie is not an improvement"),
+        step=9,
+    )
+
+    assert lane_best_foms.tolist() == [5.0]
+    assert lane_best_steps.tolist() == [4]
+    assert lane_best_params.tolist() == [[7.0]]
+
+
+def test__lane_best_update__gather_is_lazy_and_improved_only():
+    # ``gather_physical`` is the device->host copy in ``_fit``; it must be
+    # called once, only when something improved, and only with the improved
+    # lane indices — not the full population.
+    calls = []
+
+    def gather(idx):
+        calls.append(np.asarray(idx).tolist())
+        return np.zeros((len(idx), 1))
+
+    lane_best_params = np.ones((3, 1))
+    lane_best_foms = np.array([1.0, 2.0, 3.0])
+    lane_best_steps = np.array([0, 0, 0])
+
+    af.MultiStartAdam._lane_best_update(
+        lane_best_params=lane_best_params,
+        lane_best_foms=lane_best_foms,
+        lane_best_steps=lane_best_steps,
+        foms_np=np.array([5.0, 1.5, 5.0]),
+        gather_physical=gather,
+        step=1,
+    )
+
+    assert calls == [[1]]
+    assert lane_best_params.tolist() == [[1.0], [0.0], [1.0]]
+
+
+def test__lane_best_update__is_monotone_across_repeated_calls():
+    lane_best_params = np.full((2, 1), np.nan)
+    lane_best_foms = np.array([np.inf, np.inf])
+    lane_best_steps = np.array([0, 0])
+
+    trajectory = [
+        np.array([9.0, 4.0]),
+        np.array([7.0, 6.0]),  # lane 1 worsens: record must hold at 4.0
+        np.array([8.0, 3.0]),  # lane 0 worsens: record must hold at 7.0
+    ]
+    for step, foms in enumerate(trajectory):
+        af.MultiStartAdam._lane_best_update(
+            lane_best_params=lane_best_params,
+            lane_best_foms=lane_best_foms,
+            lane_best_steps=lane_best_steps,
+            foms_np=foms,
+            gather_physical=lambda idx: foms[idx][:, None],
+            step=step,
+        )
+
+    assert lane_best_foms.tolist() == [7.0, 3.0]
+    assert lane_best_steps.tolist() == [1, 2]
+    # every record is the min of that lane's own trajectory — the global best
+    # is then min over lanes by construction.
+    assert lane_best_foms.min() == min(min(f) for f in trajectory)
+
+
+def test__fit_wires_the_per_lane_best_seams():
+    """Wiring guard for the per-lane best records (PyAutoFit#1514), which are
+    otherwise tested in isolation and would keep passing if ``_fit`` stopped
+    maintaining them.
+
+    Necessarily a source-level check — ``_fit`` cannot run from this suite.
+    """
+    source = " ".join(inspect.getsource(af.MultiStartAdam._fit).split())
+
+    # the per-step capture, driven by the alive-masked foms at the
+    # pre-increment step index (= this step's fom_history index).
+    assert "self._lane_best_update(" in source
+    assert "foms_np=foms_np" in source
+    assert "step=total_steps" in source
+
+    # all three records are persisted for the profiling reader / resume.
+    assert '"lane_best_params": lane_best_params' in source
+    assert '"lane_best_foms": lane_best_foms' in source
+    assert '"lane_best_steps": lane_best_steps' in source
+
+    # resume restores defensively: a legacy search_internal re-seeds from the
+    # restored finals rather than KeyError-ing.
+    assert 'search_internal.get("lane_best_params", search_internal["params"])' in source
+
+    # a resurrected slot is a NEW start: its record resets rather than
+    # conflating two starts' basins in one slot.
+    assert "lane_best_params[dead_idx] = np.nan" in source
+    assert "lane_best_foms[dead_idx] = np.inf" in source
+    assert "lane_best_steps[dead_idx] = total_steps" in source

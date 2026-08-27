@@ -3,6 +3,7 @@ import pytest
 
 import autofit as af
 from autofit import exc
+from autofit.non_linear.bijector import BijectorAuto
 from autofit.non_linear.clipper import ClipperNone, ClipperPriorBox
 
 
@@ -68,16 +69,24 @@ class TestBoundsExtraction:
         assert not np.isnan(lower).any()
         assert not np.isnan(upper).any()
 
-    def test__log_gaussian_prior__lower_bound_is_declared_by_the_clipper(self):
+    def test__log_gaussian_prior__lower_bound_is_declared_by_the_prior(self):
         """
-        LogGaussianPrior reports (-inf, inf) because its TransformedMessage is never
-        given limits, yet ``log_prior_from_value`` is -inf for value <= 0. The
-        clipper declares the real (0, inf) support, strictly, so the projected value
+        LogGaussianPrior declares its own (0, inf) support and flags the lower bound
+        strict, so the clipper reads it like any other prior and the projected value
         lands *above* zero rather than on it.
+
+        This test used to assert ``prior.lower_limit == -np.inf`` and the clipper
+        supplied the real bound itself via an ``isinstance`` switch. That was a
+        workaround for PyAutoFit#1526: the prior was telling every consumer, not just
+        this one, that a strictly positive parameter could go negative. The bounds
+        assertions below are unchanged by the fix — that equivalence is the point.
         """
         prior = af.LogGaussianPrior(mean=0.0, sigma=1.0)
 
-        assert prior.lower_limit == -np.inf
+        assert prior.lower_limit == 0.0
+        assert prior.upper_limit == np.inf
+        assert prior.lower_limit_strict is True
+        assert prior.upper_limit_strict is False
 
         model = _model(alpha=prior)
         lower, upper = ClipperPriorBox(strict_epsilon=1.0e-12).bounds_from_model(
@@ -388,3 +397,109 @@ class TestSearchWiring:
 
         with pytest.raises(exc.SearchException):
             search._bounds_from(model=model)
+
+
+class TestBijectorComposition:
+    """
+    ``AbstractClipper.project(..., bijector=...)`` -- see the module docstring's
+    "Composition with a bijector" section and
+    ``autofit.non_linear.bijector``'s equivalence argument.
+    """
+
+    def test__scale_and_bijector_together__raises(self):
+        model = _model(alpha=af.UniformPrior(lower_limit=0.0, upper_limit=1.0))
+        bijector = BijectorAuto().from_model(model)
+
+        with pytest.raises(ValueError):
+            ClipperPriorBox().project(
+                vector=np.array([0.5]),
+                model=model,
+                scale=np.array([1.0]),
+                bijector=bijector,
+            )
+
+    def test__clipper_none__accepts_a_bijector_and_ignores_it(self):
+        model = _model(alpha=af.UniformPrior(lower_limit=0.0, upper_limit=1.0))
+        bijector = BijectorAuto().from_model(model)
+
+        vector = np.array([5.0])
+        projected, mask = ClipperNone().project(
+            vector=vector, model=model, bijector=bijector
+        )
+
+        assert projected is vector
+        assert not mask.any()
+
+    def test__log_uniform_inset__is_taken_in_log_space_not_physical_space(self):
+        """
+        The bug found while wiring this up (see the ``clipper`` module
+        docstring). The physical-relative inset (`margin * (upper - lower)`)
+        is `~1e-6 + 1e-6 * (1e6 - 1e-6) ~ 1.0` for `LogUniform(1e-6, 1e6)` --
+        fencing off virtually the entire support. The log-space inset must
+        instead land close to the ORIGINAL bound, off by a factor of
+        `exp(margin * log(upper / lower))`, not by an additive ~1.0.
+        """
+        model = _model(alpha=af.LogUniformPrior(lower_limit=1.0e-6, upper_limit=1.0e6))
+        bijector = BijectorAuto().from_model(model)
+        assert bijector.kinds == ["log"]
+
+        clipper = ClipperPriorBox(margin=1.0e-6)
+
+        physical_lower, physical_upper = clipper.bounds_from_model(model)
+        log_aware_lower, log_aware_upper = clipper._inset_from_model(
+            model, kinds=bijector.kinds
+        )
+
+        # The un-aware inset is the bug: it is nowhere near the original 1e-6.
+        assert physical_lower[0] > 0.5
+
+        # The kind-aware inset stays close (multiplicatively) to the original
+        # bound, not displaced by an O(1) physical amount.
+        assert log_aware_lower[0] == pytest.approx(1.0e-6, rel=1.0e-3)
+        assert log_aware_upper[0] == pytest.approx(1.0e6, rel=1.0e-3)
+        assert log_aware_lower[0] > 1.0e-6
+        assert log_aware_upper[0] < 1.0e6
+
+    def test__project_with_bijector__matches_a_direct_physical_clip_mapped_through(
+        self,
+    ):
+        """
+        ``clipper.project(..., bijector=...)`` clips in `phi`-space against
+        `bijector.bounds_forward` of the (kind-aware) inset box. Because every
+        bijector kind is monotone increasing this must recover EXACTLY the
+        same physical point as clipping directly against that same inset box
+        and never routing through `phi` at all.
+        """
+        model = _model(
+            alpha=af.UniformPrior(lower_limit=0.0, upper_limit=8.0),
+            beta=af.LogUniformPrior(lower_limit=1.0e-6, upper_limit=1.0e6),
+            gamma=af.GaussianPrior(mean=1.0, sigma=2.0),
+        )
+        clipper = ClipperPriorBox()
+        bijector = BijectorAuto().from_model(model)
+
+        theta = np.array([9.0, 1.0e-8, 0.4])  # alpha and beta both out of box
+
+        lower, upper = clipper._inset_from_model(model, kinds=bijector.kinds)
+        direct_physical_clip = np.clip(theta, lower, upper)
+
+        phi = bijector.forward(theta)
+        projected_phi, mask = clipper.project(vector=phi, model=model, bijector=bijector)
+        recovered = bijector.inverse(projected_phi)
+
+        assert recovered == pytest.approx(direct_physical_clip)
+        assert list(mask) == [True, True, False]
+
+    def test__no_bijector__bounds_from_model_is_unaffected_by_the_log_kind_fix(self):
+        """
+        The plain (no-bijector) `bounds_from_model` path -- used directly by
+        LBFGS's `_bounds_from` and by any existing caller -- must be
+        byte-for-byte what it was before: only `project(..., bijector=...)`
+        is kind-aware.
+        """
+        model = _model(alpha=af.LogUniformPrior(lower_limit=1.0e-6, upper_limit=1.0e6))
+        clipper = ClipperPriorBox(margin=1.0e-6)
+
+        lower, upper = clipper.bounds_from_model(model)
+
+        assert lower[0] == pytest.approx(1.0e-6 + 1.0e-6 * (1.0e6 - 1.0e-6))

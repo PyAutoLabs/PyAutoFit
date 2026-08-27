@@ -378,6 +378,11 @@ class InitializerParamStartPoints(InitializerParamBounds):
 
         super().__init__(parameter_dict=parameter_dict_new)
 
+        # Set only by `from_result` when `n_points > 1` (or `jitter != 0.0`).
+        # `None` preserves the exact single-point behaviour above unchanged.
+        self._point_dicts: Optional[List[Dict[Prior, float]]] = None
+        self._point_index: int = 0
+
     def info_value_from(self, value : Tuple[float, float]) -> float:
         """
         Returns the value that is used to display the starting point of the parameters in the initializer.
@@ -392,6 +397,225 @@ class InitializerParamStartPoints(InitializerParamBounds):
             parameter.
         """
         return (value[1] + value[0]) / 2.0
+
+    @classmethod
+    def from_result(
+        cls,
+        result,
+        model: Optional[AbstractPriorModel] = None,
+        point: str = "max_log_likelihood",
+        n_points: int = 1,
+        jitter: float = 0.0,
+        seed: int = 0,
+    ) -> "InitializerParamStartPoints":
+        """
+        Build an initializer whose starting point(s) are taken from a previous `Result`, for example to
+        warm-start a search (e.g. `BlackJAXNUTS`) from an earlier fit's best-fit point(s).
+
+        This maps the previous result's inferred parameter values onto the (possibly different) target
+        model **by prior path**, never by list index or by touching prior objects directly. This is
+        deliberately distinct from `Result.model_centred*`, which *rewrite* priors (e.g. to `GaussianPrior`s
+        centred on the previous best-fit); `from_result` only ever reads values off `result.samples` and
+        writes a `{Prior: float}` starting-point dictionary, so the scientific priors of `model` (or, if not
+        given, `result.model`) are left completely untouched.
+
+        Parameters
+        ----------
+        result
+            The previous `Result` (or any object exposing `.samples` and `.model`) start points are drawn
+            from.
+        model
+            The model the start point(s) are mapped onto. If `None`, `result.model` is used (the common
+            case: continuing to fit the same model with a different / warm-started search).
+        point
+            Which point of `result.samples` to draw the starting values from: `"max_log_likelihood"` (the
+            default) or `"median_pdf"`.
+        n_points
+            The number of starting points to generate (e.g. one per NUTS chain). `n_points=1` (the default)
+            reproduces the exact single-point `InitializerParamStartPoints` behaviour (a fixed +-1e-8
+            unit-space jitter).
+        jitter
+            For `n_points > 1` (or when explicitly non-zero), each of the `n_points` starting values is
+            offset in *physical* parameter space by `jitter * sigma * N(0, 1)`, where `sigma` is the
+            corresponding diagonal entry of `result.samples.covariance_matrix` (its square root) when that
+            covariance is available and finite; otherwise `jitter` is interpreted as an absolute physical
+            offset (`jitter * N(0, 1)`). `jitter=0.0` (the default) still applies a fixed, tiny (1e-8)
+            offset so that `n_points > 1` starting points are not bit-identical.
+        seed
+            Seed for the `numpy.random.RandomState` used to draw the (reproducible) jitter offsets.
+
+        Returns
+        -------
+        InitializerParamStartPoints
+            An initializer that draws its `n_points` starting vectors, in order, from the previous result.
+
+        Raises
+        ------
+        InitializerException
+            If `result.samples` is unavailable, if `point` is not a recognised option, or if the source
+            and target models cannot be matched by path (dimension mismatch or an unmatched path).
+        """
+        samples = result.samples
+
+        if samples is None:
+            raise exc.InitializerException(
+                "InitializerParamStartPoints.from_result: `result.samples` is None "
+                "(no samples available in memory or on disk) -- cannot build start points."
+            )
+
+        if point == "max_log_likelihood":
+            vector = samples.max_log_likelihood(as_instance=False)
+        elif point == "median_pdf":
+            vector = samples.median_pdf(as_instance=False)
+        else:
+            raise exc.InitializerException(
+                "InitializerParamStartPoints.from_result: `point` must be "
+                f"'max_log_likelihood' or 'median_pdf', got {point!r}."
+            )
+
+        # The source model is `samples.model` (not `result.model`, which for a `Result` is a *freshly
+        # constructed* mapper via `mapper_via_defaults_from()` and therefore has priors with different
+        # `id`s / ordering). `vector` above is ordered consistently with `samples.model.priors_ordered_by_id`
+        # (both derive from the same `Samples` object), so path-matching must start from that same model.
+        source_model = samples.model
+        source_priors = source_model.priors_ordered_by_id
+
+        if len(source_priors) != len(vector):
+            raise exc.InitializerException(
+                "InitializerParamStartPoints.from_result: the source result's samples vector has "
+                f"{len(vector)} entries but its model has {len(source_priors)} priors -- cannot map by path."
+            )
+
+        value_by_source_path = {}
+        for prior, value in zip(source_priors, vector):
+            path = source_model.path_for_prior(prior)
+            if path is None:
+                raise exc.InitializerException(
+                    "InitializerParamStartPoints.from_result: no path found for a prior in the source "
+                    "result's model; cannot map its value by path."
+                )
+            value_by_source_path[path] = float(value)
+
+        target_model = model if model is not None else result.model
+        target_priors = target_model.priors_ordered_by_id
+
+        base_dict = {}
+        missing_paths = []
+        for prior in target_priors:
+            path = target_model.path_for_prior(prior)
+            if path is None or path not in value_by_source_path:
+                missing_paths.append(path)
+                continue
+            base_dict[prior] = value_by_source_path[path]
+
+        if missing_paths:
+            raise exc.InitializerException(
+                "InitializerParamStartPoints.from_result: could not match the following target-model "
+                f"prior paths to the source result's ({point}) values: {missing_paths}. The target "
+                "model's free parameters must live at the same paths as the source result's model."
+            )
+
+        if n_points < 1:
+            raise exc.InitializerException(
+                f"InitializerParamStartPoints.from_result: n_points must be >= 1, got {n_points}."
+            )
+
+        if n_points == 1 and jitter == 0.0:
+            return cls(parameter_dict=base_dict)
+
+        # Multi-point and/or explicitly-jittered path: draw `n_points` starting vectors, each offset in
+        # physical space, deterministically from `seed`. Priors are only ever read (`.id`, `path_for_prior`)
+        # -- never mutated.
+        sigma_by_source_path = {}
+        covariance = None
+        try:
+            covariance = np.asarray(samples.covariance_matrix)
+        except Exception:
+            covariance = None
+
+        if (
+            covariance is not None
+            and covariance.ndim == 2
+            and covariance.shape[0] == covariance.shape[1] == len(source_priors)
+        ):
+            diagonal = np.diag(covariance)
+            for index, prior in enumerate(source_priors):
+                path = source_model.path_for_prior(prior)
+                sigma_value = diagonal[index]
+                sigma_by_source_path[path] = (
+                    float(np.sqrt(sigma_value))
+                    if np.isfinite(sigma_value) and sigma_value > 0
+                    else None
+                )
+
+        # `jitter == 0.0` still uses a tiny fixed magnitude so `n_points > 1` points differ from one
+        # another (matching the single-point class's own +-1e-8 default jitter).
+        magnitude = jitter if jitter != 0.0 else 1.0e-8
+        random_state = np.random.RandomState(seed)
+
+        point_dicts: List[Dict[Prior, float]] = []
+        for _ in range(n_points):
+            point_dict = {}
+            for prior in target_priors:
+                path = target_model.path_for_prior(prior)
+                value = base_dict[prior]
+                sigma = sigma_by_source_path.get(path)
+                if sigma is not None:
+                    value = value + magnitude * sigma * random_state.normal()
+                else:
+                    value = value + magnitude * random_state.normal()
+                point_dict[prior] = value
+            point_dicts.append(point_dict)
+
+        initializer = cls(parameter_dict=base_dict)
+        initializer._point_dicts = point_dicts
+        initializer._point_index = 0
+        return initializer
+
+    def _generate_unit_parameter_list(self, model: AbstractPriorModel) -> List[float]:
+        """
+        Generate a unit vector for the model.
+
+        When this initializer was built via `from_result(..., n_points > 1)` (or a non-zero `jitter`),
+        successive calls cycle through the `n_points` pre-computed starting vectors, one per call (i.e. one
+        per requested starting point / chain), wrapping around if more points are requested than were
+        generated. Otherwise this defers to the base `InitializerParamBounds` behaviour (a fixed +-1e-8
+        unit-space jitter around the single stored `parameter_dict`).
+        """
+        if self._point_dicts is None:
+            return super()._generate_unit_parameter_list(model)
+
+        point_dict = self._point_dicts[self._point_index % len(self._point_dicts)]
+        self._point_index += 1
+
+        unit_parameter_list = []
+        for prior in model.priors_ordered_by_id:
+            try:
+                value = point_dict[prior]
+            except KeyError:
+                key = ".".join(model.path_for_prior(prior))
+                if key not in self._generated_warnings:
+                    logger.warning(
+                        f"Range for {key} not set in the InitializerParamStartPoints. "
+                        f"Using defaults."
+                    )
+                    self._generated_warnings.add(key)
+                value = prior.random(self.lower_limit, self.upper_limit)
+
+            unit_parameter_list.append(prior.unit_value_for(value))
+
+        return unit_parameter_list
+
+    def samples_from_model(self, *args, **kwargs):
+        """
+        As `AbstractInitializer.samples_from_model`, but first resets the per-point cycling counter used by
+        `_generate_unit_parameter_list` (when this initializer was built via `from_result(n_points > 1)`) so
+        repeated fits/resumes start again from point 0.
+        """
+        if self._point_dicts is not None:
+            self._point_index = 0
+
+        return super().samples_from_model(*args, **kwargs)
 
 
 class Initializer(AbstractInitializer):

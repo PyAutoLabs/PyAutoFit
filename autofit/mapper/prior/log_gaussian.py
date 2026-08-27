@@ -12,6 +12,10 @@ class LogGaussianPrior(Prior):
     __identifier_fields__ = ("mean", "sigma")
     __database_args__ = ("mean", "sigma", "id_")
 
+    #: The support is the *open* interval ``(0, inf)``: ``log_prior_from_value``
+    #: returns ``-inf`` at ``0`` itself, so a consumer must stay strictly above it.
+    lower_limit_strict = True
+
     def __init__(
         self,
         mean: float,
@@ -50,6 +54,15 @@ class LogGaussianPrior(Prior):
 
         self.mean = mean
         self.sigma = sigma
+
+        # Declared on the prior, not on the message below. `TransformedMessage`
+        # defaults its limits to +/-inf and derives its `_support` separately, so
+        # a prior that left them to delegation reported (-inf, inf) for a strictly
+        # positive parameter -- the bug this shadowing fixes. Keeping the message's
+        # own limits untouched keeps the EP/Laplace machinery, which reads them,
+        # behaving exactly as before.
+        self.lower_limit = 0.0
+        self.upper_limit = float("inf")
 
         message = TransformedMessage(
             NormalMessage(mean, sigma),

@@ -1,12 +1,13 @@
+from __future__ import annotations
+
 import logging
 import os
 import pickle
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 import numpy as np
 
-from autofit.database.sqlalchemy_ import sa
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.fitness import Fitness
 from autofit.non_linear.paths.null import NullPaths
@@ -14,6 +15,9 @@ from autofit.non_linear.search.nest import abstract_nest
 from .samples import NSSamples
 from autofit.non_linear.samples.sample import Sample
 from autofit.non_linear.test_mode import is_test_mode
+
+if TYPE_CHECKING:
+    from autofit.database.sqlalchemy_ import sa
 
 
 try:

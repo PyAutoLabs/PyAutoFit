@@ -12,7 +12,6 @@ from . import exc
 from . import mock as m
 from .non_linear.grid.grid_search import GridSearch as SearchGridSearch
 from .aggregator.base import AggBase
-from .database.aggregator.aggregator import GridSearchAggregator
 from .graphical.expectation_propagation.history import EPHistory
 from .graphical.declarative.factor.analysis import AnalysisFactor
 from .graphical.declarative.factor.analysis import EPAnalysisFactor
@@ -34,12 +33,10 @@ from .non_linear.samples import SamplesPDF
 from .non_linear.samples import Sample
 from .non_linear.samples import load_from_table
 from .non_linear.samples import SamplesStored
-from .database.aggregator import Aggregator
 from .aggregator.summary.aggregate_csv import AggregateCSV
 from .aggregator.summary.aggregate_csv import ValueType
 from .aggregator.summary.aggregate_images import AggregateImages
 from .aggregator.summary.aggregate_fits import AggregateFITS
-from .database.aggregator import Query
 from autofit.aggregator.fit_interface import Fit
 from .aggregator.search_output import SearchOutput
 from .mapper import prior
@@ -86,6 +83,12 @@ from .non_linear.clipper import ClipperPriorBox
 from .non_linear.scaler import AbstractScaler
 from .non_linear.scaler import ScalerNone
 from .non_linear.scaler import ScalerPriorWidth
+from .non_linear.bijector import AbstractBijector
+from .non_linear.bijector import BijectorNone
+from .non_linear.bijector import BijectorAuto
+from .non_linear.bijector import BijectorLogit
+from .non_linear.bijector import BijectorPerPath
+from .non_linear.bijector import BijectorDiagonal
 from .non_linear.initializer import InitializerBall
 from .non_linear.initializer import InitializerPrior
 from .non_linear.initializer import InitializerParamBounds
@@ -95,7 +98,6 @@ from .non_linear.search.mcmc.blackjax.nuts.search import BlackJAXNUTS
 from .non_linear.search.mcmc.emcee.search import Emcee
 from .non_linear.search.mcmc.zeus.search import Zeus
 from .non_linear.search.nest.nautilus.search import Nautilus
-from .non_linear.search.nest.nss.search import NSS
 from .non_linear.search.nest.dynesty.search.dynamic import DynestyDynamic
 from .non_linear.search.nest.dynesty.search.static import DynestyStatic
 from .non_linear.search.mle.drawer.search import Drawer
@@ -136,7 +138,6 @@ from autofit.mapper.prior.arithmetic.compound import Log
 from autofit.mapper.prior.arithmetic.compound import Log10
 
 from . import example as ex
-from . import database as db
 
 
 for type_ in (
@@ -201,3 +202,34 @@ from autonerves.test_mode import (
     is_test_mode,
     test_mode_level,
 )
+
+# Lazy attributes (PEP 562): NSS pulls blackjax -> jax, and the database
+# aggregator pulls sqlalchemy + the declarative models — together over a
+# second of import time that most sessions never use.
+_LAZY_ATTRS = {
+    "NSS": ("autofit.non_linear.search.nest.nss.search", "NSS"),
+    "Aggregator": ("autofit.database.aggregator", "Aggregator"),
+    "Query": ("autofit.database.aggregator", "Query"),
+    "GridSearchAggregator": (
+        "autofit.database.aggregator.aggregator",
+        "GridSearchAggregator",
+    ),
+    "db": ("autofit.database", None),
+}
+
+
+def __getattr__(name):
+    try:
+        module_name, attr = _LAZY_ATTRS[name]
+    except KeyError:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    import importlib
+
+    module = importlib.import_module(module_name)
+    value = module if attr is None else getattr(module, attr)
+    globals()[name] = value
+    return value
+
+
+def __dir__():
+    return sorted(set(globals()) | set(_LAZY_ATTRS))

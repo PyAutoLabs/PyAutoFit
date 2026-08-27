@@ -76,6 +76,23 @@ class TestResult:
                 result.samples.prior_means, a=2.0, r=1.0
             )
 
+    def test_start_point(self, result):
+        start_point = result.start_point
+
+        assert isinstance(start_point, af.InitializerParamStartPoints)
+
+        expected = result.samples.max_log_likelihood(as_instance=False)
+        parameter_dict = {
+            ".".join(result.model.path_for_prior(prior)): value
+            for prior, value in start_point.parameter_dict.items()
+        }
+        for path, value in zip(
+            [".".join(path) for path in result.model.paths], expected
+        ):
+            assert parameter_dict[path] == pytest.approx(
+                (value - 1e-8, value + 1e-8)
+            )
+
 
 @pytest.fixture(name="results")
 def make_results_collection():

@@ -1,3 +1,4 @@
+import importlib.util
 import os
 
 import pytest
@@ -7,6 +8,14 @@ from autofit.aggregator import Aggregator
 from pathlib import Path
 import autofit as af
 from autofit.database.aggregator.info import Info
+
+
+# `astropy` ships via the `[optional]` extras. Envs installed without them
+# must skip rather than fail with `No module named 'astropy'`.
+requires_astropy = pytest.mark.skipif(
+    importlib.util.find_spec("astropy") is None,
+    reason="requires astropy (installed via the [optional] extras)",
+)
 
 
 @pytest.fixture(name="directory")
@@ -56,6 +65,7 @@ def database_aggregator(
     return aggregator
 
 
+@requires_astropy
 def test_database(database_aggregator):
     fit = list(database_aggregator)[0]
     model = fit.model
@@ -67,20 +77,24 @@ def make_info(database_aggregator):
     return Info(database_aggregator.session)
 
 
+@requires_astropy
 def test_query_fits(info):
     fits = info.fits
     assert len(info.fits) == 3
     assert fits[0].total_parameters == 4
 
 
+@requires_astropy
 def test_headers_and_rows(info):
     assert len(info.headers) == len(info.rows[0])
 
 
+@requires_astropy
 def test_info_path(info, output_directory):
     assert info.path == output_directory / "database.info"
 
 
+@requires_astropy
 def test_database_info(
     database_aggregator,
     output_directory,

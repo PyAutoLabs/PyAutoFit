@@ -1,15 +1,17 @@
+from __future__ import annotations
+
 import inspect
 import pickle
-from typing import Optional
+from typing import Optional, Sequence, TYPE_CHECKING
 
 import numpy as np
 
-from autofit.database.sqlalchemy_ import sa
 
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.search.mle.abstract_mle import AbstractMLE
 from autofit.non_linear.analysis import Analysis
 from autofit.non_linear.fitness import Fitness
+from autofit.non_linear.bijector import AbstractBijector, BijectorNone
 from autofit.non_linear.clipper import AbstractClipper, ClipperNone
 from autofit.non_linear.scaler import AbstractScaler, ScalerNone
 from autofit.non_linear.initializer import AbstractInitializer
@@ -18,6 +20,9 @@ from autofit.non_linear.samples.samples import Samples
 from autofit.non_linear.search.mle.multi_start_gradient.convergence import (
     MultiStartGradientConvergence,
 )
+
+if TYPE_CHECKING:
+    from autofit.database.sqlalchemy_ import sa
 
 
 class AbstractMultiStartGradient(AbstractMLE):
@@ -58,7 +63,10 @@ class AbstractMultiStartGradient(AbstractMLE):
         initializer: Optional[AbstractInitializer] = None,
         clipper: Optional[AbstractClipper] = None,
         scaler: Optional[AbstractScaler] = None,
+        bijector: Optional[AbstractBijector] = None,
         reset_momentum_on_clip: bool = False,
+        record_lane_nan_history: bool = False,
+        trace_param_indices: Optional[Sequence[int]] = None,
         iterations_per_full_update: int = None,
         iterations_per_quick_update: int = None,
         silence: bool = False,
@@ -79,7 +87,11 @@ class AbstractMultiStartGradient(AbstractMLE):
         single-start, line-search or second-order optimizer on the kinked
         likelihoods this promotes from (see the Phase-3 GPU MAP-optimizer
         benchmark). The best-basin start is returned as the maximum-log-posterior
-        (MAP) point, with every start's final point retained as a diagnostic.
+        (MAP) point, with every start's final point retained as a diagnostic,
+        and each start's own best (position, figure-of-merit, step index)
+        preserved in ``search_internal`` (``lane_best_*``) for per-start basin
+        classification — a final point can leave its best basin late, die, or
+        pin to a bound after its best step.
 
         The method is JAX-native: it requires an ``Analysis`` whose
         ``log_likelihood_function`` is JAX-traceable (``use_jax=True``) and the
@@ -169,6 +181,28 @@ class AbstractMultiStartGradient(AbstractMLE):
             reaching a wall rarer, never impossible, and where the likelihood
             genuinely prefers a value outside the prior only clipping can express
             the resulting MAP.
+        bijector
+            A per-parameter change of variables (see
+            :mod:`autofit.non_linear.bijector`), applied instead of ``scaler``:
+            the rule steps in ``phi = bijector.forward(theta)`` while the
+            objective is still evaluated at the physical
+            ``theta = bijector.inverse(phi)``. Where ``scaler`` only ever
+            rescales linearly, a bijector may additionally reparameterise a
+            coordinate through ``log`` (for a coordinate whose natural step is
+            multiplicative, e.g. a ``LogUniformPrior``) or ``logit`` (secondary;
+            see :class:`~autofit.non_linear.bijector.BijectorLogit`). Mutually
+            exclusive with ``scaler`` -- passing both non-default raises
+            ``ValueError`` at construction, since they are two different
+            changes of variables for the same step.
+
+            No Jacobian is added to the objective for the same reason none is
+            added under ``scaler``: composing through a bijection relabels
+            points without changing the objective's value set, so the MAP is
+            unaffected (see the module docstring's equivalence argument).
+
+            Default ``BijectorNone`` -- a no-op, skipped entirely rather than
+            applied as an identity, so the default path and its compiled step
+            are both unchanged.
         resurrect
             Restart-on-death. When ``True``, any start whose objective goes
             non-finite is redrawn each step (fresh params from the start band +
@@ -218,6 +252,27 @@ class AbstractMultiStartGradient(AbstractMLE):
             this flag would then be discarding useful state. It is a knob for
             the case where pinning is an artefact of momentum rather than a
             statement about the data.
+        record_lane_nan_history
+            Record ``lane_value_nan_history`` / ``lane_grad_nan_history`` --
+            one bit per lane per step, ``bitpacked`` to ``(n_steps,
+            ceil(n_starts / 8))`` via ``numpy.packbits`` -- alongside the
+            existing lifetime totals. The totals (``n_value_nan_lane_steps``,
+            ``n_grad_nan_lane_steps``) answer "how much"; this answers "when,
+            and which lane" at the cost of ``O(n_steps * n_starts)`` bits of
+            ``search_internal``, which is why it defaults ``False``. Uses the
+            same short-circuit style as ``has_scaler`` / ``has_clipper`` above,
+            so a default run's step loop is unchanged.
+        trace_param_indices
+            Optional physical-parameter indices (into
+            ``model.priors_ordered_by_id``) to record a full per-step trace
+            for, as ``trace_history`` -- shape ``(n_steps, n_starts, k)``,
+            PHYSICAL units. ``None`` (default) records nothing, at zero cost to
+            the step loop, the same short-circuit as
+            ``record_lane_nan_history``. Intended for post-hoc basin/step
+            diagnostics on a small, deliberately chosen set of coordinates --
+            recording every parameter for every step is the
+            ``(n_steps, n_starts, n_params)`` array this knob exists to avoid
+            paying for by default.
         convergence
             Auto-convergence (early-stopping) settings. When
             ``check_for_convergence`` is ``True`` (the default) the search stops
@@ -283,7 +338,31 @@ class AbstractMultiStartGradient(AbstractMLE):
         # that does not own its step loop, and hanging an inert knob off LBFGS
         # would be a knob that silently does nothing.
         self.scaler = scaler or ScalerNone()
+        self.bijector = bijector or BijectorNone()
+
+        # Rejected at construction, not at fit time: `scaler` and `bijector`
+        # are two different changes of variables for the same step (linear
+        # rescale vs. a general per-coordinate bijection), and letting both be
+        # non-default would mean silently picking one over the other rather
+        # than surfacing the conflict to the caller who set both.
+        if not isinstance(self.scaler, ScalerNone) and not isinstance(
+            self.bijector, BijectorNone
+        ):
+            raise ValueError(
+                f"{type(self).__name__} received both a non-default `scaler` "
+                f"({type(self.scaler).__name__}) and a non-default `bijector` "
+                f"({type(self.bijector).__name__}). They are two different "
+                "changes of variables for the same step -- pass exactly one. "
+                "(A plain diagonal scale can be expressed as a bijector via "
+                "`autofit.BijectorDiagonal(scaler)` if both are wanted at "
+                "once.)"
+            )
+
         self.reset_momentum_on_clip = reset_momentum_on_clip
+        self.record_lane_nan_history = bool(record_lane_nan_history)
+        self.trace_param_indices = (
+            list(trace_param_indices) if trace_param_indices is not None else None
+        )
         self.convergence = (
             convergence if convergence is not None else MultiStartGradientConvergence()
         )
@@ -355,6 +434,42 @@ class AbstractMultiStartGradient(AbstractMLE):
         n_grad_nan = int(np.count_nonzero(alive & ~grad_finite))
 
         return alive, n_value_nan, n_grad_nan
+
+    @staticmethod
+    def _lane_best_update(
+        lane_best_params,
+        lane_best_foms,
+        lane_best_steps,
+        foms_np,
+        gather_physical,
+        step,
+    ):
+        """
+        Update the per-lane best records (in place) for one step.
+
+        Diagnostics only — never gates a redraw or a step, the same rule as
+        :meth:`_nan_lane_counts`. ``foms_np`` is the alive-masked
+        figure-of-merit vector (dead lanes carry ``inf``), so a dead lane can
+        never improve on its record. The comparison is strict, so a tie keeps
+        the EARLIEST best step — a plateaued lane does not creep its step
+        index forward.
+
+        ``gather_physical`` maps improved lane indices to their PHYSICAL
+        parameter rows and is called only when some lane improved — in
+        ``_fit`` it is the device->host copy (plus the scaler multiply), which
+        this laziness keeps off the no-improvement steps.
+
+        Pure NumPy and free of search state so it can be tested directly;
+        ``_fit`` itself needs jax + optax + a JAX-traceable ``Analysis`` and
+        cannot be driven from the NumPy-only library suite (same reasoning as
+        ``_nan_lane_counts`` above).
+        """
+        improved = foms_np < lane_best_foms
+        if improved.any():
+            improved_idx = np.flatnonzero(improved)
+            lane_best_params[improved_idx] = gather_physical(improved_idx)
+            lane_best_foms[improved_idx] = foms_np[improved_idx]
+            lane_best_steps[improved_idx] = step
 
     @staticmethod
     def _constrained_lane_count(alive, grad_finite, constraint_violation):
@@ -651,8 +766,10 @@ class AbstractMultiStartGradient(AbstractMLE):
             import optax.contrib  # noqa: F401  — makes optax.contrib rules resolvable
         except ImportError as e:
             raise ImportError(
-                f"{type(self).__name__} requires the optional `jax` and `optax` "
-                "dependencies. Install them with `pip install autofit[jax] optax`."
+                f"{type(self).__name__} requires the `jax` and `optax` "
+                "dependencies. These are installed by default except on platforms "
+                "without JAX wheels (e.g. Intel macOS); install them with "
+                "`pip install jax optax`."
             ) from e
 
         if not getattr(analysis, "_use_jax", False):
@@ -730,8 +847,24 @@ class AbstractMultiStartGradient(AbstractMLE):
         scale = self.scaler.scale_from_model(model=model) if has_scaler else None
         scale_jnp = jnp.asarray(scale) if has_scaler else None
 
+        # Per-parameter change of variables (see ``autofit.non_linear.bijector``).
+        # Mutually exclusive with the scaler (enforced at construction), so at
+        # most one of ``has_scaler`` / ``has_bijector`` is ever true. Resolved
+        # ONCE here -- ``from_model`` bakes the per-coordinate kind arrays onto
+        # ``self.bijector`` -- so ``forward`` / ``inverse`` below need no model
+        # argument and trace to a fixed program under ``jax.jit``. Same
+        # short-circuit as ``has_scaler``: under the default ``BijectorNone``
+        # nothing here is even resolved, and the compiled step is unchanged.
+        has_bijector = not isinstance(self.bijector, BijectorNone)
+        if has_bijector:
+            self.bijector.from_model(model=model)
+
         def _to_physical(vector):
-            return vector if scale_jnp is None else vector * scale_jnp
+            if scale_jnp is not None:
+                return vector * scale_jnp
+            if has_bijector:
+                return self.bijector.inverse(vector, xp=jnp)
+            return vector
 
         # The objective the OPTIMIZER differentiates. Composed as
         # ``fitness.call(phi * scale)``, so what is optimised remains the
@@ -751,7 +884,7 @@ class AbstractMultiStartGradient(AbstractMLE):
         # draws, and those draws are, and stay, physical.
         _value_and_grad_stepped = (
             jax.value_and_grad(lambda phi: fitness.call(_to_physical(phi)))
-            if has_scaler
+            if (has_scaler or has_bijector)
             else _value_and_grad
         )
 
@@ -819,6 +952,8 @@ class AbstractMultiStartGradient(AbstractMLE):
             params = jnp.asarray(search_internal["params"])
             if has_scaler:
                 params = params / scale_jnp
+            elif has_bijector:
+                params = self.bijector.forward(params, xp=jnp)
             opt_state = optax.tree_utils.tree_get(search_internal, "opt_state")
             best_params = np.asarray(search_internal["best_params"])
             best_fom = float(search_internal["best_fom"])
@@ -843,6 +978,53 @@ class AbstractMultiStartGradient(AbstractMLE):
             )
             n_clipped_lane_steps = int(search_internal.get("n_clipped_lane_steps", 0))
             stop_reason = search_internal.get("stop_reason", None)
+
+            # ``.get``: a ``search_internal`` written before per-lane best
+            # tracking existed has none of these keys, and a resumed run must
+            # not KeyError on it. The old run's per-lane history is
+            # unrecoverable, so tracking re-seeds (params from the restored
+            # finals — PHYSICAL, like everything in the file — with ``inf``
+            # foms) rather than being back-filled, the same doctrine as
+            # ``alive_history`` above.
+            # ``np.array`` (copies), not ``np.asarray``: the update writes in
+            # place, and a zero-copy view would be READ-ONLY for a device
+            # array and would alias the loaded dict's own array for the
+            # legacy-fallback seed.
+            lane_best_params = np.array(
+                search_internal.get("lane_best_params", search_internal["params"])
+            )
+            lane_best_foms = np.array(
+                search_internal.get(
+                    "lane_best_foms", np.full(len(lane_best_params), np.inf)
+                ),
+                dtype=float,
+            )
+            lane_best_steps = np.array(
+                search_internal.get(
+                    "lane_best_steps", np.zeros(len(lane_best_params), dtype=int)
+                ),
+                dtype=int,
+            )
+
+            # ``.get`` defaults, same doctrine as above: a ``search_internal``
+            # written before these histories existed (or by a run with the
+            # recording flags off) has none of these keys. Restored as a list
+            # of per-step rows so the step loop can keep appending to them;
+            # re-stacked into an array at the next write-back.
+            _lane_value_nan_history = search_internal.get("lane_value_nan_history")
+            lane_value_nan_rows = (
+                list(_lane_value_nan_history)
+                if _lane_value_nan_history is not None
+                else []
+            )
+            _lane_grad_nan_history = search_internal.get("lane_grad_nan_history")
+            lane_grad_nan_rows = (
+                list(_lane_grad_nan_history)
+                if _lane_grad_nan_history is not None
+                else []
+            )
+            _trace_history = search_internal.get("trace_history")
+            trace_rows = list(_trace_history) if _trace_history is not None else []
 
             self.logger.info(
                 "Resuming MultiStartGradient search (previous samples found)."
@@ -891,8 +1073,22 @@ class AbstractMultiStartGradient(AbstractMLE):
 
             best_params = np.asarray(params[0])
 
+            # Per-lane best tracking (position, figure-of-merit, step index).
+            # Diagnostics only — never gates a redraw or a step, the same rule
+            # as the NaN-lane counters. Seeded here while ``params`` is still
+            # PHYSICAL (the scaler divide happens below), so the array is in
+            # the same units as ``best_params`` from step zero; ``inf`` foms
+            # mark "no finite evaluation captured yet". ``np.array`` (a copy),
+            # not ``np.asarray``: a zero-copy view of a device array is
+            # READ-ONLY and the update writes in place.
+            lane_best_params = np.array(params)
+            lane_best_foms = np.full(self.n_starts, np.inf)
+            lane_best_steps = np.zeros(self.n_starts, dtype=int)
+
             if has_scaler:
                 params = params / scale_jnp
+            elif has_bijector:
+                params = self.bijector.forward(params, xp=jnp)
 
             # Per-start optimizer state: one independent state per start, so
             # learning-rate-free rules never share a global scalar estimate.
@@ -909,6 +1105,9 @@ class AbstractMultiStartGradient(AbstractMLE):
             n_grad_nan_lane_steps = 0
             n_constrained_lane_steps = 0
             n_clipped_lane_steps = 0
+            lane_value_nan_rows = []
+            lane_grad_nan_rows = []
+            trace_rows = []
             stop_reason = None
 
             self.logger.info(
@@ -992,8 +1191,55 @@ class AbstractMultiStartGradient(AbstractMLE):
                     best_params = np.asarray(params[best_index])
                     if has_scaler:
                         best_params = best_params * scale
+                    elif has_bijector:
+                        best_params = np.asarray(
+                            self.bijector.inverse(best_params, xp=np)
+                        )
+
+                # Per-lane best capture, PHYSICAL for the same reason as
+                # ``best_params`` just above. The step index is the
+                # pre-increment ``total_steps``, which is exactly this step's
+                # index into ``fom_history`` — including across resumes.
+                self._lane_best_update(
+                    lane_best_params=lane_best_params,
+                    lane_best_foms=lane_best_foms,
+                    lane_best_steps=lane_best_steps,
+                    foms_np=foms_np,
+                    gather_physical=lambda idx: (
+                        np.asarray(params[idx]) * scale
+                        if has_scaler
+                        else (
+                            np.asarray(
+                                self.bijector.inverse(np.asarray(params[idx]), xp=np)
+                            )
+                            if has_bijector
+                            else np.asarray(params[idx])
+                        )
+                    ),
+                    step=total_steps,
+                )
 
                 fom_history.append(best_fom)
+
+                # Optional per-step lane-death and trace diagnostics, both off
+                # by default (``record_lane_nan_history`` /
+                # ``trace_param_indices``) and both skipped entirely rather
+                # than computed and discarded, the same short-circuit style as
+                # ``has_scaler`` / ``has_clipper``. Packed to one bit per lane
+                # (``numpy.packbits``) rather than kept as bool arrays: at
+                # ``n_starts=48`` and a multi-thousand-step run this is an 8x
+                # reduction in ``search_internal`` size for a feature whose
+                # whole point is being cheap to turn on.
+                if self.record_lane_nan_history:
+                    lane_value_nan_rows.append(np.packbits(~alive))
+                    lane_grad_nan_rows.append(
+                        np.packbits(alive & ~np.asarray(grad_finite).astype(bool))
+                    )
+                if self.trace_param_indices:
+                    physical_row = np.asarray(_to_physical(params))
+                    trace_rows.append(
+                        np.asarray(physical_row)[:, self.trace_param_indices]
+                    )
 
                 # The size of the living population at this step. Recorded as a
                 # history because the cumulative lane counters above are
@@ -1026,7 +1272,18 @@ class AbstractMultiStartGradient(AbstractMLE):
                         jnp=jnp,
                         rng=resurrect_rng,
                         scale=scale,
+                        bijector=self.bijector if has_bijector else None,
                     )
+                    # A resurrected slot is a NEW start: its per-lane record
+                    # resets rather than conflating two starts' basins in one
+                    # slot (the record answers "which basin did this start
+                    # find", not "what is the best this slot ever held" — the
+                    # global ``best_*`` already keeps the latter). NaN params
+                    # + ``inf`` fom mark "no finite eval since redraw" without
+                    # paying a device->host copy of the fresh draws here.
+                    lane_best_params[dead_idx] = np.nan
+                    lane_best_foms[dead_idx] = np.inf
+                    lane_best_steps[dead_idx] = total_steps
 
                 updates, opt_state = step_update(grads, opt_state, params, foms)
                 params = optax.apply_updates(params, updates)
@@ -1049,7 +1306,11 @@ class AbstractMultiStartGradient(AbstractMLE):
                 # coordinates the clipper had just placed exactly on a bound.
                 if has_clipper:
                     params, clipped_mask = self.clipper.project(
-                        vector=params, model=model, xp=jnp, scale=scale
+                        vector=params,
+                        model=model,
+                        xp=jnp,
+                        scale=scale,
+                        bijector=self.bijector if has_bijector else None,
                     )
                     # Per-LANE, not per-coordinate: a lane clipped in three
                     # parameters at once is one clipped lane-step, matching how
@@ -1089,13 +1350,20 @@ class AbstractMultiStartGradient(AbstractMLE):
                     # merely pulls forward the sync the next iteration's
                     # ``np.asarray(foms)`` would force anyway.
                     #
-                    # Under a scaler this ``d`` is in SCALED units, because that
-                    # is the space the rule is stepping in. It is reported as the
-                    # rule's own estimate rather than converted, since there is no
-                    # single physical value to convert it to — one ``d`` now spans
-                    # a whole vector of physical step sizes, which is the point of
-                    # the feature. Do not compare ``d`` across a scaled and an
-                    # unscaled arm; compare the clip rate instead.
+                    # Under a scaler OR a bijector this ``d`` is in whatever
+                    # coordinates the rule is stepping in (SCALED, or the
+                    # bijector's ``phi``), not physical units — and under a
+                    # bijector mixing ``identity`` and ``log`` coordinates it is
+                    # a single global scalar spanning units that are not even
+                    # the same KIND across coordinates (a linear step size for
+                    # one, a multiplicative log-step for another). It is
+                    # reported as the rule's own estimate rather than converted,
+                    # since there is no single physical value to convert it to
+                    # either way — this is Prodigy's own design (one global
+                    # ``d`` estimated from whole-tree norms), unmodified by
+                    # either knob and not something this feature attempts to
+                    # fix. Do not compare ``d`` across arms that step in
+                    # different coordinates; compare the clip rate instead.
                     estim_lr = optax.tree_utils.tree_get(opt_state, "estim_lr")
 
                     self.logger.info(
@@ -1119,22 +1387,35 @@ class AbstractMultiStartGradient(AbstractMLE):
                 stop_reason = "max_steps"
 
             # ``params`` is written back in PHYSICAL parameters even when the
-            # search stepped in scaled ones. The scaler does not enter the search
-            # identifier, so the same output directory can be written by a scaled
-            # run and read by an unscaled one; a file whose units depended on a
-            # knob that is invisible to the identifier would resume as a silently
-            # wrong population rather than as an error. ``samples_via_internal_from``
+            # search stepped in scaled/transformed ones. Neither the scaler nor
+            # the bijector enters the search identifier, so the same output
+            # directory can be written by a scaled/transformed run and read by
+            # an untransformed one; a file whose units depended on a knob that
+            # is invisible to the identifier would resume as a silently wrong
+            # population rather than as an error. ``samples_via_internal_from``
             # reads this array directly for the per-start parameters too, and it
-            # has no scaler to consult. The scale vector rides along so a reader
-            # can see what was used without inferring it.
+            # has no scaler/bijector to consult. The scale vector / bijector
+            # kinds ride along so a reader can see what was used without
+            # inferring it.
+            if has_scaler:
+                params_physical = np.asarray(params) * scale
+            elif has_bijector:
+                params_physical = np.asarray(self.bijector.inverse(params, xp=np))
+            else:
+                params_physical = np.asarray(params)
+
             search_internal = {
-                "params": (
-                    np.asarray(params) * scale if has_scaler else np.asarray(params)
-                ),
+                "params": params_physical,
                 "scale": scale,
+                "bijector": self.bijector.kinds if has_bijector else None,
                 "opt_state": opt_state,
                 "best_params": best_params,
                 "best_fom": best_fom,
+                # Per-lane bests, PHYSICAL like ``params``/``best_params``
+                # above; ``lane_best_steps`` indexes into ``fom_history``.
+                "lane_best_params": lane_best_params,
+                "lane_best_foms": lane_best_foms,
+                "lane_best_steps": lane_best_steps,
                 "fom_history": np.asarray(fom_history),
                 "alive_history": np.asarray(alive_history),
                 "total_steps": total_steps,
@@ -1144,6 +1425,30 @@ class AbstractMultiStartGradient(AbstractMLE):
                 "n_constrained_lane_steps": n_constrained_lane_steps,
                 "n_clipped_lane_steps": n_clipped_lane_steps,
                 "stop_reason": stop_reason,
+                # Optional per-step diagnostics (off by default -- see
+                # ``record_lane_nan_history`` / ``trace_param_indices``).
+                # ``None`` when off, rather than an empty array, so a reader can
+                # tell "not recorded" from "recorded, zero steps so far".
+                "lane_value_nan_history": (
+                    np.stack(lane_value_nan_rows)
+                    if self.record_lane_nan_history and lane_value_nan_rows
+                    else None
+                ),
+                "lane_grad_nan_history": (
+                    np.stack(lane_grad_nan_rows)
+                    if self.record_lane_nan_history and lane_grad_nan_rows
+                    else None
+                ),
+                "trace_history": (
+                    np.stack(trace_rows)
+                    if self.trace_param_indices and trace_rows
+                    else None
+                ),
+                "trace_param_indices": (
+                    list(self.trace_param_indices)
+                    if self.trace_param_indices
+                    else None
+                ),
             }
             self.paths.save_search_internal(obj=search_internal)
 
@@ -1247,7 +1552,17 @@ class AbstractMultiStartGradient(AbstractMLE):
         return optimizer, step_update
 
     def _reinit_dead_starts(
-        self, params, opt_state, dead_idx, model, optimizer, jax, jnp, rng, scale=None
+        self,
+        params,
+        opt_state,
+        dead_idx,
+        model,
+        optimizer,
+        jax,
+        jnp,
+        rng,
+        scale=None,
+        bijector=None,
     ):
         """
         Redraw the dead starts (``dead_idx``) and reinitialise their per-start
@@ -1264,9 +1579,12 @@ class AbstractMultiStartGradient(AbstractMLE):
         ``scale`` is given those are the scaled ones, so the redraw — which is
         necessarily physical, since ``vector_from_unit_vector`` returns physical
         parameters — is divided by it before it is written back into the row.
-        Redrawing into the wrong coordinates would place a resurrected lane at a
-        point the prior never proposed, and it would do so only on lanes that had
-        already died, which is exactly where nobody looks.
+        When ``bijector`` is given instead, the redraw is mapped through its
+        ``forward`` the same way. ``scale`` and ``bijector`` are mutually
+        exclusive, enforced by the caller's constructor. Redrawing into the
+        wrong coordinates would place a resurrected lane at a point the prior
+        never proposed, and it would do so only on lanes that had already died,
+        which is exactly where nobody looks.
         """
         n = params.shape[0]
 
@@ -1278,7 +1596,12 @@ class AbstractMultiStartGradient(AbstractMLE):
             redrawn = np.asarray(
                 model.vector_from_unit_vector(unit_vector=list(unit_vector), xp=jnp)
             )
-            params_np[k] = redrawn if scale is None else redrawn / scale
+            if scale is not None:
+                params_np[k] = redrawn / scale
+            elif bijector is not None:
+                params_np[k] = np.asarray(bijector.forward(redrawn, xp=np))
+            else:
+                params_np[k] = redrawn
         params = jnp.asarray(params_np)
 
         fresh_state = jax.vmap(optimizer.init)(params)
@@ -1489,6 +1812,15 @@ class AbstractMultiStartGradient(AbstractMLE):
             # feature was off would be indistinguishable from one written before
             # the feature existed.
             "scaler": type(self.scaler).__name__,
+            # Per-parameter bijector (see ``autofit.non_linear.bijector``),
+            # recorded by NAME for the same reasons as the scaler, plus the
+            # resolved per-coordinate KINDS -- read from ``search_internal``
+            # (persisted at write-back) rather than from ``self.bijector``
+            # directly, so this is correct even when called on a
+            # ``search_internal`` loaded in a process that never ran ``_fit``
+            # (and so never called ``self.bijector.from_model``).
+            "bijector": type(self.bijector).__name__,
+            "bijector_kinds": search_internal.get("bijector"),
             "reset_momentum_on_clip": self.reset_momentum_on_clip,
             "n_clipped_lane_steps": int(search_internal.get("n_clipped_lane_steps", 0)),
             # The seed this search's own draws used, so a result file says which

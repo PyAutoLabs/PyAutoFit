@@ -133,7 +133,7 @@ class SamplesMCMC(SamplesPDF):
             total_samples=self.total_samples
         )
 
-    @to_instance
+    @to_instance()
     def median_pdf(self, as_instance: bool = True) -> [float]:
         """
         The median of the probability density function (PDF) of every parameter marginalized in 1D, returned
@@ -150,7 +150,7 @@ class SamplesMCMC(SamplesPDF):
 
         return self.max_log_likelihood(as_instance=False)
 
-    @to_instance
+    @to_instance()
     def values_at_sigma(self, sigma: float) -> [float]:
         """
         The value of every parameter marginalized in 1D at an input sigma value of its probability density function
@@ -202,6 +202,51 @@ class SamplesMCMC(SamplesPDF):
     @property
     def total_walkers(self) -> int:
         return self.samples_info["total_walkers"]
+
+    @property
+    def ess_bulk(self) -> Optional[List[float]]:
+        """
+        Bulk effective sample size per free parameter (rank-normalized, split-chain), where available (e.g.
+        `BlackJAXNUTS`). `None` for searches that do not populate this diagnostic.
+        """
+        return self.samples_info.get("ess_bulk_per_param")
+
+    @property
+    def ess_tail(self) -> Optional[List[float]]:
+        """
+        Tail effective sample size per free parameter (rank-normalized, split-chain), where available (e.g.
+        `BlackJAXNUTS`). `None` for searches that do not populate this diagnostic.
+        """
+        return self.samples_info.get("ess_tail_per_param")
+
+    @property
+    def rhat(self) -> Optional[List[float]]:
+        """
+        Rank-normalized split-R-hat per free parameter, where available (e.g. `BlackJAXNUTS`). Values close
+        to 1.0 indicate convergence; values above ~1.01 suggest the chains have not converged.
+
+        With a single chain (`num_chains == 1`) this is a *split-chain* R-hat only (each chain is split in
+        half internally before comparison) -- a useful non-stationarity check, but not a genuine
+        multi-chain convergence diagnostic. `None` for searches that do not populate this diagnostic.
+        """
+        return self.samples_info.get("rhat_per_param")
+
+    @property
+    def n_divergent(self) -> Optional[int]:
+        """
+        The total number of divergent transitions across all chains and samples, where available (e.g.
+        `BlackJAXNUTS`). `None` for searches that do not populate this diagnostic.
+        """
+        return self.samples_info.get("n_divergent")
+
+    @property
+    def tree_depths(self) -> Optional[dict]:
+        """
+        A histogram of the NUTS trajectory tree depths reached across all chains and samples, as a dict
+        mapping tree depth to count, where available (e.g. ``BlackJAXNUTS``). ``None`` for searches that
+        do not populate this diagnostic.
+        """
+        return self.samples_info.get("tree_depth_histogram")
 
     @property
     def log_evidence(self):

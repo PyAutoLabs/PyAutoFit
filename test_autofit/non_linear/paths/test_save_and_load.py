@@ -1,8 +1,16 @@
 import numpy as np
 import pytest
-from astropy.io import fits
 
 import autofit as af
+
+# `astropy` ships via the `[optional]` extras; skip the module there
+# rather than fail collection with `No module named 'astropy'`.
+pytest.importorskip(
+    "astropy",
+    reason="requires astropy (installed via the [optional] extras)",
+)
+
+from astropy.io import fits
 
 
 @pytest.fixture(name="dictionary")

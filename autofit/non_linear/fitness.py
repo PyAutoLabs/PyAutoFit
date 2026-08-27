@@ -1,6 +1,5 @@
 import logging
 import numpy as np
-from IPython.display import clear_output
 import os
 import time
 
@@ -439,6 +438,8 @@ class Fitness:
         self.quick_update_count += total_updates
 
         if self.quick_update_count >= self.iterations_per_quick_update:
+
+            from IPython.display import clear_output
 
             clear_output(wait=True)
 
