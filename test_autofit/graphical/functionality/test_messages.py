@@ -212,3 +212,30 @@ def test_normal_simplex():
     # verify transformation normalises correctly
     res, err = integrate.nquad(func, [simplex_lims] * message.size)
     assert res == pytest.approx(1, rel=err)
+
+
+def test_transformed_message_factor_gradient():
+    """Verify factor_gradient unpacks and chain-rules logd_jacs correctly against numerical derivative."""
+    mult_logit = transform.MultinomialLogitTransform()
+    normal_simplex = TransformedMessage(NormalMessage(0, 1), mult_logit)
+    message = normal_simplex([-1, 2], [0.3, 0.3])
+    x = np.array([0.2, 0.5])
+
+    val, grad = message.factor_gradient(x)
+    expected_val = message.factor(x)
+    assert np.allclose(val, expected_val)
+
+    # Numerical derivative check of factor(x)
+    eps = 1e-6
+    numerical_grad = np.zeros_like(x)
+    for i in range(len(x)):
+        x_plus = x.copy()
+        x_minus = x.copy()
+        x_plus[i] += eps
+        x_minus[i] -= eps
+        diff = message.factor(x_plus) - message.factor(x_minus)
+        numerical_grad[i] = float(np.sum(diff)) / (2 * eps)
+
+    assert np.allclose(grad, numerical_grad, rtol=1e-2, atol=1e-2)
+
+

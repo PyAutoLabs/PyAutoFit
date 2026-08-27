@@ -371,11 +371,11 @@ class TransformedMessage(MessageInterface):
         -------
         The probability this value is correct
         """
-        x, logd, logd_grad, jacs = self._transform_det_jac(x)
+        x, logd, logd_jacs = self._transform_det_jac(x)
         logp, grad = self.base_message.logpdf_gradient(x)
-        for jac in reversed(jacs):
-            grad = grad * jac 
-        return logp + logd, grad + logd_grad
+        for logd_grad, jac in reversed(logd_jacs):
+            grad = (grad * jac) + logd_grad
+        return logp + logd, grad
     
 
 
