@@ -1,5 +1,5 @@
 import numpy as np
-from typing import Optional, Tuple
+from typing import Optional
 
 from autofit.messages.normal import UniformNormalMessage
 from .abstract import Prior
@@ -200,8 +200,3 @@ class UniformPrior(Prior):
         """The constant ``-log(upper - lower)`` dropped from ``log_prior_from_value``
         (which returns ``0.0``). See ``Prior.log_normalisation``."""
         return -xp.log(self.upper_limit - self.lower_limit)
-
-    @property
-    def limits(self) -> Tuple[float, float]:
-        """The (lower_limit, upper_limit) bounds of this uniform prior."""
-        return self.lower_limit, self.upper_limit

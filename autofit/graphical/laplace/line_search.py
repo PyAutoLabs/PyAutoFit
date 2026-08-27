@@ -105,10 +105,23 @@ class OptimisationState:
 
     @property
     def valid(self):
-        if self.lower_limit and (self.parameters < self.lower_limit).any():
+        """
+        Whether the current parameters lie inside the limits, when limits are set.
+
+        ``lower_limit`` / ``upper_limit`` are ``VariableData`` (a ``dict`` keyed by
+        free variable), supplied by ``LaplaceOptimiser`` only when
+        ``check_limits=True`` and ``None`` otherwise. The guards test ``is not None``
+        rather than truthiness: the intent is "was a limit supplied?", and ``if x``
+        expresses that only by accident of ``VariableData`` being a ``dict``, whose
+        truthiness is non-emptiness. It reads as a scalar test — PyAutoFit#1527's
+        follow-up list recorded it as one, as a `0.0` bug that does not exist — and
+        would become one on any change of type: a scalar would make ``0.0`` skip the
+        check, and a bare array would raise on the ambiguous truth value.
+        """
+        if self.lower_limit is not None and (self.parameters < self.lower_limit).any():
             return False
 
-        if self.upper_limit and (self.parameters > self.upper_limit).any():
+        if self.upper_limit is not None and (self.parameters > self.upper_limit).any():
             return False
 
         return True
