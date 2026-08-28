@@ -1,11 +1,12 @@
 import inspect
-from typing import NamedTuple
+from typing import NamedTuple, Tuple
 
 import numpy as np
 import pytest
 
 import autofit as af
 from autofit import example
+from autofit.mapper.prior.tuple_prior import TuplePrior
 from autofit.non_linear.search import abstract_search
 from autofit.non_linear.search.mle.multi_start_gradient.search import (
     _chunk_slices,
@@ -1227,3 +1228,125 @@ def test__fit_wires_the_per_lane_best_seams():
     assert "lane_best_params[dead_idx] = np.nan" in source
     assert "lane_best_foms[dead_idx] = np.inf" in source
     assert "lane_best_steps[dead_idx] = total_steps" in source
+
+
+# ---------------------------------------------------------------------------
+# Joint ball clipping (PyAutoFit#1537)
+#
+# Kept NumPy, like the rest of this file: the projection and the momentum reset
+# are both `xp`-generic, so the step loop's contract is exercised by calling
+# them exactly as the loop does. The end-to-end JAX fit lives in
+# autofit_workspace_test.
+# ---------------------------------------------------------------------------
+
+BALL_RADIUS = 0.999
+
+
+class EllipticalLane:
+    """Stands in for an elliptical profile: a tuple parameter confined to a disk."""
+
+    __model_ball_constraints__ = ((("ell_comps",), BALL_RADIUS),)
+
+    def __init__(
+        self,
+        ell_comps: Tuple[float, float] = (0.0, 0.0),
+        intensity: float = 1.0,
+    ):
+        self.ell_comps = ell_comps
+        self.intensity = intensity
+
+
+def _lane_model():
+    """Parameter vector ``(ell_comps_0, ell_comps_1, intensity)``.
+
+    The `ell_comps` priors span `[-2, 2]`, deliberately wider than the disk, so
+    a lane at `|e| = 1.4` is inside every prior box and outside the disk — the
+    region the box clipper cannot see.
+    """
+    model = af.Model(EllipticalLane)
+
+    tuple_prior = TuplePrior()
+    tuple_prior.ell_comps_0 = af.UniformPrior(lower_limit=-2.0, upper_limit=2.0)
+    tuple_prior.ell_comps_1 = af.UniformPrior(lower_limit=-2.0, upper_limit=2.0)
+    model.ell_comps = tuple_prior
+    model.intensity = af.UniformPrior(lower_limit=0.0, upper_limit=10.0)
+
+    return model
+
+
+def test__a_lane_seeded_outside_the_disk_is_inside_it_after_one_step():
+    """`|e| = 1.4` is what 20.1% of recorded MultiStart lane best points look
+    like (autolens_profiling#182): inside both prior boxes, outside the disk, and
+    invisible to `ClipperPriorBox`. One application of the search's own clipper —
+    the same call the step loop makes — has to end it inside."""
+    search = af.MultiStartAdam(clipper=af.ClipperPriorBoxJoint(margin=0.0))
+    model = _lane_model()
+
+    # (n_starts, n_params), as the step loop holds it. Lane 0 is out of the disk,
+    # lane 1 well inside it.
+    params = np.array(
+        [
+            [1.4 / np.sqrt(2.0), 1.4 / np.sqrt(2.0), 5.0],
+            [0.1, -0.2, 5.0],
+        ]
+    )
+
+    assert np.hypot(params[0, 0], params[0, 1]) == pytest.approx(1.4)
+
+    params, clipped_mask = search.clipper.project(
+        vector=params, model=model, xp=np, scale=None, bijector=None
+    )
+
+    assert np.hypot(params[0, 0], params[0, 1]) <= BALL_RADIUS
+    assert np.hypot(params[1, 0], params[1, 1]) == pytest.approx(np.hypot(0.1, 0.2))
+
+    assert clipped_mask[0].tolist() == [True, True, False]
+    assert not clipped_mask[1].any()
+
+
+def test__the_clipped_lanes_momentum_is_reset_in_both_components():
+    """The projection alone is not enough: a lane keeps the velocity that pushed
+    it out of the disk, so without the reset it is projected back onto the same
+    surface every step. Both members of the pair have to be zeroed — zeroing one
+    leaves the pair spiralling straight back out."""
+
+    class MockAdamState(NamedTuple):
+        mu: np.ndarray
+        nu: np.ndarray
+
+    search = af.MultiStartAdam(clipper=af.ClipperPriorBoxJoint(margin=0.0))
+    model = _lane_model()
+
+    params = np.array(
+        [
+            [1.4 / np.sqrt(2.0), 1.4 / np.sqrt(2.0), 5.0],
+            [0.1, -0.2, 5.0],
+        ]
+    )
+
+    _, clipped_mask = search.clipper.project(
+        vector=params, model=model, xp=np, scale=None, bijector=None
+    )
+
+    opt_state = MockAdamState(mu=np.ones_like(params), nu=np.ones_like(params))
+
+    reset = search._reset_clipped_momentum(
+        opt_state=opt_state, clipped_mask=clipped_mask, jnp=np
+    )
+
+    assert reset.mu[0].tolist() == [0.0, 0.0, 1.0]
+    assert reset.mu[1].tolist() == [1.0, 1.0, 1.0]
+    assert reset.nu[0].tolist() == [0.0, 0.0, 1.0]
+
+
+def test__the_default_clipper_leaves_a_lane_outside_the_disk_where_it_is():
+    """The counterfactual the change exists for: neither `ClipperNone` nor
+    `ClipperPriorBox` can move this lane, because no per-coordinate bound
+    excludes the corners of a square."""
+    model = _lane_model()
+
+    params = np.array([[1.4 / np.sqrt(2.0), 1.4 / np.sqrt(2.0), 5.0]])
+
+    for clipper in (af.ClipperNone(), af.ClipperPriorBox(margin=0.0)):
+        projected, _ = clipper.project(vector=params, model=model, xp=np)
+        assert np.hypot(projected[0, 0], projected[0, 1]) == pytest.approx(1.4)

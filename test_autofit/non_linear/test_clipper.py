@@ -1,10 +1,18 @@
+from typing import Tuple
+
 import numpy as np
 import pytest
 
 import autofit as af
 from autofit import exc
+from autofit.mapper.identifier import Identifier
+from autofit.mapper.prior.tuple_prior import TuplePrior
 from autofit.non_linear.bijector import BijectorAuto
-from autofit.non_linear.clipper import ClipperNone, ClipperPriorBox
+from autofit.non_linear.clipper import (
+    ClipperNone,
+    ClipperPriorBox,
+    ClipperPriorBoxJoint,
+)
 
 
 class Widget:
@@ -503,3 +511,284 @@ class TestBijectorComposition:
         lower, upper = clipper.bounds_from_model(model)
 
         assert lower[0] == pytest.approx(1.0e-6 + 1.0e-6 * (1.0e6 - 1.0e-6))
+
+
+# The radius `Ellipse` below declares. Deliberately not 1.0: the class it stands
+# in for (`autogalaxy.profiles.geometry_profiles.EllProfile`) declares the
+# ellipticity CLAMP, past which its own conversion saturates, rather than the
+# boundary of formal validity.
+BALL_RADIUS = 0.999
+
+
+class Ellipse:
+    """A component declaring a ball on its `ell_comps` tuple prior.
+
+    Stands in for an elliptical profile without importing one: the clipper knows
+    nothing about ellipticity, only about `__model_ball_constraints__`.
+    """
+
+    __model_ball_constraints__ = ((("ell_comps",), BALL_RADIUS),)
+
+    def __init__(
+        self,
+        ell_comps: Tuple[float, float] = (0.0, 0.0),
+        intensity: float = 1.0,
+    ):
+        self.ell_comps = ell_comps
+        self.intensity = intensity
+
+
+def _ball_model(lower_limit=-1.0, upper_limit=1.0):
+    """An `Ellipse` model whose parameter vector is
+    ``(ell_comps_0, ell_comps_1, intensity)``.
+
+    Priors are set explicitly because the fixture class has no entry in the
+    priors config, and the tuple prior is built by hand because a class with no
+    config gets its tuple default as an instance rather than as priors.
+    """
+    model = af.Model(Ellipse)
+
+    tuple_prior = TuplePrior()
+    tuple_prior.ell_comps_0 = af.UniformPrior(
+        lower_limit=lower_limit, upper_limit=upper_limit
+    )
+    tuple_prior.ell_comps_1 = af.UniformPrior(
+        lower_limit=lower_limit, upper_limit=upper_limit
+    )
+    model.ell_comps = tuple_prior
+    model.intensity = af.UniformPrior(lower_limit=0.0, upper_limit=10.0)
+
+    return model
+
+
+class TestJointBall:
+    def test__a_corner_of_the_box_is_projected_onto_the_disk(self):
+        """`(-1, -1)` is inside BOTH prior boxes and a factor `sqrt(2)` outside
+        the disk -- the region no per-coordinate bound can see, and the whole
+        reason this clipper exists."""
+        model = _ball_model()
+
+        projected, _ = ClipperPriorBoxJoint(margin=0.0).project(
+            vector=np.array([-1.0, -1.0, 5.0]), model=model
+        )
+
+        assert np.hypot(projected[0], projected[1]) == pytest.approx(BALL_RADIUS)
+
+    def test__the_projection_preserves_the_angle(self):
+        """A radial shrink, not a per-coordinate clip: the lane keeps the
+        ellipse orientation it had found and loses only the magnitude the
+        geometry cannot support."""
+        # A wider box than the disk, so the point under test is outside the ball
+        # and inside the box -- otherwise the box clip lands first and there is
+        # no angle left for the ball to preserve.
+        model = _ball_model(lower_limit=-2.0, upper_limit=2.0)
+
+        projected, _ = ClipperPriorBoxJoint(margin=0.0).project(
+            vector=np.array([-1.2, 1.6, 5.0]), model=model
+        )
+
+        assert projected[0] / projected[1] == pytest.approx(-0.6 / 0.8)
+        assert projected[0] == pytest.approx(-0.6 * BALL_RADIUS)
+        assert projected[1] == pytest.approx(0.8 * BALL_RADIUS)
+
+    def test__an_interior_point_is_bit_identical(self):
+        model = _ball_model()
+        vector = np.array([0.1, 0.2, 5.0])
+
+        projected, mask = ClipperPriorBoxJoint(margin=0.0).project(
+            vector=vector, model=model
+        )
+
+        assert (projected == vector).all()
+        assert not mask.any()
+
+    def test__the_origin_is_not_nan(self):
+        """`r = 0` is where a spherical profile's linked components sit and where
+        many priors start. The `sqrt` and the division must both survive it."""
+        model = _ball_model()
+
+        projected, mask = ClipperPriorBoxJoint(margin=0.0).project(
+            vector=np.array([0.0, 0.0, 5.0]), model=model
+        )
+
+        assert np.isfinite(projected).all()
+        assert projected[0] == 0.0
+        assert projected[1] == 0.0
+        assert not mask.any()
+
+    def test__the_mask_is_set_on_both_members_and_only_them(self):
+        """The mask's consumer is the momentum reset. A lane pushed out of the
+        disk carries outward momentum in BOTH coordinates; zeroing one leaves the
+        pair spiralling straight back out."""
+        model = _ball_model()
+
+        _, mask = ClipperPriorBoxJoint(margin=0.0).project(
+            vector=np.array([-1.0, -1.0, 5.0]), model=model
+        )
+
+        assert mask[0]
+        assert mask[1]
+        assert not mask[2]
+
+    def test__batched_input_projects_per_lane(self):
+        model = _ball_model()
+
+        vector = np.array(
+            [
+                [-1.0, -1.0, 5.0],
+                [0.1, 0.2, 5.0],
+                [0.0, 0.0, 1.0],
+            ]
+        )
+
+        projected, mask = ClipperPriorBoxJoint(margin=0.0).project(
+            vector=vector, model=model
+        )
+
+        assert np.hypot(projected[0, 0], projected[0, 1]) == pytest.approx(BALL_RADIUS)
+        assert (projected[1] == vector[1]).all()
+        assert (projected[2] == vector[2]).all()
+
+        assert mask[0].tolist() == [True, True, False]
+        assert not mask[1].any()
+        assert not mask[2].any()
+
+    def test__the_box_is_applied_before_the_ball(self):
+        """A point outside BOTH is clipped onto the box and then shrunk onto the
+        ball, landing inside both. Applying them the other way round would push a
+        point off the ball it had just been placed on."""
+        model = _ball_model()
+
+        projected, mask = ClipperPriorBoxJoint(margin=0.0).project(
+            vector=np.array([5.0, 0.0, 5.0]), model=model
+        )
+
+        assert projected[0] == pytest.approx(BALL_RADIUS)
+        assert projected[1] == 0.0
+        assert mask[0]
+        assert mask[1]
+
+    def test__a_model_declaring_no_ball_is_the_plain_box_clipper(self):
+        """The subclass is opt-in on BOTH sides: nothing happens to a model whose
+        classes declare no geometry, so it can be configured globally."""
+        model = _model(
+            alpha=af.UniformPrior(lower_limit=-1.0, upper_limit=1.0),
+            beta=af.UniformPrior(lower_limit=-1.0, upper_limit=1.0),
+        )
+        vector = np.array([5.0, -5.0])
+
+        box, box_mask = ClipperPriorBox(margin=0.0).project(vector=vector, model=model)
+        joint, joint_mask = ClipperPriorBoxJoint(margin=0.0).project(
+            vector=vector, model=model
+        )
+
+        assert (box == joint).all()
+        assert (box_mask == joint_mask).all()
+
+    def test__the_prior_box_is_still_enforced(self):
+        """Inheriting the box is not decoration: a coordinate outside its prior
+        and inside the disk is still clipped."""
+        model = _ball_model(lower_limit=-0.5, upper_limit=0.5)
+
+        projected, mask = ClipperPriorBoxJoint(margin=0.0).project(
+            vector=np.array([0.9, 0.0, 5.0]), model=model
+        )
+
+        assert projected[0] == pytest.approx(0.5)
+        assert mask[0]
+
+    def test__a_scaler_or_bijector_is_refused_rather_than_applied(self):
+        """A ball is a statement about physical parameters; a diagonal scale maps
+        the disk to an ellipse and a bijector to something with no closed form.
+        Projecting in the stepped coordinates would enforce a different, silently
+        wrong constraint."""
+        model = _ball_model()
+        clipper = ClipperPriorBoxJoint(margin=0.0)
+
+        with pytest.raises(ValueError):
+            clipper.project(
+                vector=np.array([-1.0, -1.0, 5.0]),
+                model=model,
+                scale=np.array([1.0, 1.0, 1.0]),
+            )
+
+        with pytest.raises(ValueError):
+            clipper.project(
+                vector=np.array([-1.0, -1.0, 5.0]),
+                model=model,
+                bijector=BijectorAuto().from_model(model=model),
+            )
+
+
+class TestJointBallIdentifier:
+    def test__the_base_clippers_identifier_fields_are_pinned(self):
+        """Pinned so that a subclass taking a further constructor argument cannot
+        silently re-key every stored `ClipperPriorBox` result. The pinned tuple
+        reproduces exactly what the identifier's argspec fallback inferred."""
+        assert ClipperPriorBox.__identifier_fields__ == ("margin", "strict_epsilon")
+
+    def test__the_joint_clipper_is_a_different_identifier(self):
+        """It changes where a lane can sit and therefore the result, so two runs
+        differing only in clipper must not share an output directory."""
+        model = _ball_model()
+
+        box = Identifier([af.MultiStartAdam(clipper=ClipperPriorBox()), model, None])
+        joint = Identifier(
+            [af.MultiStartAdam(clipper=ClipperPriorBoxJoint()), model, None]
+        )
+
+        assert str(box) != str(joint)
+
+
+# The `jit`/`grad`/`vmap` behaviour of the radial shrink -- in particular that the
+# "double where" keeps `grad` finite at the origin, where `sqrt(0)` has an infinite
+# derivative -- is deliberately NOT tested here: unit tests stay numpy-only because
+# JAX is an optional dependency. It is exercised by the traced path in
+# `autolens_workspace_test`, and the numpy tests above pin the same arithmetic.
+
+
+class TestJointBallSearchWiring:
+    def test__lbfgs_refuses_it_rather_than_dropping_the_ball(self):
+        """`LBFGS` enforces bounds through scipy, which has no ball. Passing the
+        box alone would give an unconstrained-in-the-corners fit from a clipper
+        chosen precisely to constrain them."""
+        search = af.LBFGS(clipper=ClipperPriorBoxJoint())
+
+        with pytest.raises(exc.SearchException):
+            search._bounds_from(model=_ball_model())
+
+    def test__lbfgs_accepts_it_on_a_model_that_declares_no_ball(self):
+        """The refusal is keyed on the model, not the clipper's type: on a model
+        with no declared geometry the joint clipper is the plain box clipper, so a
+        pipeline may configure it once without breaking its scipy searches."""
+        model = _model(
+            alpha=af.UniformPrior(lower_limit=-1.0, upper_limit=1.0),
+            beta=af.UniformPrior(lower_limit=-1.0, upper_limit=1.0),
+        )
+        search = af.LBFGS(clipper=ClipperPriorBoxJoint())
+
+        bounds = search._bounds_from(model=model)
+
+        assert bounds.lb == pytest.approx(search.clipper.bounds_from_model(model)[0])
+
+    def test__a_scaler_is_refused_at_construction_not_at_the_first_step(self):
+        """A multi-hour fit must not die a minute in on a configuration that was
+        wrong before it started."""
+        with pytest.raises(ValueError):
+            af.MultiStartAdam(
+                clipper=ClipperPriorBoxJoint(), scaler=af.ScalerPriorWidth()
+            )
+
+    def test__a_bijector_is_refused_at_construction_too(self):
+        with pytest.raises(ValueError):
+            af.MultiStartAdam(clipper=ClipperPriorBoxJoint(), bijector=BijectorAuto())
+
+    def test__the_plain_box_clipper_still_composes_with_a_scaler(self):
+        """The refusal is scoped to the joint clipper: nothing about the existing
+        box-plus-scaler combination changes."""
+        search = af.MultiStartAdam(
+            clipper=ClipperPriorBox(), scaler=af.ScalerPriorWidth()
+        )
+
+        assert isinstance(search.clipper, ClipperPriorBox)
+        assert isinstance(search.scaler, af.ScalerPriorWidth)

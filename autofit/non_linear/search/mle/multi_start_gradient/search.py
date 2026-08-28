@@ -12,7 +12,11 @@ from autofit.non_linear.search.mle.abstract_mle import AbstractMLE
 from autofit.non_linear.analysis import Analysis
 from autofit.non_linear.fitness import Fitness
 from autofit.non_linear.bijector import AbstractBijector, BijectorNone
-from autofit.non_linear.clipper import AbstractClipper, ClipperNone
+from autofit.non_linear.clipper import (
+    AbstractClipper,
+    ClipperNone,
+    ClipperPriorBoxJoint,
+)
 from autofit.non_linear.scaler import AbstractScaler, ScalerNone
 from autofit.non_linear.initializer import AbstractInitializer
 from autofit.non_linear.samples.sample import Sample
@@ -356,6 +360,27 @@ class AbstractMultiStartGradient(AbstractMLE):
                 "(A plain diagonal scale can be expressed as a bijector via "
                 "`autofit.BijectorDiagonal(scaler)` if both are wanted at "
                 "once.)"
+            )
+
+        # Same reasoning, one rung along: a `ClipperPriorBoxJoint` projects onto
+        # a ball declared in PHYSICAL coordinates, and neither change of
+        # variables maps a disk to a disk (a diagonal scale gives an ellipse, a
+        # bijector gives something with no closed form). Surfaced here rather
+        # than at the first step, so a multi-hour fit does not die a minute in
+        # on a configuration that was wrong before it started.
+        if isinstance(self.clipper, ClipperPriorBoxJoint) and not (
+            isinstance(self.scaler, ScalerNone)
+            and isinstance(self.bijector, BijectorNone)
+        ):
+            raise ValueError(
+                f"{type(self).__name__} received a "
+                f"{type(self.clipper).__name__} together with a non-default "
+                "`scaler` or `bijector`. The joint clipper projects onto a ball "
+                "declared in physical parameters, and neither change of "
+                "variables maps a disk to a disk -- projecting in the stepped "
+                "coordinates would enforce a different, silently wrong "
+                "constraint. Use ClipperPriorBox with the scaler/bijector, or "
+                "drop them to project onto the ball."
             )
 
         self.reset_momentum_on_clip = reset_momentum_on_clip
