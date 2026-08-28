@@ -855,6 +855,118 @@ class AbstractPriorModel(AbstractModel):
             tuples = [(("",), self)] + tuples
         return tuples
 
+    def ball_constraint_index_pairs(self):
+        """
+        The ``(index_0, index_1, radius)`` triples describing every pair of this
+        model's free parameters confined to a disk by a class-declared
+        ``__model_ball_constraints__``.
+
+        The indices are into the physical parameter vector — the same ordering
+        ``instance_from_vector`` and
+        :meth:`~autofit.non_linear.clipper.AbstractClipper.project` use — so a
+        consumer needs nothing but the vector and this list to project onto the
+        ball. See :mod:`autofit.mapper.prior_model.constraint` for why the
+        declaration is structural rather than a second violation measure.
+
+        This is **static geometry**: it depends only on how the model is
+        composed, never on the parameter values, so it is resolved once and
+        cached (following :attr:`parameterization`'s convention of an
+        underscore-prefixed ``__dict__`` key, which the pytree-flattening and
+        ``ModelInstance`` construction paths both skip). A search resolves it
+        outside its step loop and traces only the arithmetic.
+
+        A declared ball is **skipped**, rather than raising, in two cases, both
+        of which are ordinary model composition rather than a mistake:
+
+        - the declaring component has no such attribute at all, because every
+          coordinate was fixed to an instance (a spherical profile pins
+          ``ell_comps`` to ``(0.0, 0.0)``, so there is nothing to project);
+        - fewer than two of the coordinates are free priors, because the user
+          fixed one of them. A ball with a coordinate held constant is an
+          interval on the remainder, which is a different projection and not one
+          this pair-shaped list can express.
+
+        Returns
+        -------
+        A tuple of ``(index_0, index_1, radius)`` triples, sorted and
+        de-duplicated (two components sharing the same linked priors describe one
+        ball, not two). Empty when nothing in the model declares one.
+        """
+        cached = self.__dict__.get("_ball_constraint_index_pairs_cache")
+        if cached is not None:
+            return cached
+
+        from autofit.mapper.prior.tuple_prior import TuplePrior
+        from autofit.mapper.prior_model.constraint import ball_constraints_for
+        from autofit.mapper.prior_model.prior_model import Model
+
+        models = [
+            model
+            for _, model in self.attribute_tuples_with_type(
+                Model, ignore_children=False
+            )
+            if model.has_ball_constraints
+        ]
+        if isinstance(self, Model) and self.has_ball_constraints:
+            models = [self] + models
+
+        pairs = []
+
+        if models:
+            # Keyed on object identity, matching how the model holds its priors:
+            # `priors_ordered_by_id` and a component's `prior_tuples` return the
+            # same objects, so identity is exact and needs no equality semantics
+            # from `Prior`.
+            index_of = {
+                id(prior): index
+                for index, prior in enumerate(self.priors_ordered_by_id)
+            }
+
+            for model in models:
+                for path, radius in ball_constraints_for(model.cls):
+                    obj = model
+                    for name in path:
+                        obj = getattr(obj, name, None)
+                        if obj is None:
+                            break
+
+                    if not isinstance(obj, TuplePrior):
+                        logger.debug(
+                            f"{model.cls.__name__} declares a ball constraint on "
+                            f"{path}, which is not a TuplePrior on this model "
+                            f"(every coordinate is fixed); it is not projected."
+                        )
+                        continue
+
+                    priors = [
+                        prior
+                        for _, prior in sorted(obj.prior_tuples, key=lambda t: t[0])
+                    ]
+
+                    if len(priors) != 2:
+                        logger.debug(
+                            f"{model.cls.__name__} declares a ball constraint on "
+                            f"{path}, which has {len(priors)} free priors rather "
+                            f"than 2 on this model; it is not projected."
+                        )
+                        continue
+
+                    indices = [index_of.get(id(prior)) for prior in priors]
+
+                    if None in indices:
+                        logger.debug(
+                            f"{model.cls.__name__} declares a ball constraint on "
+                            f"{path}, whose priors are not in this model's own "
+                            f"prior vector; it is not projected."
+                        )
+                        continue
+
+                    pairs.append((indices[0], indices[1], radius))
+
+        pairs = tuple(sorted(set(pairs)))
+        self.__dict__["_ball_constraint_index_pairs_cache"] = pairs
+        return pairs
+
     def model_constraint_from_vector(self, vector, xp=np):
         """
         The largest constraint violation any component reports for this vector.

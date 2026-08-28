@@ -8,7 +8,11 @@ from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.search.mle.abstract_mle import AbstractMLE
 from autofit.non_linear.analysis import Analysis
 from autofit.non_linear.fitness import Fitness
-from autofit.non_linear.clipper import AbstractClipper, ClipperNone
+from autofit.non_linear.clipper import (
+    AbstractClipper,
+    ClipperNone,
+    ClipperPriorBoxJoint,
+)
 from autofit.non_linear.initializer import AbstractInitializer
 from autofit.non_linear.samples.sample import Sample
 from autofit.non_linear.samples.samples import Samples
@@ -126,6 +130,20 @@ class AbstractBFGS(AbstractMLE):
         constant and returns a wrong fit with no error and no warning; at every
         other dimensionality it raises. Building an explicit ``Bounds`` is what
         makes the intent unambiguous.
+
+        A :class:`~autofit.non_linear.clipper.ClipperPriorBoxJoint` on a model that
+        actually declares a ball is rejected rather than degraded to its box. A
+        ball is not expressible as a ``scipy.optimize.Bounds`` at all -- no
+        per-coordinate interval can exclude the corners of a square -- so silently
+        handing scipy the box alone would give the caller an
+        unconstrained-in-the-corners fit from a clipper they chose precisely to
+        constrain them, which is the same class of silent wrong answer the
+        ``_BOUND_SUPPORTING_METHODS`` check below exists to prevent.
+
+        The refusal is keyed on the *model*, not on the clipper's type, because
+        the joint clipper is a strict no-op on a model whose classes declare no
+        geometry (see :class:`ClipperPriorBoxJoint`); refusing that case too would
+        stop the clipper being configured once for a whole pipeline.
         """
         # Imported lazily, as everywhere else in autofit -- no module in the
         # package pulls scipy in at import time.
@@ -133,6 +151,20 @@ class AbstractBFGS(AbstractMLE):
 
         if isinstance(self.clipper, ClipperNone):
             return None
+
+        if (
+            isinstance(self.clipper, ClipperPriorBoxJoint)
+            and model.ball_constraint_index_pairs()
+        ):
+            raise exc.SearchException(
+                f"A {type(self.clipper).__name__} was passed to "
+                f"{type(self).__name__}, which enforces its bounds through "
+                "scipy, together with a model declaring a ball constraint. A "
+                "ball cannot be expressed as a `scipy.optimize.Bounds` -- only "
+                "the box could be passed on, silently dropping the ball this "
+                "clipper exists for. Use ClipperPriorBox here, or a search that "
+                "projects its own steps (e.g. af.MultiStartAdam)."
+            )
 
         if self.method not in self._BOUND_SUPPORTING_METHODS:
             raise exc.SearchException(

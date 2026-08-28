@@ -45,6 +45,12 @@ modelled on, a ``Clipper`` has two structurally different consumers:
 Both read one private ``_limits_from_model`` so the declarative and imperative
 views can never drift apart.
 
+That split is also what bounds :class:`ClipperPriorBoxJoint`, the box-plus-ball
+subclass: a ball has an imperative projection but no declarative ``Bounds``, so
+it is available to the first consumer and explicitly refused by the second (see
+:meth:`~autofit.non_linear.search.mle.bfgs.search.AbstractBFGS._bounds_from`)
+rather than quietly degraded to its box.
+
 ``project`` returns **which coordinates it clipped**, not just the new vector.
 That mask is what lets a caller zero optimiser momentum along clipped directions:
 projecting the parameters while the accumulated optimiser state keeps pushing
@@ -240,6 +246,15 @@ class ClipperPriorBox(AbstractClipper):
         dead.
     """
 
+    # Pinned explicitly rather than left to the identifier's fallback, which
+    # infers the fields from `__init__`'s argspec and therefore produces the
+    # identical `{margin, strict_epsilon}` today. The pin is what keeps it
+    # identical: a subclass that takes a further constructor argument would
+    # otherwise silently re-key every stored `ClipperPriorBox` result whose
+    # search shares the identifier machinery. Any subclass adding a parameter
+    # that changes where a lane can sit must extend this tuple deliberately.
+    __identifier_fields__ = ("margin", "strict_epsilon")
+
     def __init__(self, margin: float = 1.0e-6, strict_epsilon: float = 1.0e-12):
         self.margin = float(margin)
         self.strict_epsilon = float(strict_epsilon)
@@ -405,3 +420,160 @@ class ClipperPriorBox(AbstractClipper):
         projected = xp.clip(vector, lower, upper)
 
         return projected, projected != vector
+
+
+class ClipperPriorBoxJoint(ClipperPriorBox):
+    """
+    The prior box, and then the class-declared **balls** inside it.
+
+    A box prior on each of a pair of coordinates is a square, and where the model
+    means a disk the corners of that square are not merely unlikely, they are
+    **non-physical**. The canonical case is `ell_comps`: two independent
+    ``[-1, 1]`` priors whose valid region is ``e0**2 + e1**2 < 1``, so ``1 - pi/4``
+    — 21.5% — of the declared prior area describes no ellipse at all. Nothing in
+    a box clipper can see that, because no per-coordinate bound can: ``(0.8, 0.8)``
+    is inside both boxes and outside the disk.
+
+    That region is not hypothetical. 20.1% of MultiStart lane best points across
+    the recorded `autolens_profiling` campaign end at ``|e| >= 1``, and 0 of the
+    246 lanes that reach the target basin do — ending outside the disk is a
+    property of *failed* lanes, so the 20% is wasted budget rather than a wasted
+    answer (autolens_profiling#182). The reason the lanes are never pulled back
+    is the same reason :class:`ClipperPriorBox` exists at all: the conversion to
+    an axis ratio *saturates* past the clamp, so the objective is flat out there
+    and the gradient has nothing to say.
+
+    Which is why this clipper **projects** rather than penalises: the projection
+    does not need a gradient to exist, and it moves the lane in one step from a
+    region where no gradient exists to the nearest point where one does.
+
+    Where the geometry comes from
+    -----------------------------
+
+    Nothing here knows what ``ell_comps`` is. The radius and the coordinate pair
+    are read off the model, which reads them off the declaring class's
+    ``__model_ball_constraints__`` (see
+    :mod:`autofit.mapper.prior_model.constraint`) — so PyAutoGalaxy states its own
+    geometry and PyAutoFit projects onto whatever geometry it is told about.
+
+    The order of the two projections
+    --------------------------------
+
+    The box is applied first and the balls second, never the reverse. The ball is
+    a *subset* of the box for any radius the box contains, so projecting onto the
+    ball last is what leaves the point inside both; projecting onto the box last
+    could push a point that was on the ball's surface back off it. It is not a
+    true joint projection onto the intersection — that would require iterating —
+    but for the case this exists for (a ball inscribed in, or well inside, its
+    box) the two-step projection lands in the intersection in one pass.
+
+    Jittability
+    -----------
+
+    The radial shrink is written to survive ``jit``, ``vmap`` and ``grad``:
+
+    - the factor is built with ``xp.where`` rather than a Python branch, so the
+      pair's radius is never a concrete condition;
+    - the radius is compared **squared**, so the ``sqrt`` is only ever needed on
+      the branch that is actually taken;
+    - the ``sqrt`` argument is itself passed through a ``where`` that substitutes
+      ``1.0`` on the untaken branch — the "double where" idiom. A lane sitting
+      exactly at the origin (where a *spherical* profile's linked components sit,
+      and where many priors start) would otherwise evaluate ``sqrt(0)``, whose
+      derivative is infinite; ``jax.grad`` computes **both** branches of a
+      ``where`` and multiplies the untaken one by zero, and ``0 * inf`` is
+      ``NaN``. The forward value is unaffected either way; only the gradient is,
+      and only silently. Substituting before the ``sqrt`` is the only thing that
+      keeps it finite;
+    - the divisor is additionally floored at ``tiny``, so a degenerate
+      ``radius=0`` declaration cannot divide by zero;
+    - the factors are assembled as a full multiplicative vector and applied with
+      a single multiply, rather than with ``.at[...].set(...)`` scatter updates,
+      so the traced program is a fixed handful of ops independent of how many
+      balls the model declares and works unchanged under ``numpy``.
+
+    ``clipped_mask`` is set on **both** members of a projected pair, even though
+    a shrink of a factor ``1.0 - 1e-16`` moves one of them imperceptibly. The
+    mask's consumer is ``MultiStartGradient``'s momentum reset: a lane pushed out
+    of the disk carries outward momentum in *both* coordinates, and zeroing only
+    one of them leaves the pair spiralling back out on the next step.
+    """
+
+    # Divisor floor for the radial shrink. Small enough to be irrelevant for any
+    # coordinate the projection actually moves (a pair is only shrunk when
+    # `r > radius`, and every declared radius is orders of magnitude larger than
+    # this), and large enough that `r / tiny` cannot overflow float32.
+    _TINY = 1.0e-30
+
+    def project(self, vector, model, xp=np, scale=None, bijector=None):
+        projected, clipped_mask = super().project(
+            vector=vector,
+            model=model,
+            xp=xp,
+            scale=scale,
+            bijector=bijector,
+        )
+
+        pairs = model.ball_constraint_index_pairs()
+
+        if not pairs:
+            return projected, clipped_mask
+
+        if scale is not None or bijector is not None:
+            # A ball is a statement about PHYSICAL coordinates, and neither
+            # change of variables preserves it: a per-parameter `scale` maps the
+            # disk to an ellipse, and a `bijector` maps it to something with no
+            # closed form at all. Projecting the scaled coordinates onto a circle
+            # would enforce a different, silently wrong constraint -- so this
+            # says so rather than doing it.
+            raise ValueError(
+                f"{type(self).__name__} cannot project onto a ball while the "
+                "search steps in scaled or transformed coordinates: the ball is "
+                "a statement about physical parameters, and neither a scaler nor "
+                "a bijector maps a disk to a disk. Use ClipperPriorBox with the "
+                "scaler/bijector, or drop them to project onto the ball."
+            )
+
+        # One multiplicative factor per parameter, defaulting to 1.0, so the
+        # whole projection is a single elementwise multiply and every
+        # non-ball coordinate passes through exactly (`x * 1.0 == x`).
+        factor = xp.ones_like(projected)
+        shrunk = xp.zeros_like(projected, dtype=bool)
+
+        for index_0, index_1, radius in pairs:
+            value_0 = projected[..., index_0]
+            value_1 = projected[..., index_1]
+
+            r_squared = value_0**2 + value_1**2
+            outside = r_squared > radius**2
+
+            # See the class docstring: the substitution has to happen BEFORE the
+            # `sqrt`, not after it, or `grad` differentiates `sqrt` at zero on
+            # the branch it then discards and the NaN survives the discard.
+            r = xp.sqrt(xp.where(outside, r_squared, xp.ones_like(r_squared)))
+
+            pair_factor = xp.where(
+                outside,
+                radius / xp.maximum(r, self._TINY),
+                xp.ones_like(r),
+            )
+
+            # Built by broadcasting a one-hot selector rather than by scattering
+            # into `factor`, so the same code runs under numpy and under a JAX
+            # trace (where arrays are immutable) with no `.at` and no
+            # index-dependent control flow.
+            for index in (index_0, index_1):
+                selector = xp.asarray(
+                    np.arange(projected.shape[-1]) == index,
+                )
+                factor = xp.where(selector, pair_factor[..., None], factor)
+                shrunk = shrunk | selector
+
+        projected_ball = projected * factor
+
+        # `shrunk` marks the coordinates a ball COULD move; `factor != 1.0` marks
+        # the lanes it actually did. Both members of a moved pair are marked --
+        # see the class docstring on the momentum reset.
+        moved = shrunk & (factor != 1.0)
+
+        return projected_ball, clipped_mask | moved

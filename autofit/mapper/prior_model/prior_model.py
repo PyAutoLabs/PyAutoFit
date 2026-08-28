@@ -17,6 +17,9 @@ from autofit.mapper.prior.tuple_prior import TuplePrior
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.mapper.prior_model.constraint import (
     MODEL_CONSTRAINT,
+    MODEL_BALL_CONSTRAINT,
+    ball_constraints_for,
+    declares_ball_constraints,
     declares_model_constraint,
 )
 from autofit.mapper.prior_model.util import gather_namespaces
@@ -45,6 +48,17 @@ class Model(AbstractPriorModel):
         correctly.
         """
         return declares_model_constraint(self.cls)
+
+    @property
+    def has_ball_constraints(self) -> bool:
+        """
+        Whether this component's class declares one or more ball constraints.
+
+        Resolved from ``cls`` for the same reason as
+        :attr:`has_model_constraint`: a model rebuilt or deserialised without
+        going through ``__init__`` must still report correctly.
+        """
+        return declares_ball_constraints(self.cls)
 
     def __str__(self):
         prior_string = ", ".join(map(str, self.prior_tuples))
@@ -231,6 +245,12 @@ class Model(AbstractPriorModel):
                 f"{cls.__name__}.{MODEL_CONSTRAINT} must be callable; got "
                 f"{vars(cls)[MODEL_CONSTRAINT]!r}"
             )
+
+        # Same reasoning for the ball declaration: a malformed `(path, radius)`
+        # entry fails here, where the model is built, rather than when a search
+        # first asks the model for its index pairs.
+        if MODEL_BALL_CONSTRAINT in vars(cls):
+            ball_constraints_for(cls)
 
         # try:
         #     # noinspection PyTypeChecker

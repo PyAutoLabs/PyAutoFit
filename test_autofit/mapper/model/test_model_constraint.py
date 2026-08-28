@@ -1,9 +1,15 @@
+from typing import Tuple
+
 import numpy as np
 import pytest
 
 import autofit as af
+from autofit.mapper.prior.tuple_prior import TuplePrior
 from autofit.mapper.prior_model.constraint import (
+    MODEL_BALL_CONSTRAINT,
     MODEL_CONSTRAINT,
+    ball_constraints_for,
+    declares_ball_constraints,
     declares_model_constraint,
     violation_for_instance,
 )
@@ -169,3 +175,147 @@ class TestConstrainedLaneCount:
         )
         assert (n_value_nan, n_grad_nan, n_constrained) == (1, 1, 1)
         assert n_value_nan + n_grad_nan + n_constrained <= len(foms)
+
+
+class Elliptical:
+    """Stands in for `EllProfile`: a TUPLE parameter with a declared disk.
+
+    `Saturating` above declares the same geometry as a violation *measure* on two
+    flat scalars. This one declares it structurally, on a real `TuplePrior`,
+    which is the only shape `ball_constraint_index_pairs` can resolve — the
+    declaration names a path to a tuple, not a pair of loose parameter names.
+    """
+
+    __model_ball_constraints__ = ((("ell_comps",), 0.999),)
+
+    def __init__(
+        self,
+        ell_comps: Tuple[float, float] = (0.0, 0.0),
+        intensity: float = 1.0,
+    ):
+        self.ell_comps = ell_comps
+        self.intensity = intensity
+
+
+def elliptical_model(free=2):
+    """An `Elliptical` model with `free` of its two components as priors.
+
+    `free=0` is the spherical case: every component fixed, so the model has no
+    `ell_comps` tuple prior at all.
+    """
+    model = af.Model(Elliptical)
+    model.intensity = af.UniformPrior(lower_limit=0.0, upper_limit=10.0)
+
+    if free == 0:
+        return model
+
+    tuple_prior = TuplePrior()
+    tuple_prior.ell_comps_0 = af.UniformPrior(lower_limit=-1.0, upper_limit=1.0)
+    if free == 2:
+        tuple_prior.ell_comps_1 = af.UniformPrior(lower_limit=-1.0, upper_limit=1.0)
+    else:
+        tuple_prior.ell_comps_1 = 0.5
+    model.ell_comps = tuple_prior
+
+    return model
+
+
+class TestBallDeclaration:
+    def test_duck_typed_detection(self):
+        assert declares_ball_constraints(Elliptical)
+        assert not declares_ball_constraints(Unconstrained)
+        assert not declares_ball_constraints(Saturating)
+
+    def test_model_exposes_the_declaration(self):
+        assert af.Model(Elliptical).has_ball_constraints
+        assert not af.Model(Unconstrained).has_ball_constraints
+
+    def test_the_two_declarations_are_independent(self):
+        """A class may declare a measure, a ball, or both. `Elliptical` declares
+        only the ball and `Saturating` only the measure, and neither is inferred
+        from the other."""
+        assert not declares_model_constraint(Elliptical)
+        assert not declares_ball_constraints(Saturating)
+
+    def test_entries_are_normalised(self):
+        class Listy:
+            __model_ball_constraints__ = [[["ell_comps"], 1]]
+
+        assert ball_constraints_for(Listy) == ((("ell_comps",), 1.0),)
+
+    def test_undeclared_is_empty(self):
+        assert ball_constraints_for(Unconstrained) == ()
+
+    def test_malformed_declaration_fails_at_composition(self):
+        class Malformed:
+            def __init__(self, centre=0.0):
+                self.centre = centre
+
+        setattr(Malformed, MODEL_BALL_CONSTRAINT, ("ell_comps", 0.999))
+
+        with pytest.raises(AssertionError):
+            af.Model(Malformed)
+
+    def test_a_bare_string_path_fails_rather_than_iterating_its_letters(self):
+        class Stringy:
+            __model_ball_constraints__ = (("ell_comps", 0.999),)
+
+        with pytest.raises(AssertionError):
+            ball_constraints_for(Stringy)
+
+
+class TestBallConstraintIndexPairs:
+    def test_indices_point_at_the_declared_tuple(self):
+        model = elliptical_model()
+
+        ((index_0, index_1, radius),) = model.ball_constraint_index_pairs()
+
+        names = [tuple_.name for tuple_ in model.prior_tuples_ordered_by_id]
+        assert names[index_0] == "ell_comps_0"
+        assert names[index_1] == "ell_comps_1"
+        assert radius == pytest.approx(0.999)
+
+    def test_indices_are_into_the_whole_collections_vector(self):
+        """The offset matters: a nested component's pair must be indexed against
+        the vector the search actually steps, not against its own sub-model."""
+        model = af.Collection(a=unconstrained_model(), b=elliptical_model())
+
+        ((index_0, index_1, _),) = model.ball_constraint_index_pairs()
+
+        names = [tuple_.name for tuple_ in model.prior_tuples_ordered_by_id]
+        assert names[index_0] == "ell_comps_0"
+        assert names[index_1] == "ell_comps_1"
+        assert index_0 >= unconstrained_model().prior_count
+
+    def test_one_pair_per_declaring_component(self):
+        model = af.Collection(a=elliptical_model(), b=elliptical_model())
+
+        assert len(model.ball_constraint_index_pairs()) == 2
+
+    def test_linked_components_describe_one_ball_not_two(self):
+        a = elliptical_model()
+        b = elliptical_model()
+        b.ell_comps = a.ell_comps
+
+        assert len(af.Collection(a=a, b=b).ball_constraint_index_pairs()) == 1
+
+    def test_undeclared_model_has_none(self):
+        assert (
+            af.Collection(a=unconstrained_model()).ball_constraint_index_pairs() == ()
+        )
+
+    def test_every_component_fixed_is_skipped(self):
+        """The spherical case: `ell_comps` is pinned to an instance, so there is
+        no pair of free parameters to project and nothing to do."""
+        assert elliptical_model(free=0).ball_constraint_index_pairs() == ()
+
+    def test_one_component_fixed_is_skipped(self):
+        """A ball with a coordinate held constant is an interval on the
+        remainder, which this pair-shaped list cannot express."""
+        assert elliptical_model(free=1).ball_constraint_index_pairs() == ()
+
+    def test_is_cached(self):
+        model = elliptical_model()
+        assert (
+            model.ball_constraint_index_pairs() is model.ball_constraint_index_pairs()
+        )
