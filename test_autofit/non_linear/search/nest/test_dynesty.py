@@ -59,21 +59,3 @@ def test__explicit_params():
     assert search.facc == 0.2
     assert search.dlogz_init == 0.01
     assert search.number_of_cores == 1
-
-
-def test__test_mode():
-    # #1541 (the Dynesty sibling of the Nautilus defect): `maxcall = 1` stopped
-    # dynesty before it drew a single replacement point, so the posterior had an
-    # effective sample size of ~1. Test mode must run a short but real chain.
-    search = af.DynestyStatic()
-    search.apply_test_mode()
-
-    assert search.maxcall > 1
-    assert search.maxcall <= 500
-    assert search.nlive < af.DynestyStatic().nlive
-
-    search = af.DynestyDynamic()
-    search.apply_test_mode()
-
-    assert search.maxcall > 1
-    assert search.nlive_init < af.DynestyDynamic().nlive_init

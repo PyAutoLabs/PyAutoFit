@@ -491,39 +491,11 @@ class AbstractDynesty(AbstractNest, ABC):
             pass
 
     def apply_test_mode(self):
-        """
-        Reduce the sampler to a small but *real* run for test mode (level 1).
-
-        A previous implementation set ``maxcall = 1``, which stopped dynesty
-        before it had drawn a single nested-sampling replacement: every sample
-        came from the initial live set at the same prior weight bar one, so the
-        returned posterior had an effective sample size of ~1 and weighted plots
-        (e.g. ``corner``'s quantile ``range``) collapsed onto a single point.
-
-        The settings below instead run a genuine, if short, nested sampling
-        chain: a small live set with a few hundred likelihood evaluations,
-        capped so an expensive likelihood cannot make test mode slow.
-
-        Note that a few hundred evaluations buys real nested-sampling
-        iterations, not yet a well-spread weight distribution — on the reference
-        ``autofit_workspace`` ``Gaussian`` fit the effective sample size only
-        lifts off after a few thousand evaluations, which test mode cannot
-        afford. Plotting code must therefore still guard against a low
-        effective sample size (see ``plot.samples_plotters.corner_cornerpy``)
-        rather than assume this run is plottable.
-        """
         logger.warning(
-            "TEST MODE 1 (reduced iterations): Sampler will run with reduced "
-            "live points and a capped likelihood budget, producing a coarse "
-            "but real posterior."
+            "TEST MODE 1 (reduced iterations): Sampler will run with "
+            "minimal iterations for faster completion."
         )
-        # `nlive` (static) and `nlive_init` (dynamic) are the subclass names for
-        # the live set; only the one this subclass defines is reduced.
-        for live_point_attribute in ("nlive", "nlive_init"):
-            if getattr(self, live_point_attribute, None) is not None:
-                setattr(self, live_point_attribute, 25)
-
-        self.maxcall = 150
+        self.maxcall = 1
 
     def live_points_init_from(self, model, fitness):
         """

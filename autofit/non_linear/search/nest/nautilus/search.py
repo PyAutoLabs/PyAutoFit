@@ -150,42 +150,11 @@ class Nautilus(abstract_nest.AbstractNest):
         self.logger.debug("Creating Nautilus Search")
 
     def apply_test_mode(self):
-        """
-        Reduce the sampler to a small but *real* run for test mode (level 1).
-
-        A previous implementation set ``n_like_max = 1``, which stopped nautilus
-        after its very first batch of prior draws. Nautilus weights samples by
-        shell volume times likelihood, so before any bound has been built one
-        draw carries essentially all the weight: the returned posterior had an
-        effective sample size of 1, which is not a posterior at all and made
-        weighted plots (e.g. ``corner``'s quantile ``range``) collapse.
-
-        The settings below instead let nautilus complete a coarse exploration —
-        fewer live points, no neural-network bounds, and an early exploration
-        cut-off — while capping the total likelihood budget so an expensive
-        likelihood cannot make test mode slow. On the reference
-        ``autofit_workspace`` ``Gaussian`` fit this yields 800-1000 likelihood
-        evaluations and an effective sample size of a few tens in a few seconds
-        — coarse, but a posterior weighted statistics can be computed from.
-
-        `n_live` is a floor, not a final value: nautilus cannot build a bound
-        from fewer live points than the model has dimensions, so `_fit` raises
-        it above the model's prior count once the model is known.
-        """
         logger.warning(
-            "TEST MODE 1 (reduced iterations): Sampler will run with reduced "
-            "live points and a capped likelihood budget, producing a coarse "
-            "but real posterior."
+            "TEST MODE 1 (reduced iterations): Sampler will run with "
+            "minimal iterations for faster completion."
         )
-        self.n_live = 25
-        self.n_batch = 25
-        # 0 disables nautilus' neural-network bounds (multi-ellipsoid only),
-        # which dominate the wall time of a short run.
-        self.n_networks = 0
-        # Terminate exploration once <= 50% of the evidence is in the live set.
-        self.f_live = 0.5
-        self.n_eff = 25
-        self.n_like_max = 1000
+        self.n_like_max = 1
 
     def _fit(self, model: AbstractPriorModel, analysis):
         """
@@ -205,15 +174,6 @@ class Nautilus(abstract_nest.AbstractNest):
         A result object comprising the Samples object that includes the maximum log likelihood instance and full
         set of accepted ssamples of the fit.
         """
-
-        if is_test_mode():
-            # `apply_test_mode` runs in `__init__`, before the model is known,
-            # so its reduced `n_live` is only a floor: nautilus needs strictly
-            # more live points than dimensions to fit a bound at all, and would
-            # otherwise raise "Number of points must be larger than number of
-            # dimensions" on a model with more parameters than that floor.
-            self.n_live = max(self.n_live, model.prior_count + 5)
-            self.n_batch = self.n_live
 
         if not isinstance(self.paths, NullPaths):
             checkpoint_exists = Path(self.checkpoint_file).exists()
