@@ -201,19 +201,19 @@ class SearchUpdater:
         """
         Generate and persist samples.
 
+        Everything that does not need a model instance -- the weight-thresholded
+        `samples.csv` and the `samples_summary.json` -- is written *first*, so a stored
+        best point the current model rejects can never cost a completed fit its data
+        (PyAutoFit #1535, and the reason the weight-threshold prune did not run, #1487).
+        Only the instance-dependent outputs (latents, visualization, profiling) are
+        skipped when materialization fails.
+
         Returns (samples, samples_summary, instance, samples_save).
-        ``instance`` is ``None`` when the fit has failed, signalling the
-        caller to return early.
+        ``instance`` is ``None`` when the stored best point cannot be reconstructed,
+        signalling the caller to skip the instance-dependent outputs.
         """
         samples = self._samples_from(model, search_internal)
         samples_summary = samples.summary()
-
-        try:
-            instance = samples_summary.instance
-        except (exc.FitException, exc.SamplesException):
-            return samples, samples_summary, None, samples
-
-        self._paths.save_samples_summary(samples_summary=samples_summary)
 
         log_message = not during_analysis and not self._disable_output
 
@@ -221,6 +221,19 @@ class SearchUpdater:
             log_message=log_message
         )
         self._paths.save_samples(samples=samples_save)
+        self._paths.save_samples_summary(samples_summary=samples_summary)
+
+        try:
+            instance = samples_summary.instance
+        except (exc.FitException, exc.SamplesException) as e:
+            logger.warning(
+                "The maximum log likelihood sample cannot be reconstructed as a model "
+                "instance, so the outputs which require one (latent variables, "
+                "visualization, profiling) are skipped for this update. The samples and "
+                "samples summary have still been written to the output folder:\n%s",
+                e,
+            )
+            return samples, samples_summary, None, samples_save
 
         return samples, samples_summary, instance, samples_save
 

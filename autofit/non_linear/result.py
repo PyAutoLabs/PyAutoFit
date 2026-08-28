@@ -114,11 +114,53 @@ class AbstractResult(ABC):
 
     @property
     def instance(self):
+        """
+        The maximum log likelihood model instance of the fit.
+
+        The instance normally comes from the `samples_summary`, which is cheap to load and is the only
+        result available when a run is resumed with `samples.csv` output disabled.
+
+        A summary stores a *single* sample, so when the current model rejects that stored vector with
+        `FitException` there is nothing for it to substitute and its `to_instance` policy (correctly)
+        raises `SamplesException` -- that policy is not changed here. The full `samples`, when they are
+        available, do carry the other stored points, and `Samples.max_log_likelihood` falls back to the
+        highest-likelihood point the model can still reconstruct (see PyAutoFit #1486). A rejected best
+        point therefore degrades to that recovering path with a warning, instead of killing a completed
+        fit at results-write (PyAutoFit #1535).
+        """
+        recovered = getattr(self, "_recovered_instance", None)
+
+        if recovered is not None:
+            # The recovery scans every stored sample, and `instance` is read many times by
+            # downstream results (e.g. `max_log_likelihood_tracer`), so it is cached to keep
+            # that cost -- and the warning below -- to one occurrence.
+            return recovered
+
         try:
             return self.samples_summary.instance
         except AttributeError as e:
             logging.warning(e)
             return None
+        except (exc.SamplesException, exc.FitException) as e:
+            samples = self.samples
+
+            if samples is None:
+                logging.warning(
+                    f"The maximum log likelihood sample of this result cannot be reconstructed as a "
+                    f"model instance and the full samples are not available to fall back on, so the "
+                    f"instance is None:\n{e}"
+                )
+                return None
+
+            logging.warning(
+                f"The maximum log likelihood sample stored in the samples summary cannot be "
+                f"reconstructed as a model instance, falling back to the highest likelihood sample "
+                f"the model still accepts:\n{e}"
+            )
+
+            self._recovered_instance = samples.max_log_likelihood()
+
+            return self._recovered_instance
 
     @property
     def max_log_likelihood_instance(self):
