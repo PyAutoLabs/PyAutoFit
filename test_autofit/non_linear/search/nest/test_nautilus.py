@@ -59,10 +59,16 @@ def test__identifier_fields():
 
 
 def test__test_mode():
+    # #1541: `n_like_max = 1` stopped nautilus after its first batch of prior
+    # draws, returning a posterior whose effective sample size was 1. Test mode
+    # must instead deliver a small but real posterior.
     search = af.Nautilus()
     search.apply_test_mode()
 
-    assert search.n_like_max == 1
+    assert search.n_like_max > 1
+    assert search.n_like_max <= 2000
+    assert search.n_live < af.Nautilus().n_live
+    assert search.n_networks == 0
 
 
 @requires_nautilus

@@ -1,3 +1,5 @@
+import logging
+
 import numpy as np
 import pytest
 
@@ -53,12 +55,12 @@ class MockModel:
 
 
 class MockSamples:
-    def __init__(self, parameter_lists, weight_list=None):
+    def __init__(self, parameter_lists, weight_list=None, labels=None):
         self.parameter_lists = parameter_lists
         self.weight_list = (
             weight_list if weight_list is not None else [1.0] * len(parameter_lists)
         )
-        self.model = MockModel(["x", "y"])
+        self.model = MockModel(labels if labels is not None else ["x", "y"])
 
 
 @pytest.fixture
@@ -177,3 +179,56 @@ def test__corner_cornerpy__degenerate_columns_still_render(monkeypatch):
     degenerate = MockSamples(parameter_lists=[[1.0, 5.0]] * 20)
 
     samples_plotters.corner_cornerpy(samples=degenerate, bins=5)
+
+
+def test__effective_sample_size__uniform_and_degenerate_weights():
+    assert samples_plotters._effective_sample_size([1.0] * 10, 10) == pytest.approx(10.0)
+
+    # One point carrying all the weight is worth a single sample, however many
+    # rows sit beside it.
+    degenerate = [0.0] * 99 + [1.0]
+    assert samples_plotters._effective_sample_size(degenerate, 100) == pytest.approx(1.0)
+
+    # No weights at all means unweighted, so every row counts.
+    assert samples_plotters._effective_sample_size(None, 7) == pytest.approx(7.0)
+    assert samples_plotters._effective_sample_size([], 7) == pytest.approx(7.0)
+
+
+def test__corner_cornerpy__weight_degenerate_sample_is_skipped_not_plotted(
+    corner_call, caplog
+):
+    # Regression (#1541): a nested sampler stopped after its first batch returns
+    # plenty of rows but one non-zero weight. `range=0.999` is then a weighted
+    # quantile over that single point, collapsing to a sliver that excludes every
+    # row, and `corner` raised "the provided 'range' is not valid or the sample
+    # is empty". The row-count guard never fired because the rows are all there.
+    rng = np.random.default_rng(0)
+    degenerate = MockSamples(
+        parameter_lists=rng.normal(size=(100, 3)).tolist(),
+        weight_list=[0.0] * 99 + [1.0],
+        labels=["x", "y", "z"],
+    )
+
+    with caplog.at_level(logging.INFO, logger=samples_plotters.__name__):
+        samples_plotters.corner_cornerpy(
+            samples=degenerate,
+            range=np.ones(3) * 0.999,
+        )
+
+    assert corner_call == {}
+    assert "skipping corner plot" in caplog.text
+    assert "effective sample size" in caplog.text
+
+
+def test__corner_cornerpy__healthy_weights_still_plot(corner_call):
+    rng = np.random.default_rng(0)
+    healthy = MockSamples(
+        parameter_lists=rng.normal(size=(100, 3)).tolist(),
+        weight_list=[1.0] * 100,
+        labels=["x", "y", "z"],
+    )
+
+    samples_plotters.corner_cornerpy(samples=healthy, range=np.ones(3) * 0.999)
+
+    assert corner_call != {}
+    assert corner_call["weights"] == healthy.weight_list

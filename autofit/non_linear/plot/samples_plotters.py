@@ -35,15 +35,53 @@ def _corner_range_from(data):
     return plot_range
 
 
+def _effective_sample_size(weight_list, sample_count):
+    """Kish effective sample size ``sum(w)**2 / sum(w**2)`` of a weight list.
+
+    Row count alone does not say whether a sample can be plotted: a nested
+    sampler stopped early returns many rows of which one carries essentially all
+    the weight, so every weighted statistic ``corner`` computes (quantile
+    ``range`` most visibly) is a statistic of that single point. ``None`` or an
+    empty weight list means unweighted, for which every row counts.
+    """
+    if weight_list is None:
+        return float(sample_count)
+
+    weights = np.asarray(weight_list, dtype=float)
+
+    if weights.size == 0:
+        return float(sample_count)
+
+    sum_of_squares = np.sum(weights**2)
+
+    if sum_of_squares == 0.0:
+        return 0.0
+
+    return float(np.sum(weights) ** 2 / sum_of_squares)
+
+
 @skip_in_test_mode
 def corner_cornerpy(samples, path=None, filename="corner", format="show", **kwargs):
     data = np.asarray(samples.parameter_lists)
-    if data.ndim < 2 or data.shape[0] <= data.shape[1]:
+
+    sample_count = data.shape[0] if data.ndim >= 1 else 0
+    parameter_count = data.shape[1] if data.ndim >= 2 else 0
+    effective_sample_size = _effective_sample_size(
+        getattr(samples, "weight_list", None), sample_count
+    )
+
+    if (
+        data.ndim < 2
+        or sample_count <= parameter_count
+        or effective_sample_size <= parameter_count
+    ):
         logger.info(
-            "corner_cornerpy: skipping corner plot, only %s sample(s) for %s parameter(s) "
+            "corner_cornerpy: skipping corner plot, only %s sample(s) "
+            "(effective sample size %.2f) for %s parameter(s) "
             "(e.g. PYAUTO_TEST_MODE bypass or an early-iteration update).",
-            data.shape[0] if data.ndim >= 1 else 0,
-            data.shape[1] if data.ndim >= 2 else 0,
+            sample_count,
+            effective_sample_size,
+            parameter_count,
         )
         return
 
