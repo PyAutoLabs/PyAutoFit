@@ -160,6 +160,17 @@ class AbstractMultiStartGradient(AbstractMLE):
             enforcement on moves where the search converges and would shift every
             stored multi-start benchmark, so the default flip is deliberately a
             separate, re-baselined change.
+
+            ``ClipperPriorBoxJoint`` additionally projects onto the balls the
+            model's classes declare (the ``ell_comps`` disk being the canonical
+            one). It composes with ``scaler`` / ``bijector`` **per ball pair**,
+            not wholesale: a pair both of whose members the map merely rescales
+            by one common linear factor ``s`` is still a disk in the stepped
+            coordinates, of radius ``R / s``, and is projected onto normally; a
+            pair a ``log`` / ``logit`` kind or two unequal scales touch is not a
+            disk at all and raises. That check runs once against the model at
+            the start of ``_fit`` — not at construction, where there is no model
+            to ask — and always before the first likelihood evaluation.
         scaler
             A per-parameter step scale derived from the priors, applied as a
             change of variables so the rule steps in ``phi = theta / scale`` while
@@ -207,6 +218,13 @@ class AbstractMultiStartGradient(AbstractMLE):
             Default ``BijectorNone`` -- a no-op, skipped entirely rather than
             applied as an identity, so the default path and its compiled step
             are both unchanged.
+
+            Composable with ``ClipperPriorBoxJoint`` where the map leaves each
+            declared ball pair identity-mapped under one common scale — so a
+            model wanting ``log`` on (say) an ``einstein_radius`` while its
+            ``ell_comps`` step linearly gets both the reparameterisation and
+            the disk. See ``clipper`` above for the condition and where it is
+            checked.
         resurrect
             Restart-on-death. When ``True``, any start whose objective goes
             non-finite is redrawn each step (fresh params from the start band +
@@ -362,26 +380,16 @@ class AbstractMultiStartGradient(AbstractMLE):
                 "once.)"
             )
 
-        # Same reasoning, one rung along: a `ClipperPriorBoxJoint` projects onto
-        # a ball declared in PHYSICAL coordinates, and neither change of
-        # variables maps a disk to a disk (a diagonal scale gives an ellipse, a
-        # bijector gives something with no closed form). Surfaced here rather
-        # than at the first step, so a multi-hour fit does not die a minute in
-        # on a configuration that was wrong before it started.
-        if isinstance(self.clipper, ClipperPriorBoxJoint) and not (
-            isinstance(self.scaler, ScalerNone)
-            and isinstance(self.bijector, BijectorNone)
-        ):
-            raise ValueError(
-                f"{type(self).__name__} received a "
-                f"{type(self.clipper).__name__} together with a non-default "
-                "`scaler` or `bijector`. The joint clipper projects onto a ball "
-                "declared in physical parameters, and neither change of "
-                "variables maps a disk to a disk -- projecting in the stepped "
-                "coordinates would enforce a different, silently wrong "
-                "constraint. Use ClipperPriorBox with the scaler/bijector, or "
-                "drop them to project onto the ball."
-            )
+        # A `ClipperPriorBoxJoint` alongside a scaler/bijector is NOT rejected
+        # here, deliberately, even though the pair above is. Whether the two
+        # compose is a question about the MODEL -- which coordinate pairs carry
+        # a ball, and how the map treats each of them -- and no model exists at
+        # construction. A ball survives a common linear rescale of both its
+        # members and nothing else, so the same search+clipper+bijector triple
+        # is perfectly well defined on one model and undefinable on the next.
+        # The check is made once in `_fit`, as soon as the bijector has been
+        # resolved against the model and before any step is compiled, so a bad
+        # combination still dies before the first likelihood evaluation.
 
         self.reset_momentum_on_clip = reset_momentum_on_clip
         self.record_lane_nan_history = bool(record_lane_nan_history)
@@ -883,6 +891,27 @@ class AbstractMultiStartGradient(AbstractMLE):
         has_bijector = not isinstance(self.bijector, BijectorNone)
         if has_bijector:
             self.bijector.from_model(model=model)
+
+        # The joint clipper's ball is declared in PHYSICAL coordinates, and it
+        # is still a ball in the stepped ones only where the map rescales both
+        # its members by one common linear factor (see
+        # `ClipperPriorBoxJoint.pairs_in_stepped_coordinates`). Resolved HERE:
+        # this is the first moment both halves are known -- the bijector was
+        # resolved against the model one line above, and the model is what says
+        # which pairs carry a ball at all -- and it is still before `_vmapped`
+        # is built, so an unresolvable combination dies without a single
+        # likelihood evaluation rather than a minute into a multi-hour fit.
+        # Its return value is discarded: the step loop calls `clipper.project`,
+        # which re-derives the same restated pairs itself. What is wanted here
+        # is only the raise.
+        if isinstance(self.clipper, ClipperPriorBoxJoint) and (
+            has_scaler or has_bijector
+        ):
+            self.clipper.pairs_in_stepped_coordinates(
+                pairs=model.ball_constraint_index_pairs(),
+                scale=scale if has_scaler else None,
+                bijector=self.bijector if has_bijector else None,
+            )
 
         def _to_physical(vector):
             if scale_jnp is not None:

@@ -1350,3 +1350,78 @@ def test__the_default_clipper_leaves_a_lane_outside_the_disk_where_it_is():
     for clipper in (af.ClipperNone(), af.ClipperPriorBox(margin=0.0)):
         projected, _ = clipper.project(vector=params, model=model, xp=np)
         assert np.hypot(projected[0, 0], projected[0, 1]) == pytest.approx(1.4)
+
+
+def _log_intensity_lane_model():
+    """`_lane_model()` with a `log`-eligible `intensity`, so a per-path bijector
+    has something to actually transform OUTSIDE the ball pair."""
+    model = _lane_model()
+    model.intensity = af.LogUniformPrior(lower_limit=1.0e-3, upper_limit=1.0e3)
+    return model
+
+
+def test__the_joint_clipper_and_a_bijector_construct_together():
+    """No longer refused at construction: whether the two compose is a question
+    about the MODEL, and there is no model here to ask."""
+    search = af.MultiStartAdam(
+        clipper=af.ClipperPriorBoxJoint(margin=0.0),
+        bijector=af.BijectorPerPath({"intensity": "log"}),
+    )
+
+    assert isinstance(search.clipper, af.ClipperPriorBoxJoint)
+    assert isinstance(search.bijector, af.BijectorPerPath)
+
+
+def test__an_identity_mapped_ball_pair_is_accepted_at_model_resolution():
+    """The check `_fit` runs once, immediately after resolving the bijector
+    against the model and before a step is compiled. Exercised here through the
+    search's own clipper rather than by calling `_fit`, which is JAX-native --
+    this suite stays NumPy-only, and the call below is the identical one.
+
+    `log` sits on `intensity`; the `ell_comps` pair is untouched by the map, so
+    the disk survives at its declared radius and the lane keeps the projection."""
+    search = af.MultiStartAdam(
+        clipper=af.ClipperPriorBoxJoint(margin=0.0),
+        bijector=af.BijectorPerPath({"intensity": "log"}),
+    )
+    model = _log_intensity_lane_model()
+    bijector = search.bijector.from_model(model=model)
+
+    assert bijector.kinds == ["identity", "identity", "log"]
+
+    pairs = search.clipper.pairs_in_stepped_coordinates(
+        pairs=model.ball_constraint_index_pairs(),
+        bijector=bijector,
+    )
+
+    assert pairs == [(0, 1, BALL_RADIUS)]
+
+    # And the projection the step loop then makes still pulls the corner lane in.
+    params = np.array([[1.4 / np.sqrt(2.0), 1.4 / np.sqrt(2.0), np.log(5.0)]])
+    projected, clipped_mask = search.clipper.project(
+        vector=params, model=model, xp=np, scale=None, bijector=bijector
+    )
+
+    assert np.hypot(projected[0, 0], projected[0, 1]) <= BALL_RADIUS
+    assert clipped_mask[0].tolist() == [True, True, False]
+
+
+def test__a_logit_on_the_ell_comps_pair_is_refused_before_the_first_step():
+    """The combination that genuinely cannot work still dies at model
+    resolution, so a multi-hour fit does not start and then fail a minute in."""
+    search = af.MultiStartAdam(
+        clipper=af.ClipperPriorBoxJoint(margin=0.0),
+        bijector=af.BijectorLogit(),
+    )
+    model = _lane_model()
+    bijector = search.bijector.from_model(model=model)
+
+    assert bijector.kinds[:2] == ["logit", "logit"]
+
+    with pytest.raises(ValueError) as exc_info:
+        search.clipper.pairs_in_stepped_coordinates(
+            pairs=model.ball_constraint_index_pairs(),
+            bijector=bijector,
+        )
+
+    assert "(0, 1)" in str(exc_info.value)

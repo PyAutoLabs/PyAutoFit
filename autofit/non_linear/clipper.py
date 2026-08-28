@@ -97,6 +97,11 @@ negligible. The bug is in the inset arithmetic, not in the bijector: a
 :meth:`ClipperPriorBox._inset_from_model`); the plain, no-bijector
 ``bounds_from_model`` path is unaffected — every existing caller keeps its
 current (physical) inset exactly.
+
+A **ball** composes with the same maps under a narrower condition, resolved per
+pair rather than per map: it survives a common linear rescale of both its
+members and nothing else. See :class:`ClipperPriorBoxJoint` ("Composition with
+a scaler/bijector") and :meth:`ClipperPriorBoxJoint.pairs_in_stepped_coordinates`.
 """
 
 import logging
@@ -497,6 +502,43 @@ class ClipperPriorBoxJoint(ClipperPriorBox):
     mask's consumer is ``MultiStartGradient``'s momentum reset: a lane pushed out
     of the disk carries outward momentum in *both* coordinates, and zeroing only
     one of them leaves the pair spiralling back out on the next step.
+
+    Composition with a scaler/bijector
+    ---------------------------------
+
+    A ball is a statement about **physical** coordinates, so a search stepping
+    in some other coordinates can only be given a ball projection if the ball
+    is still a ball there. That is a question about the *pair*, not about the
+    map as a whole, and it has a clean answer:
+
+    - both members ``identity``-kind under a **common** linear scale ``s``: the
+      step coordinates are ``(theta_i / s, theta_j / s)``, so
+      ``theta_i**2 + theta_j**2 <= R**2`` is exactly
+      ``phi_i**2 + phi_j**2 <= (R / s)**2``. A disk of radius ``R`` in physical
+      coordinates **is** a disk of radius ``R / s`` in the stepped ones, and
+      the radial shrink below — which is scale-covariant, being a pure
+      multiply — projects onto it correctly. The pair is accepted, with its
+      radius divided;
+    - anything else — ``log``, ``logit``, or two ``identity`` members with
+      *different* scales — is not a disk. Unequal scales give an **ellipse**,
+      whose nearest-point projection is not a radial shrink at all (it is the
+      root of a quartic), and the non-linear kinds give a region with no closed
+      form. Projecting a circle onto those coordinates would enforce a
+      different, silently wrong constraint, so :meth:`project` raises instead,
+      naming the offending index pair and the kinds it found.
+
+    This is deliberately resolved **per pair** rather than per map. A model
+    reparameterised through ``log`` on, say, an ``einstein_radius`` while its
+    ``ell_comps`` stay linear is the common case, and refusing it wholesale is
+    what left those lanes at the box corner ``|e| = 1.414`` — inside every prior
+    box, outside the disk, and in the flat region the clipper exists to escape.
+
+    The projection is **not** round-tripped through the bijector (map back to
+    physical, project, map forward). That would be correct for every kind, but
+    it would also drag the ``logit`` epsilon clamps across coordinates the ball
+    has nothing to do with, breaking the bit-identity the interior-point path
+    promises, saturating gradients at the clamped edges, and adding traced ops
+    to every step. Dividing the radius costs nothing and is exact.
     """
 
     # Divisor floor for the radial shrink. Small enough to be irrelevant for any
@@ -504,6 +546,93 @@ class ClipperPriorBoxJoint(ClipperPriorBox):
     # `r > radius`, and every declared radius is orders of magnitude larger than
     # this), and large enough that `r / tiny` cannot overflow float32.
     _TINY = 1.0e-30
+
+    def pairs_in_stepped_coordinates(self, pairs, scale=None, bijector=None):
+        """
+        The declared ball pairs, restated in whatever coordinates the search is
+        actually stepping in — or a ``ValueError`` naming the pair that cannot
+        be restated.
+
+        Parameters
+        ----------
+        pairs
+            ``(index_0, index_1, radius)`` triples as
+            :meth:`~autofit.mapper.prior_model.abstract.AbstractPriorModel.
+            ball_constraint_index_pairs` returns them, in **physical**
+            coordinates.
+        scale
+            The per-parameter linear scale a ``scaler`` is applying, or
+            ``None``.
+        bijector
+            A **resolved** bijector (``from_model`` already called) the search
+            is stepping through, or ``None``. Mutually exclusive with ``scale``.
+
+        Returns
+        -------
+        The same triples with each ``radius`` divided by that pair's common
+        linear scale — unchanged when neither a scaler nor a bijector is in
+        play, since the common scale is then ``1.0``.
+
+        Raises
+        ------
+        ValueError
+            When a pair is not a disk in the stepped coordinates. See the class
+            docstring's "Composition with a scaler/bijector" for which pairs
+            those are and why the projection cannot be defined for them.
+
+        This is a **model-resolution-time** check, separable from
+        :meth:`project` on purpose: ``MultiStartGradient`` calls it once, as
+        soon as it has resolved its bijector against the model and before it
+        compiles a step, so a combination that cannot work dies there rather
+        than a minute into a multi-hour fit.
+        """
+        if scale is None and bijector is None:
+            return list(pairs)
+
+        if scale is not None:
+            # A raw scaler is linear by construction, so every coordinate is
+            # `identity`-kind; only the equality of the two scales is in doubt.
+            scales = [float(value) for value in np.asarray(scale, dtype=float)]
+            kinds = ["identity"] * len(scales)
+        else:
+            scales = bijector.identity_scales
+            kinds = bijector.kinds
+
+        resolved = []
+
+        for index_0, index_1, radius in pairs:
+            scale_0 = scales[index_0]
+            scale_1 = scales[index_1]
+
+            common = (
+                scale_0 is not None
+                and scale_1 is not None
+                and scale_0 == scale_1
+                and scale_0 > 0.0
+                and np.isfinite(scale_0)
+            )
+
+            if not common:
+                raise ValueError(
+                    f"{type(self).__name__} cannot project onto the ball "
+                    f"declared on parameter indices ({index_0}, {index_1}) "
+                    "while the search steps in scaled or transformed "
+                    f"coordinates: that pair maps as ({kinds[index_0]}, "
+                    f"{kinds[index_1]}) with linear scales ({scale_0}, "
+                    f"{scale_1}), which is not a disk. A ball survives a "
+                    "COMMON linear scale `s` (radius `R` becomes `R / s`) and "
+                    "is composed with; unequal scales give an ellipse and a "
+                    "log/logit coordinate a region with no closed form, and "
+                    "projecting a circle onto either would enforce a "
+                    "different, silently wrong constraint. Leave this pair "
+                    "identity-mapped under one common scale (e.g. a "
+                    "`BijectorPerPath` carrying the non-linear kinds on the "
+                    "OTHER paths), or use ClipperPriorBox instead."
+                )
+
+            resolved.append((index_0, index_1, radius / scale_0))
+
+        return resolved
 
     def project(self, vector, model, xp=np, scale=None, bijector=None):
         projected, clipped_mask = super().project(
@@ -519,20 +648,15 @@ class ClipperPriorBoxJoint(ClipperPriorBox):
         if not pairs:
             return projected, clipped_mask
 
-        if scale is not None or bijector is not None:
-            # A ball is a statement about PHYSICAL coordinates, and neither
-            # change of variables preserves it: a per-parameter `scale` maps the
-            # disk to an ellipse, and a `bijector` maps it to something with no
-            # closed form at all. Projecting the scaled coordinates onto a circle
-            # would enforce a different, silently wrong constraint -- so this
-            # says so rather than doing it.
-            raise ValueError(
-                f"{type(self).__name__} cannot project onto a ball while the "
-                "search steps in scaled or transformed coordinates: the ball is "
-                "a statement about physical parameters, and neither a scaler nor "
-                "a bijector maps a disk to a disk. Use ClipperPriorBox with the "
-                "scaler/bijector, or drop them to project onto the ball."
-            )
+        # Restated in the coordinates `projected` is already in (the box above
+        # returns the STEPPED vector on both the scaler and the bijector path),
+        # so the radial shrink below is unchanged -- it just shrinks onto a
+        # radius that has been divided by the pair's common scale.
+        pairs = self.pairs_in_stepped_coordinates(
+            pairs=pairs,
+            scale=scale,
+            bijector=bijector,
+        )
 
         # One multiplicative factor per parameter, defaulting to 1.0, so the
         # whole projection is a single elementwise multiply and every

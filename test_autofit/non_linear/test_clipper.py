@@ -7,7 +7,13 @@ import autofit as af
 from autofit import exc
 from autofit.mapper.identifier import Identifier
 from autofit.mapper.prior.tuple_prior import TuplePrior
-from autofit.non_linear.bijector import BijectorAuto
+from autofit.non_linear.bijector import (
+    BijectorAuto,
+    BijectorDiagonal,
+    BijectorLogit,
+    BijectorNone,
+    BijectorPerPath,
+)
 from autofit.non_linear.clipper import (
     ClipperNone,
     ClipperPriorBox,
@@ -697,27 +703,145 @@ class TestJointBall:
         assert projected[0] == pytest.approx(0.5)
         assert mask[0]
 
-    def test__a_scaler_or_bijector_is_refused_rather_than_applied(self):
-        """A ball is a statement about physical parameters; a diagonal scale maps
-        the disk to an ellipse and a bijector to something with no closed form.
-        Projecting in the stepped coordinates would enforce a different, silently
-        wrong constraint."""
+
+class TestJointBallComposesWithAMap:
+    """A ball is a statement about PHYSICAL parameters, but it survives a common
+    linear rescale of both its members: a disk of radius `R` becomes a disk of
+    radius `R / s`. Only a genuinely non-linear pair -- a `log`/`logit` kind, or
+    two identity coordinates with DIFFERENT scales (an ellipse) -- has no
+    projection, and only those are refused."""
+
+    def test__the_no_op_bijector_composes_and_is_bit_identical(self):
+        """`BijectorNone` is every coordinate identity-scaled by 1.0, so passing
+        it must be indistinguishable from passing nothing -- not merely close."""
         model = _ball_model()
         clipper = ClipperPriorBoxJoint(margin=0.0)
+        vector = np.array([-1.0, -1.0, 5.0])
 
-        with pytest.raises(ValueError):
+        plain, plain_mask = clipper.project(vector=vector, model=model)
+        composed, composed_mask = clipper.project(
+            vector=vector,
+            model=model,
+            bijector=BijectorNone().from_model(model=model),
+        )
+
+        assert (composed == plain).all()
+        assert (composed_mask == plain_mask).all()
+        assert np.hypot(composed[0], composed[1]) == pytest.approx(BALL_RADIUS)
+
+    def test__a_log_on_a_path_the_ball_does_not_touch_composes(self):
+        """The case the blanket refusal cost: a model reparameterised through
+        `log` on some OTHER parameter still has a linear `ell_comps` pair, so the
+        disk is still a disk and the corner is still projected onto it."""
+        model = _ball_model()
+        model.intensity = af.LogUniformPrior(lower_limit=1.0e-3, upper_limit=1.0e3)
+
+        bijector = BijectorPerPath({"intensity": "log"}).from_model(model=model)
+        assert bijector.kinds == ["identity", "identity", "log"]
+
+        projected, mask = ClipperPriorBoxJoint(margin=0.0).project(
+            vector=np.array([-1.0, -1.0, np.log(5.0)]),
+            model=model,
+            bijector=bijector,
+        )
+
+        # The ball pair is untouched by the map, so the physical answer stands:
+        # the corner projected radially onto the disk, angle preserved.
+        assert np.hypot(projected[0], projected[1]) == pytest.approx(BALL_RADIUS)
+        assert projected[0] == pytest.approx(projected[1])
+        assert mask[0]
+        assert mask[1]
+
+    def test__a_logit_on_the_ball_pair_itself_is_refused_and_names_the_pair(self):
+        """`logit` maps the disk to a region with no closed form. The refusal has
+        to say WHICH pair and WHAT kinds, or a user with a large model cannot act
+        on it."""
+        model = _ball_model()
+        clipper = ClipperPriorBoxJoint(margin=0.0)
+        bijector = BijectorLogit().from_model(model=model)
+
+        assert bijector.kinds[:2] == ["logit", "logit"]
+
+        with pytest.raises(ValueError) as exc_info:
             clipper.project(
                 vector=np.array([-1.0, -1.0, 5.0]),
                 model=model,
-                scale=np.array([1.0, 1.0, 1.0]),
+                bijector=bijector,
             )
 
-        with pytest.raises(ValueError):
-            clipper.project(
-                vector=np.array([-1.0, -1.0, 5.0]),
+        message = str(exc_info.value)
+        assert "(0, 1)" in message
+        assert "logit" in message
+
+    def test__a_common_scale_projects_onto_the_divided_radius(self):
+        """The composition rule itself: in coordinates scaled by `s`, the disk of
+        radius `R` IS the disk of radius `R / s`."""
+        model = _ball_model()
+
+        projected, mask = ClipperPriorBoxJoint(margin=0.0).project(
+            # The stepped vector: the physical corner `(-1, -1)` divided by 2.
+            vector=np.array([-0.5, -0.5, 5.0]),
+            model=model,
+            scale=np.array([2.0, 2.0, 1.0]),
+        )
+
+        assert np.hypot(projected[0], projected[1]) == pytest.approx(BALL_RADIUS / 2.0)
+        assert mask[0]
+        assert mask[1]
+
+    def test__an_unequal_scale_on_the_pair_is_refused(self):
+        """Two different scales map the disk to an ELLIPSE, whose nearest-point
+        projection is not a radial shrink at all."""
+        model = _ball_model()
+
+        with pytest.raises(ValueError) as exc_info:
+            ClipperPriorBoxJoint(margin=0.0).project(
+                vector=np.array([-0.5, -0.5, 5.0]),
                 model=model,
-                bijector=BijectorAuto().from_model(model=model),
+                scale=np.array([2.0, 3.0, 1.0]),
             )
+
+        assert "(0, 1)" in str(exc_info.value)
+
+    def test__a_diagonal_bijector_with_equal_pair_widths_is_accepted(self):
+        """`BijectorDiagonal(ScalerPriorWidth())` reports every coordinate as
+        `identity`, and the two `ell_comps` priors have equal widths -- so the
+        pair shares one scale and composes."""
+        model = _ball_model()
+        bijector = BijectorDiagonal(af.ScalerPriorWidth()).from_model(model=model)
+
+        scales = bijector.identity_scales
+        assert scales[0] == scales[1]
+        assert scales[0] is not None
+
+        projected, mask = ClipperPriorBoxJoint(margin=0.0).project(
+            vector=np.array([-1.0, -1.0, 5.0]) / scales[0],
+            model=model,
+            bijector=bijector,
+        )
+
+        assert np.hypot(projected[0], projected[1]) == pytest.approx(
+            BALL_RADIUS / scales[0]
+        )
+        assert mask[0]
+        assert mask[1]
+
+    def test__a_model_with_no_ball_is_unaffected_by_any_of_this(self):
+        """The resolution is per DECLARED pair, so a model declaring none never
+        reaches it -- a pipeline may configure the joint clipper globally and
+        still use any bijector it likes."""
+        model = _model(
+            alpha=af.UniformPrior(lower_limit=-1.0, upper_limit=1.0),
+            beta=af.UniformPrior(lower_limit=-1.0, upper_limit=1.0),
+        )
+
+        projected, _ = ClipperPriorBoxJoint(margin=0.0).project(
+            vector=np.array([5.0, -5.0]),
+            model=model,
+            bijector=BijectorLogit().from_model(model=model),
+        )
+
+        assert np.isfinite(projected).all()
 
 
 class TestJointBallIdentifier:
@@ -738,6 +862,34 @@ class TestJointBallIdentifier:
         )
 
         assert str(box) != str(joint)
+
+    def test__composing_with_a_bijector_leaves_the_identifier_unchanged(self):
+        """The composition adds no constructor argument, deliberately: had it
+        taken one, every stored `ClipperPriorBoxJoint` result would have been
+        silently re-keyed by a change that does not alter what those runs did.
+
+        Note what this does NOT say. The equality holds partly because the
+        search identifier does not yet tag the `bijector` at all -- a separate,
+        pre-existing gap that predates this change and is tracked on its own;
+        this test pins that the clipper's own key is untouched, not that two
+        runs differing only in bijector *should* share an output directory."""
+        model = _ball_model()
+
+        plain = Identifier(
+            [af.MultiStartAdam(clipper=ClipperPriorBoxJoint()), model, None]
+        )
+        composed = Identifier(
+            [
+                af.MultiStartAdam(
+                    clipper=ClipperPriorBoxJoint(),
+                    bijector=BijectorPerPath({"intensity": "log"}),
+                ),
+                model,
+                None,
+            ]
+        )
+
+        assert str(plain) == str(composed)
 
 
 # The `jit`/`grad`/`vmap` behaviour of the radial shrink -- in particular that the
@@ -771,17 +923,51 @@ class TestJointBallSearchWiring:
 
         assert bounds.lb == pytest.approx(search.clipper.bounds_from_model(model)[0])
 
-    def test__a_scaler_is_refused_at_construction_not_at_the_first_step(self):
-        """A multi-hour fit must not die a minute in on a configuration that was
-        wrong before it started."""
+    def test__a_scaler_is_accepted_at_construction_because_no_model_exists_yet(self):
+        """Whether a ball composes with a map is a question about the MODEL --
+        which pairs carry a ball, and how the map treats each of them -- and no
+        model exists at construction. The same triple is well defined on one
+        model and undefinable on the next, so construction cannot answer it."""
+        search = af.MultiStartAdam(
+            clipper=ClipperPriorBoxJoint(), scaler=af.ScalerPriorWidth()
+        )
+
+        assert isinstance(search.clipper, ClipperPriorBoxJoint)
+        assert isinstance(search.scaler, af.ScalerPriorWidth)
+
+    def test__a_bijector_is_accepted_at_construction_too(self):
+        search = af.MultiStartAdam(
+            clipper=ClipperPriorBoxJoint(), bijector=BijectorAuto()
+        )
+
+        assert isinstance(search.clipper, ClipperPriorBoxJoint)
+        assert isinstance(search.bijector, BijectorAuto)
+
+    def test__an_unresolvable_map_is_refused_at_model_resolution(self):
+        """Refused before the first STEP, not at construction: a multi-hour fit
+        must still not die a minute in on a combination that was wrong before it
+        started, so the check runs once against the model at the top of `_fit`,
+        before anything is compiled or evaluated."""
+        model = _ball_model()
+        clipper = ClipperPriorBoxJoint()
+
         with pytest.raises(ValueError):
-            af.MultiStartAdam(
-                clipper=ClipperPriorBoxJoint(), scaler=af.ScalerPriorWidth()
+            clipper.pairs_in_stepped_coordinates(
+                pairs=model.ball_constraint_index_pairs(),
+                bijector=BijectorLogit().from_model(model=model),
             )
 
-    def test__a_bijector_is_refused_at_construction_too(self):
-        with pytest.raises(ValueError):
-            af.MultiStartAdam(clipper=ClipperPriorBoxJoint(), bijector=BijectorAuto())
+    def test__a_resolvable_map_passes_model_resolution(self):
+        model = _ball_model()
+        model.intensity = af.LogUniformPrior(lower_limit=1.0e-3, upper_limit=1.0e3)
+        clipper = ClipperPriorBoxJoint()
+
+        pairs = clipper.pairs_in_stepped_coordinates(
+            pairs=model.ball_constraint_index_pairs(),
+            bijector=BijectorPerPath({"intensity": "log"}).from_model(model=model),
+        )
+
+        assert pairs == [(0, 1, BALL_RADIUS)]
 
     def test__the_plain_box_clipper_still_composes_with_a_scaler(self):
         """The refusal is scoped to the joint clipper: nothing about the existing
