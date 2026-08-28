@@ -230,7 +230,8 @@ class AbstractBijector(ABC):
             raise RuntimeError(
                 f"{type(self).__name__}.from_model(model) must be called before "
                 "forward / inverse / log_det_jacobian / bounds_forward / kinds "
-                "-- the per-coordinate kind arrays are not yet resolved."
+                "/ identity_scales -- the per-coordinate kind arrays are not "
+                "yet resolved."
             )
 
     @property
@@ -238,6 +239,34 @@ class AbstractBijector(ABC):
         """The per-coordinate kind, in ``model.priors_ordered_by_id`` order."""
         self._check_resolved()
         return [_KIND_NAMES[int(code)] for code in self._kind_code]
+
+    @property
+    def identity_scales(self) -> List[Optional[float]]:
+        """
+        The per-coordinate **linear** scale, or ``None`` where there is not one.
+
+        Entry ``i`` is ``self._scale[i]`` when coordinate ``i`` is
+        ``identity``-kind — the one case in which ``forward`` is exactly
+        ``theta / scale``, an affine map — and ``None`` for ``log`` / ``logit``,
+        where ``scale`` is not read at all and no single linear factor describes
+        the coordinate.
+
+        It exists so a consumer can ask "is this coordinate merely rescaled,
+        and by how much?" without reaching into ``_kind_code`` / ``_scale``.
+        :class:`~autofit.non_linear.clipper.ClipperPriorBoxJoint` is the caller:
+        a ball is a statement about physical coordinates, and it stays a ball
+        under a *common* linear rescale of both its members (radius ``R`` maps
+        to ``R / s``) but not otherwise — so it needs the scale where there is
+        one and an explicit "there is not" where there is not. ``None`` rather
+        than ``1.0`` for the non-identity kinds, deliberately: a ``log``
+        coordinate is not a coordinate scaled by one, and reporting it as such
+        would let a caller compose with it silently and wrongly.
+        """
+        self._check_resolved()
+        return [
+            float(scale) if int(code) == _IDENTITY else None
+            for code, scale in zip(self._kind_code, self._scale)
+        ]
 
     def forward(self, theta, xp=np):
         """

@@ -409,6 +409,50 @@ def test__objective_composed_through_the_bijector_is_the_SAME_objective():
         ) == pytest.approx(_log_coordinate_objective(theta), rel=1.0e-9)
 
 
+def test__round_tripping_a_per_path_map_is_bit_exact_where_it_is_identity():
+    """
+    The F5 pin. A per-path map touches the paths it names and NOTHING else, and
+    "nothing else" has to mean bit-identity, not agreement to some tolerance.
+
+    It is load-bearing for
+    :class:`~autofit.non_linear.clipper.ClipperPriorBoxJoint`, which composes
+    with such a map by dividing a ball's radius rather than by round-tripping
+    the vector through the bijector. That shortcut is only sound if the
+    untouched coordinates really are untouched: `theta / 1.0 * 1.0 == theta`
+    exactly in IEEE 754, so an identity coordinate survives forward-then-inverse
+    with every bit intact, while a `log` one does not (`exp(log(x))` is
+    correctly rounded, not exact) and is therefore checked to a tolerance.
+
+    The composed objective is equal to `rel=1e-12` across the whole vector, so
+    the log coordinate's rounding is confirmed to be the only difference and to
+    be negligible.
+    """
+    model = log_uniform_model()
+    bijector = BijectorPerPath({"normalization": "log"}).from_model(model)
+
+    assert bijector.kinds == ["identity", "log", "identity"]
+
+    rng = np.random.default_rng(5)
+
+    for _ in range(50):
+        theta = rng.uniform(
+            np.array([-10.0, 0.5, -10.0]), np.array([10.0, 500.0, 10.0])
+        )
+        round_tripped = bijector.inverse(bijector.forward(theta))
+
+        # `==`, not `approx`: the identity coordinates are bit-exact.
+        assert round_tripped[0] == theta[0]
+        assert round_tripped[2] == theta[2]
+
+        # The log coordinate round trips through `exp(log(x))`, which is
+        # correctly rounded rather than exact.
+        assert round_tripped[1] == pytest.approx(theta[1], rel=1.0e-12)
+
+        assert _log_coordinate_objective(round_tripped) == pytest.approx(
+            _log_coordinate_objective(theta), rel=1.0e-12
+        )
+
+
 def test__bijector_cannot_move_the_MAP():
     """
     The end-to-end statement: minimise the raw objective, and minimise the
