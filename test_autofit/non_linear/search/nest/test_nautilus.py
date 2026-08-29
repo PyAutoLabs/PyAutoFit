@@ -97,3 +97,81 @@ def test__single_core_builds_no_pool(monkeypatch):
     )
 
     search.fit(model=model, analysis=analysis)
+
+
+@requires_nautilus
+def test__multi_core_passes_serial_sampler_pool(monkeypatch):
+    """
+    number_of_cores > 1 must hand nautilus the tuple `(pool, None)`: the fork
+    pool for likelihood evaluations (`pool_l`) and no pool for the sampler's
+    own calculations (`pool_s`).
+
+    Nautilus otherwise trains its neural bounds on the same pool via
+    `pool.map`; a worker that dies mid-fit is replaced by
+    `multiprocessing.Pool` but its task is never re-issued, so `map` blocks
+    forever and the fit hangs (#1547).
+    """
+    from autofit.non_linear.search.nest.nautilus import search as nautilus_search
+
+    class StopFit(Exception):
+        pass
+
+    captured = {}
+
+    class StubSampler:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            raise StopFit
+
+    sentinel = object()
+
+    class StubPoolContext:
+        def __enter__(self):
+            return sentinel
+
+        def __exit__(self, *args):
+            return False
+
+    class StubContext:
+        def Pool(self, number_of_cores):
+            captured["number_of_cores"] = number_of_cores
+            return StubPoolContext()
+
+    monkeypatch.setattr(nautilus_search, "fork_context", lambda: StubContext())
+    monkeypatch.setattr(
+        af.Nautilus, "sampler_cls", property(lambda self: StubSampler)
+    )
+    monkeypatch.setenv("PYAUTO_TEST_MODE", "1")
+
+    model = af.Model(af.ex.Gaussian)
+    analysis = af.ex.Analysis(
+        data=np.full(100, 5.0),
+        noise_map=np.full(100, 1.0),
+    )
+
+    search = af.Nautilus(
+        name="nautilus_multi_core",
+        unique_tag="multi_core_serial_sampler_pool_test",
+        n_live=10,
+        number_of_cores=2,
+    )
+
+    with pytest.raises(StopFit):
+        search.fit(model=model, analysis=analysis)
+
+    assert captured["number_of_cores"] == 2
+    assert captured["pool"] == (sentinel, None)
+
+    captured.clear()
+
+    search = af.Nautilus(
+        name="nautilus_single_core_pool_kwarg",
+        unique_tag="single_core_serial_sampler_pool_test",
+        n_live=10,
+        number_of_cores=1,
+    )
+
+    with pytest.raises(StopFit):
+        search.fit(model=model, analysis=analysis)
+
+    assert captured["pool"] is None

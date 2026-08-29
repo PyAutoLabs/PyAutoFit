@@ -338,6 +338,19 @@ class Nautilus(abstract_nest.AbstractNest):
         # forces every likelihood call into a forked worker — which deadlocks
         # in XLA compilation when the likelihood touches JAX, since a forked
         # child of a JAX-initialized parent cannot compile.
+        #
+        # The pool is passed as the tuple `(pool, None)` rather than as a bare
+        # `pool`, because nautilus otherwise uses the one pool for likelihood
+        # evaluations *and* for its own sampler calculations — in particular
+        # neural bound training (`nautilus/neural.py`,
+        # `NeuralNetworkEmulator.train` -> `pool.map`). A worker that dies
+        # mid-fit (e.g. a per-job OOM kill on a cluster) is silently replaced
+        # by `multiprocessing.Pool`, but the task it was running is never
+        # re-issued, so `map` blocks forever and the fit hangs — observed on
+        # RAL 2026-08-29 (#1547). `(pool, None)` keeps likelihoods parallel
+        # (`pool_l`) and makes bound training serial in the parent (`pool_s`),
+        # which is negligible: 4 small MLPs fit on at most a few hundred
+        # points.
         if self.number_of_cores <= 1:
             pool_context = nullcontext(None)
         else:
@@ -349,7 +362,7 @@ class Nautilus(abstract_nest.AbstractNest):
                 likelihood=fitness.call_wrap,
                 n_dim=model.prior_count,
                 filepath=self.checkpoint_file,
-                pool=pool,
+                pool=(pool, None) if pool is not None else None,
                 n_live=self.n_live,
                 n_update=self.n_update,
                 enlarge_per_dim=self.enlarge_per_dim,
