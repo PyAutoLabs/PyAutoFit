@@ -31,5 +31,5 @@ test:
   check_likelihood_function: true   # if True, when a search is resumed the likelihood of a previous sample is recalculated to ensure it is consistent with the previous run.
   exception_override: false
   lh_timeout_seconds:               # If a float is input, the log_likelihood_function call is timed out after this many seconds, to diagnose infinite loops. Default is None, meaning no timeout.
-  log_likelihood_ceiling: 1.0e+20   # If a float is input, log likelihoods whose magnitude exceeds it are treated as numerical garbage and replaced by the resample figure of merit. Blank (null) or inf disables the guard.
+  log_likelihood_ceiling:           # If a float is input, log likelihoods whose magnitude exceeds it are treated as numerical garbage and replaced by the resample figure of merit. Blank (null) or inf disables the guard, which is the default: a log likelihood scales with the noise-map units, so a fixed magnitude can reject a legitimate fit on a badly-scaled dataset. Opt in where the units are known (e.g. autolens_profiling sets 1.0e+20).
   parallel_profile: false

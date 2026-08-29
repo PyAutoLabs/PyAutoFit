@@ -28,5 +28,5 @@ test:
   preloads_check_threshold: 1.0     # If the figure of merit of a fit with and without preloads is greater than this threshold, the check preload test fails and an exception raised for a model-fit.              # If True, perform a sanity check that the likelihood using preloads is identical to the likelihood not using preloads.
   exception_override: false
   lh_timeout_seconds:               # If a float is input, the log_likelihood_function call is timed out after this many seconds, to diagnose infinite loops. Default is None, meaning no timeout.
-  log_likelihood_ceiling: 1.0e+20   # If a float is input, log likelihoods whose magnitude exceeds it are treated as numerical garbage and replaced by the resample figure of merit. Blank (null) or inf disables the guard.
+  log_likelihood_ceiling:           # If a float is input, log likelihoods whose magnitude exceeds it are treated as numerical garbage and replaced by the resample figure of merit. Blank (null) or inf disables the guard, which is the default: a log likelihood scales with the noise-map units, so a fixed magnitude can reject a legitimate fit on a badly-scaled dataset. Opt in where the units are known (e.g. autolens_profiling sets 1.0e+20).
   parallel_profile: false

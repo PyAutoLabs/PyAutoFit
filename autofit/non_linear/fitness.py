@@ -32,9 +32,53 @@ logger = logging.getLogger(__name__)
 timeout_seconds = get_timeout_seconds()
 
 #: Ceiling used when ``general.test.log_likelihood_ceiling`` is absent from the config (e.g. a
-#: workspace whose ``general.yaml`` pre-dates the key). Chosen far above any physically meaningful
-#: log likelihood, so it only ever catches numerical garbage.
-LOG_LIKELIHOOD_CEILING_DEFAULT = 1.0e20
+#: workspace whose ``general.yaml`` pre-dates the key). ``inf`` -- i.e. the guard is **off** --
+#: because the packaged default is off, and a config that never mentions the key must inherit
+#: today's default rather than the one that shipped in PyAutoFit 2025.x.
+LOG_LIKELIHOOD_CEILING_DEFAULT = float("inf")
+
+#: Set the first time the magnitude guard actually rejects a log likelihood on the numpy path, so
+#: the warning below is emitted once per process rather than once per sample. Module level, not
+#: per-`Fitness`: a search rebuilds its fitness object on resume, and one warning per run is the
+#: point.
+_log_likelihood_ceiling_warning_emitted = False
+
+
+def _warn_log_likelihood_ceiling_fired(log_likelihood, ceiling: float):
+    """
+    Warn, once per process, that the magnitude guard has rejected a log likelihood.
+
+    The guard is deliberately silent about *which* of the two things it caught: numerical garbage
+    (what it exists for), or a legitimate likelihood on a dataset whose noise-map units make
+    ``|log_likelihood|`` genuinely enormous (what makes the ceiling unsafe as a default -- see
+    `get_log_likelihood_ceiling`). Only the user knows their units, so the warning names the value
+    and the ceiling and leaves the judgement to them.
+
+    **Numpy path only.** `Fitness.call` also runs under ``jax.jit`` / ``jax.vmap``, where the
+    rejection is an ``xp.where`` on a *tracer*: there is no Python-visible moment at which the guard
+    "fires", so this cannot be called, and those paths reject silently by construction. Nor is a
+    fire *counter* offered for them -- incrementing one from traced code needs a host callback or a
+    donated buffer, which perturbs the very code being profiled and does not survive ``vmap`` /
+    ``grad``. A counter that only ever counted the numpy path would read ``0`` on a jitted run that
+    rejected every sample, which is worse than no counter at all.
+    """
+    global _log_likelihood_ceiling_warning_emitted
+
+    if _log_likelihood_ceiling_warning_emitted:
+        return
+
+    _log_likelihood_ceiling_warning_emitted = True
+
+    logger.warning(
+        f"A log likelihood of {log_likelihood} exceeded the configured magnitude ceiling of "
+        f"{ceiling} and was replaced by the resample figure of merit, so the search will not "
+        "sample this model. This is usually numerical garbage (e.g. an fp64 Cholesky on a "
+        "non-positive-definite matrix), but a log likelihood scales with the noise-map units, so a "
+        "badly-scaled dataset can exceed the ceiling legitimately -- check the units before "
+        "trusting the rejection. Set general.test.log_likelihood_ceiling higher, or blank to "
+        "disable the guard. This warning is issued once per run; JAX-traced runs (jit / vmap) "
+        "cannot issue it at all."
+    )
 
 
 def get_log_likelihood_ceiling() -> float:
@@ -42,14 +86,25 @@ def get_log_likelihood_ceiling() -> float:
     The largest ``|log_likelihood|`` a fitness function accepts before treating the value as
     numerical garbage and substituting the resample figure of merit.
 
-    `Fitness.call` maps ``NaN`` and ``inf`` log likelihoods to ``resample_figure_of_merit``, but a
-    *finite* value of, say, ``3e+303`` passes straight through and the search accepts it as its best
-    point. That is not hypothetical: a non-positive-definite regularization matrix makes an fp64
-    Cholesky return finite garbage, a nested sampler treats it as the peak of the posterior, its
-    shell log evidence explodes to ``~1e56`` and the termination criterion never fires -- the run
-    burns its wall clock without ever converging.
+    **Off by default.** The packaged ``general.yaml`` ships this blank, so the guard is disabled
+    unless a config opts in. It is off because the ceiling is a bare magnitude in *unspecified
+    units*: a log likelihood is ``-0.5 * chi_squared - 0.5 * noise_normalization``, and both terms
+    scale with the noise map -- ``chi_squared`` as ``noise ** -2``, ``noise_normalization``
+    linearly in the number of pixels. A dataset whose noise map is expressed in a small unit can
+    therefore produce a *legitimate* log likelihood above any fixed threshold, and every model
+    would be silently rejected, leaving the search nothing but the resample sentinel. The guard
+    cannot tell that case from the one below, because a magnitude is the only signal it reads.
 
-    The ceiling closes that hole. It is read **once** from
+    What it exists for, when a config does opt in: `Fitness.call` maps ``NaN`` and ``inf`` log
+    likelihoods to ``resample_figure_of_merit``, but a *finite* value of, say, ``3e+303`` passes
+    straight through and the search accepts it as its best point. That is not hypothetical: a
+    non-positive-definite regularization matrix makes an fp64 Cholesky return finite garbage, a
+    nested sampler treats it as the peak of the posterior, its shell log evidence explodes to
+    ``~1e56`` and the termination criterion never fires -- the run burns its wall clock without ever
+    converging. `autolens_profiling` enables the ceiling for exactly this reason (run ``341908_5``);
+    a science analysis should enable it only once its own units are known to be safe.
+
+    The value is read **once** from
     ``conf.instance["general"]["test"]["log_likelihood_ceiling"]`` and returned as a static Python
     float, because the guard it feeds runs inside JAX-traced code, where a Python ``if`` on a traced
     value is illegal and the comparison must be a static-vs-traced ``xp.where``.
@@ -59,8 +114,8 @@ def get_log_likelihood_ceiling() -> float:
 
     Returns
     -------
-    The ceiling as a float. ``inf`` disables the guard, which is what a ``null``, non-positive or
-    unparseable config entry maps to, since ``abs(x) > inf`` is never true.
+    The ceiling as a float. ``inf`` disables the guard, which is what an absent, ``null``,
+    non-positive or unparseable config entry maps to, since ``abs(x) > inf`` is never true.
     """
     try:
         ceiling = conf.instance["general"]["test"]["log_likelihood_ceiling"]
@@ -266,6 +321,16 @@ class Fitness:
     def _xp(self):
         return self.analysis._xp
 
+    @property
+    def _is_jax(self) -> bool:
+        """
+        Whether the array backend is JAX, and therefore whether `call` may be running on tracers.
+
+        Read by the log-likelihood magnitude guard, which warns from Python and so must stay on the
+        numpy path — under `jax.jit` / `jax.vmap` a Python branch on a traced value is illegal.
+        """
+        return self._xp.__name__.startswith("jax")
+
     def call(self, parameters):
         """
         A private method that calls the fitness function with the given parameters and additional keyword arguments.
@@ -278,8 +343,11 @@ class Fitness:
         the resample sentinel and never select the point. The magnitude ceiling exists because the NaN/inf checks
         miss the failure mode that actually kills long runs: an fp64 Cholesky on a non-positive-definite matrix
         returns *finite* garbage (log likelihoods up to `3e+303`), which a nested sampler happily accepts as its
-        best point and then never terminates on. It is a static Python float (see `get_log_likelihood_ceiling`),
-        so `inf` makes the `where` a no-op and the comparison stays legal under `jax.jit` / `jax.vmap`. Gradient
+        best point and then never terminates on. It is **off unless a config opts in** — the threshold is a bare
+        magnitude and a log likelihood scales with the noise-map units, so a fixed ceiling can reject a legitimate
+        fit (`get_log_likelihood_ceiling` carries the argument). It is a static Python float, so the default `inf`
+        makes the `where` a no-op and the comparison stays legal under `jax.jit` / `jax.vmap`. When it does fire,
+        the numpy path warns once per process; the traced paths cannot warn at all. Gradient
         consumers get no such protection: under `jax.grad`, reverse-mode differentiates *both* branches of an
         `xp.where` and multiplies the unselected one by zero, so if the likelihood's derivative is also non-finite
         the guard yields `0 * NaN = NaN` and the returned gradient is NaN even though the value looks handled.
@@ -309,7 +377,7 @@ class Fitness:
         -------
         The figure of merit returned to the non-linear search, which is either the log likelihood or log posterior.
         """
-        if self._xp.__name__.startswith("jax"):
+        if self._is_jax:
 
             # Get instance from model (must be side-effect free and exception-free under JAX)
             instance = self.model.instance_from_vector(vector=parameters, xp=self._xp)
@@ -333,13 +401,35 @@ class Fitness:
 
         # Penalize finite-but-impossible log-likelihoods (e.g. 3e+303 out of an fp64 Cholesky on a
         # non-positive-definite matrix), which the isnan/isinf guards above let through. Same
-        # value-only caveat. The ceiling is a static float, so `inf` makes this a no-op and the
+        # value-only caveat. The ceiling is a static float, and it is `inf` unless a config opts in
+        # (see `get_log_likelihood_ceiling`), so by default this is a no-op; when it is set, the
         # resample sentinels (-inf, -1e99, -1e30) map to themselves.
+        raw_log_likelihood = log_likelihood
+
+        over_ceiling = self._xp.abs(log_likelihood) > self.log_likelihood_ceiling
+
         log_likelihood = self._xp.where(
-            self._xp.abs(log_likelihood) > self.log_likelihood_ceiling,
+            over_ceiling,
             self.resample_figure_of_merit,
             log_likelihood,
         )
+
+        # Tell the user the first time the guard actually rejects something, because a rejection is
+        # indistinguishable from "the model is bad" from inside the search. Numpy path only:
+        # `over_ceiling` is a tracer under jit / vmap, so a Python `if` on it is illegal there and
+        # those runs reject silently (documented in `_warn_log_likelihood_ceiling_fired`). The
+        # ceiling test comes first so the default (disabled) config short-circuits before touching
+        # the array at all, and `_warning_emitted` takes this off the hot path after the first fire.
+        if (
+            self.log_likelihood_ceiling != np.inf
+            and not _log_likelihood_ceiling_warning_emitted
+            and not self._is_jax
+        ):
+            if bool(np.any(over_ceiling)):
+                _warn_log_likelihood_ceiling_fired(
+                    log_likelihood=raw_log_likelihood,
+                    ceiling=self.log_likelihood_ceiling,
+                )
 
         # Determine final figure of merit
         if self.fom_is_log_likelihood:

@@ -56,11 +56,18 @@ def nss_log_likelihood_from(model, analysis, log_likelihood_ceiling=None):
 
     Two things are rejected, both mapped to `NSS_INVALID_LOG_LIKELIHOOD`:
 
-    - non-finite values (``NaN`` / ``inf``), as before;
-    - finite values whose magnitude exceeds the configured ceiling. An fp64 Cholesky on a
-      non-positive-definite matrix returns finite garbage (log likelihoods up to ``3e+303``), which
-      a nested sampler otherwise accepts as its highest-likelihood live point; the shell log
-      evidence then explodes and the termination criterion never fires.
+    - non-finite values (``NaN`` / ``inf``), always;
+    - finite values whose magnitude exceeds the configured ceiling, **if** a config has opted in.
+      An fp64 Cholesky on a non-positive-definite matrix returns finite garbage (log likelihoods up
+      to ``3e+303``), which a nested sampler otherwise accepts as its highest-likelihood live point;
+      the shell log evidence then explodes and the termination criterion never fires. The ceiling is
+      off in the packaged config, because a log likelihood scales with the noise-map units and a
+      fixed magnitude can therefore reject a legitimate fit
+      (`autofit.non_linear.fitness.get_log_likelihood_ceiling` carries the full argument).
+
+    This closure is JAX-only, so it cannot warn when the ceiling fires — the rejection is an
+    ``jnp.where`` on a tracer. `Fitness.call`'s numpy path warns once per process; ``af.NSS`` does
+    not sample through it.
 
     Parameters
     ----------
@@ -70,8 +77,9 @@ def nss_log_likelihood_from(model, analysis, log_likelihood_ceiling=None):
         The analysis supplying `log_likelihood_function`.
     log_likelihood_ceiling
         The magnitude ceiling. Defaults to the configured value
-        (`autofit.non_linear.fitness.get_log_likelihood_ceiling`); ``inf`` disables the check. It
-        must be a static Python float, because JAX traces the comparison it feeds.
+        (`autofit.non_linear.fitness.get_log_likelihood_ceiling`), which is ``inf`` — the check
+        disabled — unless a config opts in. It must be a static Python float, because JAX traces
+        the comparison it feeds.
 
     Returns
     -------
