@@ -209,6 +209,7 @@ from autonerves.test_mode import (
 # second of import time that most sessions never use.
 _LAZY_ATTRS = {
     "NSS": ("autofit.non_linear.search.nest.nss.search", "NSS"),
+    "SMC": ("autofit.non_linear.search.mcmc.blackjax.smc.search", "SMC"),
     "Aggregator": ("autofit.database.aggregator", "Aggregator"),
     "Query": ("autofit.database.aggregator", "Query"),
     "GridSearchAggregator": (
