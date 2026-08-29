@@ -31,6 +31,65 @@ def get_timeout_seconds():
 logger = logging.getLogger(__name__)
 timeout_seconds = get_timeout_seconds()
 
+#: Ceiling used when ``general.test.log_likelihood_ceiling`` is absent from the config (e.g. a
+#: workspace whose ``general.yaml`` pre-dates the key). Chosen far above any physically meaningful
+#: log likelihood, so it only ever catches numerical garbage.
+LOG_LIKELIHOOD_CEILING_DEFAULT = 1.0e20
+
+
+def get_log_likelihood_ceiling() -> float:
+    """
+    The largest ``|log_likelihood|`` a fitness function accepts before treating the value as
+    numerical garbage and substituting the resample figure of merit.
+
+    `Fitness.call` maps ``NaN`` and ``inf`` log likelihoods to ``resample_figure_of_merit``, but a
+    *finite* value of, say, ``3e+303`` passes straight through and the search accepts it as its best
+    point. That is not hypothetical: a non-positive-definite regularization matrix makes an fp64
+    Cholesky return finite garbage, a nested sampler treats it as the peak of the posterior, its
+    shell log evidence explodes to ``~1e56`` and the termination criterion never fires -- the run
+    burns its wall clock without ever converging.
+
+    The ceiling closes that hole. It is read **once** from
+    ``conf.instance["general"]["test"]["log_likelihood_ceiling"]`` and returned as a static Python
+    float, because the guard it feeds runs inside JAX-traced code, where a Python ``if`` on a traced
+    value is illegal and the comparison must be a static-vs-traced ``xp.where``.
+
+    A bare ``1e20`` in YAML parses as a *string*, not a float (PyYAML requires a decimal point or a
+    signed exponent), so the value is coerced with ``float`` rather than trusted as read.
+
+    Returns
+    -------
+    The ceiling as a float. ``inf`` disables the guard, which is what a ``null``, non-positive or
+    unparseable config entry maps to, since ``abs(x) > inf`` is never true.
+    """
+    try:
+        ceiling = conf.instance["general"]["test"]["log_likelihood_ceiling"]
+    except KeyError:
+        return LOG_LIKELIHOOD_CEILING_DEFAULT
+
+    if ceiling is None:
+        return float("inf")
+
+    try:
+        ceiling = float(ceiling)
+    except (TypeError, ValueError):
+        logger.warning(
+            f"general.test.log_likelihood_ceiling = {ceiling!r} could not be read as a float. "
+            "The log likelihood magnitude guard is disabled for this run."
+        )
+        return float("inf")
+
+    if not ceiling > 0.0:
+        logger.warning(
+            f"general.test.log_likelihood_ceiling = {ceiling} is not positive, so every log "
+            "likelihood would be rejected. The log likelihood magnitude guard is disabled for "
+            "this run."
+        )
+        return float("inf")
+
+    return ceiling
+
+
 class Fitness:
     def __init__(
         self,
@@ -113,6 +172,11 @@ class Fitness:
         self.fom_is_log_likelihood = fom_is_log_likelihood
 
         self.resample_figure_of_merit = resample_figure_of_merit or -self._xp.inf
+
+        # Static Python float, read once here rather than per-call: `call` compares it against a
+        # traced value under `jax.jit` / `jax.vmap`, which requires the ceiling to be a compile-time
+        # constant.
+        self.log_likelihood_ceiling = get_log_likelihood_ceiling()
         self.convert_to_chi_squared = convert_to_chi_squared
         self.store_history = store_history
 
@@ -207,10 +271,15 @@ class Fitness:
         A private method that calls the fitness function with the given parameters and additional keyword arguments.
         This method is intended for internal use only.
 
-        The NaN/inf guard below protects the **value only, never the gradient**.
+        The NaN/inf/magnitude guards below protect the **value only, never the gradient**.
 
-        A model whose likelihood is NaN or inf is mapped to `resample_figure_of_merit`, so searches that read only
-        the figure of merit (nested samplers, MCMC) get the resample sentinel and never select the point. Gradient
+        A model whose likelihood is NaN, inf, or larger in magnitude than `self.log_likelihood_ceiling` is mapped
+        to `resample_figure_of_merit`, so searches that read only the figure of merit (nested samplers, MCMC) get
+        the resample sentinel and never select the point. The magnitude ceiling exists because the NaN/inf checks
+        miss the failure mode that actually kills long runs: an fp64 Cholesky on a non-positive-definite matrix
+        returns *finite* garbage (log likelihoods up to `3e+303`), which a nested sampler happily accepts as its
+        best point and then never terminates on. It is a static Python float (see `get_log_likelihood_ceiling`),
+        so `inf` makes the `where` a no-op and the comparison stays legal under `jax.jit` / `jax.vmap`. Gradient
         consumers get no such protection: under `jax.grad`, reverse-mode differentiates *both* branches of an
         `xp.where` and multiplies the unselected one by zero, so if the likelihood's derivative is also non-finite
         the guard yields `0 * NaN = NaN` and the returned gradient is NaN even though the value looks handled.
@@ -261,6 +330,16 @@ class Fitness:
         # docstring above -- gradient-safety belongs at the site that creates the NaN, not here.
         log_likelihood = self._xp.where(self._xp.isnan(log_likelihood), self.resample_figure_of_merit, log_likelihood)
         log_likelihood = self._xp.where(self._xp.isinf(log_likelihood), self.resample_figure_of_merit, log_likelihood)
+
+        # Penalize finite-but-impossible log-likelihoods (e.g. 3e+303 out of an fp64 Cholesky on a
+        # non-positive-definite matrix), which the isnan/isinf guards above let through. Same
+        # value-only caveat. The ceiling is a static float, so `inf` makes this a no-op and the
+        # resample sentinels (-inf, -1e99, -1e30) map to themselves.
+        log_likelihood = self._xp.where(
+            self._xp.abs(log_likelihood) > self.log_likelihood_ceiling,
+            self.resample_figure_of_merit,
+            log_likelihood,
+        )
 
         # Determine final figure of merit
         if self.fom_is_log_likelihood:
@@ -532,6 +611,9 @@ class Fitness:
 
     def __setstate__(self, state):
         self.__dict__.update(state)
+        # Fitness objects pickled before the magnitude guard existed carry no ceiling; give them the
+        # configured one rather than letting `call` raise `AttributeError` on resume.
+        self.__dict__.setdefault("log_likelihood_ceiling", get_log_likelihood_ceiling())
         self._call = self.call
         if getattr(self, "use_jax_vmap", False):
             self._call = self._vmap
