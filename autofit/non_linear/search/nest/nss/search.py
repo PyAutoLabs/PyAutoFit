@@ -9,7 +9,7 @@ from typing import Optional, TYPE_CHECKING
 import numpy as np
 
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
-from autofit.non_linear.fitness import Fitness
+from autofit.non_linear.fitness import Fitness, get_log_likelihood_ceiling
 from autofit.non_linear.paths.null import NullPaths
 from autofit.non_linear.search.nest import abstract_nest
 from .samples import NSSamples
@@ -38,6 +38,61 @@ except ImportError:
 
 
 logger = logging.getLogger(__name__)
+
+#: The figure of merit ``af.NSS`` substitutes for a log likelihood it refuses to sample from. Not
+#: ``-inf``: blackjax's nested sampler arithmetic (log weights, shell evidence) has to stay finite,
+#: so an unreachably low finite value is used instead.
+NSS_INVALID_LOG_LIKELIHOOD = -1e30
+
+
+def nss_log_likelihood_from(model, analysis, log_likelihood_ceiling=None):
+    """
+    Build the JAX log-likelihood closure ``af.NSS`` samples through.
+
+    ``af.NSS`` does not call `Fitness.call` while sampling -- it hands blackjax an inline JAX
+    closure -- so it does not inherit that method's guards and has to repeat them here. Keeping the
+    closure in one module-level factory means the guards exist once and can be tested directly,
+    rather than being restated by a test that only resembles the sampled path.
+
+    Two things are rejected, both mapped to `NSS_INVALID_LOG_LIKELIHOOD`:
+
+    - non-finite values (``NaN`` / ``inf``), as before;
+    - finite values whose magnitude exceeds the configured ceiling. An fp64 Cholesky on a
+      non-positive-definite matrix returns finite garbage (log likelihoods up to ``3e+303``), which
+      a nested sampler otherwise accepts as its highest-likelihood live point; the shell log
+      evidence then explodes and the termination criterion never fires.
+
+    Parameters
+    ----------
+    model
+        The model whose parameter vector is mapped to an instance.
+    analysis
+        The analysis supplying `log_likelihood_function`.
+    log_likelihood_ceiling
+        The magnitude ceiling. Defaults to the configured value
+        (`autofit.non_linear.fitness.get_log_likelihood_ceiling`); ``inf`` disables the check. It
+        must be a static Python float, because JAX traces the comparison it feeds.
+
+    Returns
+    -------
+    The closure blackjax samples through.
+    """
+    import jax.numpy as jnp
+
+    if log_likelihood_ceiling is None:
+        log_likelihood_ceiling = get_log_likelihood_ceiling()
+
+    def log_likelihood(params):
+        instance = model.instance_from_vector(vector=params, xp=jnp)
+        raw = analysis.log_likelihood_function(instance=instance)
+        raw = jnp.where(jnp.isfinite(raw), raw, NSS_INVALID_LOG_LIKELIHOOD)
+        return jnp.where(
+            jnp.abs(raw) > log_likelihood_ceiling,
+            NSS_INVALID_LOG_LIKELIHOOD,
+            raw,
+        )
+
+    return log_likelihood
 
 
 _CHECKPOINT_FILENAME = "nss_checkpoint.pkl"
@@ -341,10 +396,7 @@ class NSS(abstract_nest.AbstractNest):
 
         ndim = model.prior_count
 
-        def log_likelihood(params):
-            instance = model.instance_from_vector(vector=params, xp=jnp)
-            raw = analysis.log_likelihood_function(instance=instance)
-            return jnp.where(jnp.isfinite(raw), raw, -1e30)
+        log_likelihood = nss_log_likelihood_from(model=model, analysis=analysis)
 
         def prior_logprob(params):
             log_priors = model.log_prior_list_from_vector(vector=params, xp=jnp)
