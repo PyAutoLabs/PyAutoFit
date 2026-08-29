@@ -39,6 +39,8 @@ MCMC
 
    Emcee
    Zeus
+   BlackJAXNUTS
+   SMC
 
 Maximum Likelihood Estimators
 -----------------------------
