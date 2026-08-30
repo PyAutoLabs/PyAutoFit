@@ -25,6 +25,53 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+class _LikelihoodWorkerPool:
+    """
+    A `multiprocessing.Pool` wrapper handed to nautilus as its likelihood pool
+    (`pool_l`), whose workers already hold the fitness function in a global set
+    by `nautilus.pool.initialize_worker` at fork time.
+
+    Nautilus calls `pool.map(self.likelihood, args)` (`nautilus/sampler.py`),
+    which for a plain pool object makes `multiprocessing` pickle the bound
+    `Fitness.call_wrap` — and therefore the whole analysis, dataset, PSF
+    convolver, sparse operator and adapt images — into every task chunk, for
+    every likelihood call. This class ignores the function it is mapped with
+    and dispatches `likelihood_worker` instead, which reads the worker-global
+    likelihood, exactly as nautilus does for a `pool=<int>` argument (#1547).
+    """
+
+    def __init__(self, pool):
+        self._pool = pool
+
+    @property
+    def size(self):
+        """
+        The number of worker processes, read by `nautilus.pool.NautilusPool.size`.
+        """
+        return getattr(self._pool, "_processes", None)
+
+    def map(self, func, iterable):
+        # `func` is deliberately ignored: nautilus's likelihood pool is only ever
+        # mapped with the likelihood, and dispatching the worker-global instead
+        # avoids pickling the `Fitness` (and its analysis and dataset) into every
+        # task chunk (#1547).
+        from nautilus.pool import likelihood_worker
+
+        return self._pool.map(likelihood_worker, iterable)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is None:
+            self._pool.close()
+        else:
+            self._pool.terminate()
+        self._pool.join()
+        return False
+
+
 class Nautilus(abstract_nest.AbstractNest):
     __identifier_fields__ = (
         "n_live",
@@ -351,10 +398,29 @@ class Nautilus(abstract_nest.AbstractNest):
         # (`pool_l`) and makes bound training serial in the parent (`pool_s`),
         # which is negligible: 4 small MLPs fit on at most a few hundred
         # points.
+        #
+        # The pool is also built with nautilus's own `initialize_worker`, and is
+        # handed over wrapped in `_LikelihoodWorkerPool`, so that the likelihood
+        # is dispatched as `likelihood_worker`. Before a pool object was passed
+        # in place of `pool=<int>` (e6279c53f, #1439), nautilus did this itself;
+        # with a pool object it instead maps the bound `Fitness.call_wrap`, so
+        # `multiprocessing` pickles the entire analysis (dataset, PSF convolver,
+        # sparse operator, adapt images) into every task chunk and each worker
+        # unpickles a fresh copy for every likelihood call. Worker memory then
+        # grows by a few MB per call (8-core RAL runs reached the 96 GB cgroup
+        # limit) while the parent starves the pool serialising it (#1547).
         if self.number_of_cores <= 1:
             pool_context = nullcontext(None)
         else:
-            pool_context = fork_context().Pool(self.number_of_cores)
+            from nautilus.pool import initialize_worker
+
+            pool_context = _LikelihoodWorkerPool(
+                fork_context().Pool(
+                    self.number_of_cores,
+                    initializer=initialize_worker,
+                    initargs=(fitness.call_wrap,),
+                )
+            )
 
         with pool_context as pool:
             search_internal = self.sampler_cls(
