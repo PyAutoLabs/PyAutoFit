@@ -25,6 +25,10 @@ jnp = pytest.importorskip("jax.numpy")
 
 PARAMETERS = [1.0, 1.0, 1.0]
 
+#: The ceiling `autolens_profiling` opts into. PyAutoFit ships the guard off, so every
+#: enabled-path test below passes it explicitly.
+CEILING = 1.0e20
+
 #: Above the 1e20 ceiling, inside float32 range — so the value is rejected by the magnitude guard
 #: and not by the isfinite guard that precedes it.
 OVER_CEILING = 1.0e30
@@ -45,13 +49,13 @@ def test_nss_closure_rejects_a_log_likelihood_above_the_ceiling():
     The failure this exists for: a finite `3e+303` out of an fp64 Cholesky becomes the
     highest-likelihood live point, the shell log evidence explodes and the run never terminates.
     """
-    log_likelihood = _log_likelihood_from(OVER_CEILING, log_likelihood_ceiling=1.0e20)
+    log_likelihood = _log_likelihood_from(OVER_CEILING, log_likelihood_ceiling=CEILING)
 
     assert float(log_likelihood(jnp.array(PARAMETERS))) == NSS_INVALID_LOG_LIKELIHOOD
 
 
 def test_nss_closure_passes_a_log_likelihood_below_the_ceiling():
-    log_likelihood = _log_likelihood_from(UNDER_CEILING, log_likelihood_ceiling=1.0e20)
+    log_likelihood = _log_likelihood_from(UNDER_CEILING, log_likelihood_ceiling=CEILING)
 
     assert float(log_likelihood(jnp.array(PARAMETERS))) == pytest.approx(
         UNDER_CEILING, rel=1.0e-5
@@ -64,7 +68,7 @@ def test_nss_closure_still_rejects_non_finite_log_likelihoods(log_likelihood):
     The magnitude guard is added *after* the isfinite guard; the pre-existing behaviour must be
     unchanged.
     """
-    closure = _log_likelihood_from(log_likelihood, log_likelihood_ceiling=1.0e20)
+    closure = _log_likelihood_from(log_likelihood, log_likelihood_ceiling=CEILING)
 
     assert float(closure(jnp.array(PARAMETERS))) == NSS_INVALID_LOG_LIKELIHOOD
 
@@ -75,7 +79,7 @@ def test_nss_closure_sentinel_maps_to_itself():
     idempotent against the value it substitutes.
     """
     closure = _log_likelihood_from(
-        NSS_INVALID_LOG_LIKELIHOOD, log_likelihood_ceiling=1.0e20
+        NSS_INVALID_LOG_LIKELIHOOD, log_likelihood_ceiling=CEILING
     )
 
     assert float(closure(jnp.array(PARAMETERS))) == NSS_INVALID_LOG_LIKELIHOOD
@@ -89,11 +93,26 @@ def test_nss_closure_with_the_ceiling_disabled_passes_any_finite_value():
     )
 
 
-def test_nss_closure_defaults_to_the_configured_ceiling():
+def test_nss_closure_defaults_to_the_configured_ceiling_which_is_disabled():
     """
-    With no explicit ceiling the closure reads the config, so `af.NSS` picks the guard up without
-    the search having to thread it.
+    With no explicit ceiling the closure reads the config — and the packaged config ships the guard
+    **off**, because the threshold is a bare magnitude and a log likelihood scales with the
+    noise-map units. So `af.NSS` picks up "disabled" by default and an enormous finite value passes
+    through, exactly as it did before the guard existed. A config that opts in (as
+    `autolens_profiling` does) is what turns the tests above into the live behaviour.
     """
     closure = _log_likelihood_from(OVER_CEILING)
+
+    assert float(closure(jnp.array(PARAMETERS))) == pytest.approx(
+        OVER_CEILING, rel=1.0e-5
+    )
+
+
+def test_nss_closure_still_rejects_non_finite_values_with_the_ceiling_disabled():
+    """
+    Turning the magnitude guard off must not turn the isfinite guard off with it — blackjax's
+    nested-sampler arithmetic still cannot see a `NaN`.
+    """
+    closure = _log_likelihood_from(np.nan)
 
     assert float(closure(jnp.array(PARAMETERS))) == NSS_INVALID_LOG_LIKELIHOOD
