@@ -97,3 +97,162 @@ def test__single_core_builds_no_pool(monkeypatch):
     )
 
     search.fit(model=model, analysis=analysis)
+
+
+@requires_nautilus
+def test__multi_core_passes_serial_sampler_pool(monkeypatch):
+    """
+    number_of_cores > 1 must hand nautilus the tuple `(pool, None)`: the fork
+    pool for likelihood evaluations (`pool_l`) and no pool for the sampler's
+    own calculations (`pool_s`).
+
+    The pool itself is handed over wrapped in `_LikelihoodWorkerPool`, whose
+    `map` dispatches nautilus's `likelihood_worker` so the `Fitness` is not
+    pickled into every task chunk (#1547).
+
+    Nautilus otherwise trains its neural bounds on the same pool via
+    `pool.map`; a worker that dies mid-fit is replaced by
+    `multiprocessing.Pool` but its task is never re-issued, so `map` blocks
+    forever and the fit hangs (#1547).
+    """
+    from autofit.non_linear.search.nest.nautilus import search as nautilus_search
+
+    class StopFit(Exception):
+        pass
+
+    captured = {}
+
+    class StubPool:
+        _processes = 2
+
+        def close(self):
+            captured["closed"] = True
+
+        def terminate(self):
+            captured["terminated"] = True
+
+        def join(self):
+            captured["joined"] = True
+
+    class StubSampler:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            raise StopFit
+
+    class StubContext:
+        def Pool(self, number_of_cores, initializer=None, initargs=()):
+            captured["number_of_cores"] = number_of_cores
+            captured["initializer"] = initializer
+            captured["initargs"] = initargs
+            return StubPool()
+
+    monkeypatch.setattr(nautilus_search, "fork_context", lambda: StubContext())
+    monkeypatch.setattr(
+        af.Nautilus, "sampler_cls", property(lambda self: StubSampler)
+    )
+    monkeypatch.setenv("PYAUTO_TEST_MODE", "1")
+
+    model = af.Model(af.ex.Gaussian)
+    analysis = af.ex.Analysis(
+        data=np.full(100, 5.0),
+        noise_map=np.full(100, 1.0),
+    )
+
+    search = af.Nautilus(
+        name="nautilus_multi_core",
+        unique_tag="multi_core_serial_sampler_pool_test",
+        n_live=10,
+        number_of_cores=2,
+    )
+
+    with pytest.raises(StopFit):
+        search.fit(model=model, analysis=analysis)
+
+    from nautilus.pool import initialize_worker
+
+    assert captured["number_of_cores"] == 2
+    assert captured["initializer"] is initialize_worker
+    assert len(captured["initargs"]) == 1
+
+    pool = captured["pool"]
+
+    assert isinstance(pool, tuple)
+    assert pool[1] is None
+    assert isinstance(pool[0], nautilus_search._LikelihoodWorkerPool)
+    assert pool[0].size == 2
+
+    captured.clear()
+
+    search = af.Nautilus(
+        name="nautilus_single_core_pool_kwarg",
+        unique_tag="single_core_serial_sampler_pool_test",
+        n_live=10,
+        number_of_cores=1,
+    )
+
+    with pytest.raises(StopFit):
+        search.fit(model=model, analysis=analysis)
+
+    assert captured["pool"] is None
+
+
+@requires_nautilus
+def test__likelihood_pool_does_not_pickle_fitness():
+    """
+    `_LikelihoodWorkerPool.map` must ignore the function nautilus maps with and
+    dispatch `nautilus.pool.likelihood_worker`, which reads the likelihood from
+    the worker-global set by `initialize_worker` at fork time.
+
+    If the mapped function were dispatched instead, `multiprocessing` would
+    pickle the bound `Fitness.call_wrap` — and with it the analysis, dataset,
+    PSF convolver and sparse operator — into every task chunk, for every
+    likelihood call (#1547).
+    """
+    import multiprocessing
+
+    from nautilus.pool import initialize_worker
+
+    from autofit.non_linear.search.nest.nautilus.search import _LikelihoodWorkerPool
+
+    if "fork" not in multiprocessing.get_all_start_methods():
+        pytest.skip("requires the fork start method")
+
+    likelihood = _UnpicklableLikelihood()
+
+    context = multiprocessing.get_context("fork")
+    pool = context.Pool(
+        2,
+        initializer=initialize_worker,
+        initargs=(likelihood,),
+    )
+
+    try:
+        with _LikelihoodWorkerPool(pool) as wrapper:
+            assert wrapper.size == 2
+
+            result = wrapper.map(
+                _must_not_be_dispatched,
+                [(1, 2), (3, 4)],
+            )
+
+            assert list(result) == [3, 7]
+    finally:
+        pool.terminate()
+        pool.join()
+
+
+class _UnpicklableLikelihood:
+    """
+    A stand-in for the `Fitness`: it is inherited by the forked workers, but
+    raises if anything tries to pickle it into a task.
+    """
+
+    def __getstate__(self):
+        raise AssertionError("Fitness must not be pickled")
+
+    def __call__(self, args):
+        return sum(args)
+
+
+def _must_not_be_dispatched(*args):
+    raise AssertionError("the mapped function must be ignored")
