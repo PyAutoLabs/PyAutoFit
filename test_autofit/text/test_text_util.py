@@ -120,7 +120,23 @@ def _gradient_samples(model, samples_info):
     )
 
 
-def test__search_summary__nan_lane_step_counters(model):
+def _summary_file_text(samples, tmp_path, visualization_time=None) -> str:
+    """
+    The resampling lines live at the bottom of the WRITTEN summary (not in
+    ``search_summary_from_samples``), so the resampling tests go through
+    ``search_summary_to_file`` and read the file back.
+    """
+    filename = tmp_path / "search.summary"
+    text_util.search_summary_to_file(
+        samples=samples,
+        log_likelihood_function_time=1.0,
+        filename=filename,
+        visualization_time=visualization_time,
+    )
+    return filename.read_text()
+
+
+def test__search_summary__nan_lane_step_counters(model, tmp_path):
     """
     The gradient searches report both non-finite failure modes, plus rates
     normalised by lane-steps (``n_starts * total_steps``) -- raw counts are not
@@ -139,7 +155,7 @@ def test__search_summary__nan_lane_step_counters(model):
         },
     )
 
-    summary = "".join(text_util.search_summary_from_samples(samples=samples))
+    summary = _summary_file_text(samples=samples, tmp_path=tmp_path)
 
     assert "Resurrections = 40\n" in summary
     assert "Value-NaN Lane-Steps = 40\n" in summary
@@ -149,8 +165,52 @@ def test__search_summary__nan_lane_step_counters(model):
     assert "Value-NaN Lane-Step Rate = 0.05\n" in summary
     assert "Gradient-NaN Lane-Step Rate = 0.01\n" in summary
 
+    # The diagnostics close the file as their own section, not interleaved
+    # with the headline sample counts.
+    assert "\nResampling Info\nResurrections = 40\n" in summary
+    assert summary.index("Resampling Info") > summary.index(
+        "Expected Time To Run"
+    )
 
-def test__search_summary__nan_counters_absent_for_other_searches(model):
+
+def test__search_summary__resampling_info_section_at_bottom(model, tmp_path):
+    """
+    The Witness for the section move: a completed search's ``search.summary``
+    ends with a blank line after the 'Visualization Time' line, then a
+    'Resampling Info' subheader followed by the six resampling lines.
+    """
+    samples = _gradient_samples(
+        model=model,
+        samples_info={
+            "total_samples": 10,
+            "time": None,
+            "n_starts": 8,
+            "total_steps": 100,
+            "n_resurrections": 40,
+            "n_value_nan_lane_steps": 40,
+            "n_grad_nan_lane_steps": 8,
+            "n_constrained_lane_steps": 0,
+        },
+    )
+
+    summary = _summary_file_text(
+        samples=samples, tmp_path=tmp_path, visualization_time=1.0
+    )
+
+    assert summary.endswith(
+        "Visualization Time (seconds) = 1.0\n"
+        "\n"
+        "Resampling Info\n"
+        "Resurrections = 40\n"
+        "Value-NaN Lane-Steps = 40\n"
+        "Gradient-NaN Lane-Steps = 8\n"
+        "Constrained Lane-Steps = 0\n"
+        "Value-NaN Lane-Step Rate = 0.05\n"
+        "Gradient-NaN Lane-Step Rate = 0.01\n"
+    )
+
+
+def test__search_summary__nan_counters_absent_for_other_searches(model, tmp_path):
     """
     ``search_summary_from_samples`` is on EVERY search's summary path, so a
     search without the counters -- Nautilus, which is jit-only and has no
@@ -190,8 +250,13 @@ def test__search_summary__nan_counters_absent_for_other_searches(model):
     # The MCMC block it sits beside is untouched.
     assert "Total Accepted Samples = 2\n" in summary
 
+    # The written file gains no 'Resampling Info' section either -- a search
+    # without the counters must be completely unaffected, file included.
+    file_text = _summary_file_text(samples=samples, tmp_path=tmp_path)
+    assert "Resampling Info" not in file_text
 
-def test__search_summary__nan_rates_omitted_when_no_lane_steps_taken(model):
+
+def test__search_summary__nan_rates_omitted_when_no_lane_steps_taken(model, tmp_path):
     """
     A search that died before its first step has a zero denominator. The counts
     still report; the rates are omitted rather than raising ZeroDivisionError.
@@ -209,7 +274,7 @@ def test__search_summary__nan_rates_omitted_when_no_lane_steps_taken(model):
         },
     )
 
-    summary = "".join(text_util.search_summary_from_samples(samples=samples))
+    summary = _summary_file_text(samples=samples, tmp_path=tmp_path)
 
     assert "Value-NaN Lane-Steps = 0\n" in summary
     assert "Rate" not in summary
@@ -318,7 +383,7 @@ def test__search_summary__clipper_absent_for_other_searches(model):
     assert "Clipped" not in summary
 
 
-def test__search_summary__constrained_lane_steps_reported(model):
+def test__search_summary__constrained_lane_steps_reported(model, tmp_path):
     """
     The trapped-lane counter (PyAutoFit#1475) reached ``samples_info`` when it
     shipped but was never emitted, so the artefact a user reads to find out what
@@ -338,12 +403,12 @@ def test__search_summary__constrained_lane_steps_reported(model):
         },
     )
 
-    summary = "".join(text_util.search_summary_from_samples(samples=samples))
+    summary = _summary_file_text(samples=samples, tmp_path=tmp_path)
 
     assert "Constrained Lane-Steps = 667\n" in summary
 
 
-def test__search_summary__constrained_absent_when_never_written(model):
+def test__search_summary__constrained_absent_when_never_written(model, tmp_path):
     """
     A ``search_internal`` written before the trapped-lane counter existed has no
     such key. A zero it never wrote must not be reported as a measured zero --
@@ -362,6 +427,6 @@ def test__search_summary__constrained_absent_when_never_written(model):
         },
     )
 
-    summary = "".join(text_util.search_summary_from_samples(samples=samples))
+    summary = _summary_file_text(samples=samples, tmp_path=tmp_path)
 
     assert "Constrained" not in summary
