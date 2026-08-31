@@ -186,6 +186,9 @@ def test__search_summary__nan_counters_absent_for_other_searches(model):
     assert "NaN" not in summary
     assert "Resurrections" not in summary
     assert "Lane-Step" not in summary
+    assert "Total Steps" not in summary
+    assert "Stop Reason" not in summary
+    assert "per-start" not in summary
 
     # The MCMC block it sits beside is untouched.
     assert "Total Accepted Samples = 2\n" in summary
@@ -213,6 +216,109 @@ def test__search_summary__nan_rates_omitted_when_no_lane_steps_taken(model):
 
     assert "Value-NaN Lane-Steps = 0\n" in summary
     assert "Rate" not in summary
+
+
+def test__search_summary__step_count_and_stop_reason_reported(model):
+    """
+    The gradient searches report how long the run actually was. Their
+    ``Total Samples`` is 1 best + ``n_starts`` per-start final points — fixed
+    at construction, no step information — yet as the summary's one prominent
+    number it reads as a step count: a 48-start run reports 49, one below a
+    50-step quick-update cadence, and was read as the search dying at its
+    first quick-update boundary (PyAutoFit#1553). The sample count is
+    labelled with its composition and the step count / stop reason are
+    stated explicitly.
+    """
+    # 1 best + 8 per-start final points, matching ``n_starts`` below — the
+    # composition label is only emitted where its arithmetic actually holds.
+    parameters = [[float(i), float(i)] for i in range(9)]
+
+    samples = af.m.MockSamples(
+        model=model,
+        sample_list=af.Sample.from_lists(
+            parameter_lists=parameters,
+            log_likelihood_list=[1.0] + [0.0] * 8,
+            log_prior_list=[0.0] * 9,
+            weight_list=[1.0] + [0.0] * 8,
+            model=model,
+        ),
+        samples_info={
+            "total_samples": 9,
+            "time": None,
+            "n_starts": 8,
+            "total_steps": 300,
+            "stop_reason": "max_steps",
+            "n_resurrections": 0,
+            "n_value_nan_lane_steps": 0,
+            "n_grad_nan_lane_steps": 0,
+        },
+    )
+
+    summary = "".join(text_util.search_summary_from_samples(samples=samples))
+
+    assert (
+        "Total Samples = 9 (1 best + 8 per-start final points; "
+        "not a step count)\n" in summary
+    )
+    assert "Total Steps = 300\n" in summary
+    assert "Stop Reason = max_steps\n" in summary
+
+
+def test__search_summary__composition_omitted_when_arithmetic_does_not_hold(model):
+    """
+    The per-start rows carry weight 0 and are pruned by the samples-weight
+    threshold on write, so RELOADED samples (a completed fit re-run, the
+    aggregator) arrive with fewer rows than ``1 + n_starts``; and ``n_starts``
+    is outside the search identifier, so a re-run at a different ``n_starts``
+    reads a stored ``samples_info`` whose composition never matches. On those
+    paths the composition label would be self-contradictory, so the sample
+    count stays plain — the step count still reports.
+    """
+    samples = _gradient_samples(
+        model=model,
+        samples_info={
+            "total_samples": 9,
+            "time": None,
+            "n_starts": 8,
+            "total_steps": 300,
+            "stop_reason": "max_steps",
+            "n_resurrections": 0,
+            "n_value_nan_lane_steps": 0,
+            "n_grad_nan_lane_steps": 0,
+        },
+    )
+
+    # ``total_samples`` is ``len(sample_list)`` — 2 in this mock, != 1 + 8.
+    summary = "".join(text_util.search_summary_from_samples(samples=samples))
+
+    assert "Total Samples = 2\n" in summary
+    assert "per-start" not in summary
+    assert "Total Steps = 300\n" in summary
+
+
+def test__search_summary__stop_reason_omitted_when_never_written(model):
+    """
+    A ``search_internal`` written before auto-convergence existed carries no
+    ``stop_reason``; a reason the run never recorded is omitted rather than
+    reported as ``None``. The step count still reports.
+    """
+    samples = _gradient_samples(
+        model=model,
+        samples_info={
+            "total_samples": 10,
+            "time": None,
+            "n_starts": 8,
+            "total_steps": 100,
+            "n_resurrections": 0,
+            "n_value_nan_lane_steps": 0,
+            "n_grad_nan_lane_steps": 0,
+        },
+    )
+
+    summary = "".join(text_util.search_summary_from_samples(samples=samples))
+
+    assert "Total Steps = 100\n" in summary
+    assert "Stop Reason" not in summary
 
 
 def test__search_summary__clipper_none_emits_nothing(model):

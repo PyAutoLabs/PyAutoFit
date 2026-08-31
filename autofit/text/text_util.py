@@ -223,6 +223,41 @@ def search_summary_from_samples(samples) -> [str]:
         n_value_nan = int(samples_info.get("n_value_nan_lane_steps", 0))
         n_grad_nan = int(samples_info.get("n_grad_nan_lane_steps", 0))
 
+        # For these searches ``Total Samples`` is 1 best + ``n_starts``
+        # per-start final points — a count fixed at construction that carries
+        # no information about how long the search ran. As the summary's one
+        # prominent number it reads as a step count anyway: a 48-start run
+        # reports 49, one below a 50-step quick-update cadence, and was read
+        # as the search dying at its first quick-update boundary
+        # (PyAutoFit#1553). So the sample count is labelled with its
+        # composition and the run's real length is stated explicitly.
+        #
+        # The composition is asserted only where it actually holds. The
+        # per-start rows carry weight 0 and are pruned by the samples-weight
+        # threshold on write, so RELOADED samples (a completed fit re-run, the
+        # aggregator) arrive here with ``total_samples == 1``; and ``n_starts``
+        # is outside the search identifier, so a re-run at a different
+        # ``n_starts`` reads a stored ``samples_info`` whose composition never
+        # matches. Printing "1 (1 best + 48 per-start final points)" on those
+        # paths would be self-contradictory — worse than the ambiguity this
+        # line exists to remove.
+        if (
+            "n_starts" in samples_info
+            and samples.total_samples == int(samples_info["n_starts"]) + 1
+        ):
+            line[0] = (
+                f"Total Samples = {samples.total_samples} "
+                f"(1 best + {int(samples_info['n_starts'])} per-start final "
+                f"points; not a step count)\n"
+            )
+        if "total_steps" in samples_info:
+            line.append(f"Total Steps = {int(samples_info['total_steps'])}\n")
+        # ``.get``: a ``search_internal`` written before auto-convergence
+        # existed carries no ``stop_reason``; a reason it never recorded is
+        # omitted rather than reported as ``None``.
+        if samples_info.get("stop_reason") is not None:
+            line.append(f"Stop Reason = {samples_info['stop_reason']}\n")
+
         line.append(f"Resurrections = {int(samples_info.get('n_resurrections', 0))}\n")
         line.append(f"Value-NaN Lane-Steps = {n_value_nan}\n")
         line.append(f"Gradient-NaN Lane-Steps = {n_grad_nan}\n")
