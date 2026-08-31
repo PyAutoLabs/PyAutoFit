@@ -31,12 +31,12 @@ EXEMPT = {
         "search's own outer loop instead: `iterations_per_quick_update` is "
         "consumed directly in `_fit` via `_fire_quick_update`."
     ),
-    "mle/multi_start_gradient/search.py": (
-        "MultiStartGradient differentiates `fitness.call` inside its own "
-        "jit/vmap step loop, so the Python-side counter in `call_wrap` would run "
-        "once at trace time rather than per step. Its progress reporting is "
-        "handled separately -- see PyAutoFit#1433."
-    ),
+    # mle/multi_start_gradient/search.py was exempt here from PyAutoFit#1433
+    # (its `fitness.call` is differentiated inside jit/vmap, so the counter in
+    # `call_wrap` cannot run) until PyAutoFit#1552 wired the cadence through
+    # the host-side step loop instead: the search now forwards the kwarg to its
+    # `Fitness` and feeds the counter one gradient step at a time via
+    # `_manage_quick_update_step`.
 }
 
 
