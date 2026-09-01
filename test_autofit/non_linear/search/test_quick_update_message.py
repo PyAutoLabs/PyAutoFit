@@ -22,13 +22,25 @@ def test__real_cadence_renders_as_a_plain_integer():
     # The knob is stored as a float (so ``search.json`` keeps a readable
     # ``1e99`` rather than a 99-digit integer), so the message has to cast --
     # otherwise a user configuring 250000 is told "every 250000.0 iterations".
-    search = af.MultiStartAdam(n_steps=3000, iterations_per_quick_update=250000)
+    search = af.Emcee(iterations_per_quick_update=250000)
 
     assert isinstance(search.iterations_per_quick_update, float)
 
     message = search.quick_update_message
 
     assert "every 250000 iterations" in message
+    assert "250000.0" not in message
+    assert "disabled" not in message
+
+    # The multi-start gradient searches drive the cadence from their own step
+    # loop, so their override reports the unit they actually count in --
+    # gradient steps, not per-evaluation iterations (PyAutoFit#1552) -- and
+    # must make the same integer cast.
+    search = af.MultiStartAdam(n_steps=3000, iterations_per_quick_update=250000)
+
+    message = search.quick_update_message
+
+    assert "every 250000 gradient steps" in message
     assert "250000.0" not in message
     assert "disabled" not in message
 
@@ -65,6 +77,10 @@ def test__any_never_sized_cadence_reads_as_disabled(never):
 def test__a_cadence_of_one_still_reads_as_a_number():
     # Guards the boundary from the other side: the disabled branch must not
     # swallow small real cadences.
-    search = af.MultiStartAdam(n_steps=300, iterations_per_quick_update=1)
+    search = af.Emcee(iterations_per_quick_update=1)
 
     assert "every 1 iterations" in search.quick_update_message
+
+    search = af.MultiStartAdam(n_steps=300, iterations_per_quick_update=1)
+
+    assert "every 1 gradient steps" in search.quick_update_message

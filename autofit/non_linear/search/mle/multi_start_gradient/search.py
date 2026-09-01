@@ -8,6 +8,7 @@ import numpy as np
 
 
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
+from autofit.non_linear.search.abstract_search import ITERATIONS_NEVER
 from autofit.non_linear.search.mle.abstract_mle import AbstractMLE
 from autofit.non_linear.analysis import Analysis
 from autofit.non_linear.fitness import Fitness
@@ -311,13 +312,15 @@ class AbstractMultiStartGradient(AbstractMLE):
             "... sampling complete", which on a long fit leaves a user unable to
             tell a live search from a hung one.
 
-            Neither of the framework's usual progress channels reaches this
-            search, which is why it needs its own: ``iterations_per_full_update``
+            The framework's usual progress channels need help to reach this
+            search, which is why it has its own: ``iterations_per_full_update``
             defaults to the never-sentinel, so the whole run is a single chunk
             whose lone ``perform_update`` is (correctly) suppressed as duplicated
-            work; and ``Fitness``'s quick-update counter is Python state mutated
-            inside ``fitness.call``, which is traced under ``jax.jit(jax.vmap(…))``
-            here — it runs once at trace time and never again. The samplers dodge
+            work; and ``Fitness``'s own quick-update counter is Python state
+            mutated inside ``fitness.call``, which is traced under
+            ``jax.jit(jax.vmap(…))`` here — it would run once at trace time and
+            never again, so the step loop feeds the quick-update cadence itself
+            (see ``iterations_per_quick_update`` below). The samplers dodge
             the problem entirely by delegating to their own library's progress bar
             (emcee ``progress=True``, dynesty ``print_progress``); a search that
             owns its step loop has to report for itself.
@@ -328,6 +331,28 @@ class AbstractMultiStartGradient(AbstractMLE):
             than a progress bar: ``n_steps`` is a ceiling that auto-convergence
             routinely stops short of, so a bar's ETA would mislead, and lines
             survive SLURM/HPC log capture where bars do not.
+        iterations_per_quick_update
+            How many **gradient steps** pass between on-the-fly quick updates
+            of the maximum likelihood model (``analysis.perform_quick_update``
+            on the current global-best point: the fast max-likelihood
+            visualization, e.g. a ``fit.png``, plus the live display paths
+            below). The unit is deliberately NOT the per-evaluation counting
+            ``Fitness`` does for the searches that count inside
+            ``Fitness.call_wrap`` — there a batch of ``n_starts`` evaluations
+            advances the counter by ``n_starts``, so a cadence of 50 with 48
+            starts would fire roughly every second step. Here one gradient
+            step (which evaluates all ``n_starts`` lanes at once) advances the
+            counter by exactly one, driven from the host-side step loop via
+            ``_manage_quick_update_step`` because the traced
+            ``fitness.call`` cannot count (see ``iterations_per_log`` above).
+            Terminal steps skip the quick update — the framework performs the
+            full final update unconditionally when ``_fit`` returns.
+        live_visual_update
+            If ``True``, each quick update also refreshes a live view of the
+            fit (a matplotlib window in script mode, an in-place refreshed
+            cell in a notebook), through the same LiveDisplay /
+            BackgroundQuickUpdate machinery every other search uses. Requires
+            a finite ``iterations_per_quick_update``.
         """
 
         super().__init__(
@@ -428,6 +453,81 @@ class AbstractMultiStartGradient(AbstractMLE):
         ``Analysis`` and cannot be driven from the NumPy-only library suite.
         """
         return bool(converged) or total_steps >= self.n_steps
+
+    @property
+    def quick_update_message(self) -> str:
+        """
+        The base-class message calls the cadence unit "iterations", which for
+        the searches that count inside ``Fitness.call_wrap`` means likelihood
+        evaluations — counted per batch, so ``n_starts`` at a time. This search
+        drives the cadence from its own host-side step loop instead (see
+        ``_manage_quick_update_step``), where the unit is **gradient steps**,
+        each of which evaluates all ``n_starts`` lanes at once. Saying so keeps
+        the startup line honest: before PyAutoFit#1552 this line announced a
+        cadence these searches then silently ignored, and a unit the search
+        does not count in is only a smaller version of the same false claim.
+        """
+        iterations = self.iterations_per_quick_update
+
+        if not np.isfinite(iterations) or iterations >= ITERATIONS_NEVER:
+            return super().quick_update_message
+
+        return (
+            "On-the-fly updates of the maximum likelihood model every "
+            f"{int(iterations)} gradient steps (each step evaluates all "
+            f"{self.n_starts} starts; progress log lines follow the separate "
+            "`iterations_per_log` cadence)."
+        )
+
+    def _manage_quick_update_step(self, fitness: Fitness, best_params, best_fom):
+        """
+        Feed one gradient step into ``Fitness``'s quick-update machinery.
+
+        ``fitness.call`` is traced under ``jax.jit(jax.vmap(...))`` here, so
+        the usual counting in ``Fitness.call_wrap`` can never run — the
+        Python-side counter would tick once at trace time and never again,
+        which is why these searches ignored ``iterations_per_quick_update``
+        entirely before PyAutoFit#1552. The step loop is plain host Python
+        (the same seam ``iterations_per_log`` uses), so the cadence is driven
+        from it instead: one call per step, passing the current global-best
+        point as a single scalar evaluation, which makes
+        ``Fitness.quick_update_count`` count **gradient steps** — each of
+        which evaluates all ``n_starts`` lanes — rather than the
+        per-evaluation batch counting the ``call_wrap`` searches get. The two
+        countings never mix: this search's evaluations bypass ``call_wrap``
+        by construction, so this is the sole feeder of the counter. The fire
+        path itself (``analysis.perform_quick_update``, the results text,
+        LiveDisplay / BackgroundQuickUpdate) runs unmodified.
+
+        Skipped while the global best is not yet finite: there is no model
+        worth visualizing before the first finite evaluation, and firing would
+        hand ``instance_from_vector`` a ``None``. In practice
+        ``_broad_starts`` filters the initial draws to finite objectives, so
+        the guard only bites on a run whose every lane dies immediately.
+
+        Parameters
+        ----------
+        fitness
+            The ``Fitness`` built by ``_fit``, carrying the quick-update
+            cadence and display machinery.
+        best_params
+            The global-best parameter vector, in PHYSICAL units (the loop
+            maintains that invariant for ``samples_via_internal_from``).
+        best_fom
+            The global-best figure of merit (``-2 * log_posterior``).
+        """
+        if fitness.iterations_per_quick_update is None:
+            return
+
+        if not np.isfinite(best_fom):
+            return
+
+        log_likelihood = fitness.log_likelihood_from(
+            figure_of_merit=best_fom, parameters=best_params
+        )
+        fitness.manage_quick_update(
+            parameters=best_params, log_likelihood=float(log_likelihood)
+        )
 
     @staticmethod
     def _nan_lane_counts(foms, grad_finite):
@@ -813,6 +913,23 @@ class AbstractMultiStartGradient(AbstractMLE):
                 "backend."
             )
 
+        # ``fitness.call`` is differentiated inside ``jax.jit(jax.vmap(...))``
+        # below, so the per-evaluation quick-update counting that fires from
+        # ``Fitness.call_wrap`` can never run here — the step loop drives the
+        # cadence itself via ``_manage_quick_update_step`` (one count per
+        # gradient step). The kwargs are still forwarded so ``Fitness`` owns
+        # the LiveDisplay / BackgroundQuickUpdate setup through the exact path
+        # every other search uses. The never-sentinel maps to ``None`` so a
+        # disabled cadence is disabled *inside* ``Fitness`` too: no
+        # visualization warm-up at construction, and
+        # ``_manage_quick_update_step`` short-circuits to zero per-step work.
+        iterations_per_quick_update = (
+            None
+            if not np.isfinite(self.iterations_per_quick_update)
+            or self.iterations_per_quick_update >= ITERATIONS_NEVER
+            else self.iterations_per_quick_update
+        )
+
         fitness = Fitness(
             model=model,
             analysis=analysis,
@@ -820,6 +937,9 @@ class AbstractMultiStartGradient(AbstractMLE):
             fom_is_log_likelihood=False,
             resample_figure_of_merit=-np.inf,
             convert_to_chi_squared=True,
+            iterations_per_quick_update=iterations_per_quick_update,
+            background_quick_update=self.quick_update_background,
+            live_visual_update=self.live_visual_update,
         )
 
         # -2 * log_posterior, to MINIMIZE. value_and_grad over every start.
@@ -1432,6 +1552,21 @@ class AbstractMultiStartGradient(AbstractMLE):
                     )
                     previous_logged_fom = best_fom
 
+                # On-the-fly quick updates, at ``iterations_per_quick_update``
+                # cadence in GRADIENT STEPS (see ``_manage_quick_update_step``).
+                # Skipped at a terminal step for the same reason
+                # ``perform_update`` is skipped at a terminal boundary below:
+                # ``start_resume_fit`` performs the final update unconditionally
+                # the moment ``_fit`` returns, so one here is duplicated work.
+                if not self._is_final_boundary(
+                    converged=converged, total_steps=total_steps
+                ):
+                    self._manage_quick_update_step(
+                        fitness=fitness,
+                        best_params=best_params,
+                        best_fom=best_fom,
+                    )
+
                 if converged:
                     break
 
@@ -1539,6 +1674,16 @@ class AbstractMultiStartGradient(AbstractMLE):
                 )
 
         self.logger.info(f"{self.optax_method} MultiStartGradient sampling complete.")
+
+        # The step loop above is the sole feeder of the quick-update counter
+        # (the traced ``fitness.call`` bypasses ``call_wrap``), but the final
+        # update's likelihood profiling calls ``fitness.call_wrap`` directly
+        # after ``_fit`` returns — and those evaluations would keep advancing
+        # the counter and could fire a quick update the unconditional final
+        # update supersedes. Disabling the cadence here closes that path; the
+        # display machinery is shut down separately by ``start_resume_fit``
+        # via ``shutdown_quick_update``.
+        fitness.iterations_per_quick_update = None
 
         return search_internal, fitness
 

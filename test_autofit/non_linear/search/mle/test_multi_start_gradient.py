@@ -19,7 +19,12 @@ from autonerves.dictable import from_dict, to_dict
 # plumbing (config knobs, dict round-trip, and the internal-results -> Samples
 # mapping) is pure NumPy and is tested here. The end-to-end JAX/optax fit that
 # recovers a truth basin is validated in autofit_workspace_test, keeping JAX out
-# of the library unit suite.
+# of the library unit suite — with one deliberate exception: the quick-update
+# cadence tests at the bottom of this file drive the real step loop (guarded by
+# `pytest.importorskip`), because the defect they pin (PyAutoFit#1552: the
+# cadence announced in the startup log silently never fired) lived precisely in
+# the gap between the constructed knobs and the running loop, which no
+# source-level or plumbing check can see.
 
 pytestmark = pytest.mark.filterwarnings("ignore::FutureWarning")
 
@@ -1425,3 +1430,146 @@ def test__a_logit_on_the_ell_comps_pair_is_refused_before_the_first_step():
         )
 
     assert "(0, 1)" in str(exc_info.value)
+
+
+# --------------------------------------------------------------------------
+# Quick-update wiring (PyAutoFit#1552). These drive the REAL step loop — the
+# file-header exception — because the defect lived between the constructed
+# knobs and the running loop: `iterations_per_quick_update` was accepted,
+# stored and announced in the startup log, and then never fired, since the
+# counter in `Fitness.call_wrap` sits inside the jit/vmap trace.
+# --------------------------------------------------------------------------
+
+
+def _quick_update_fit(n_steps, iterations_per_quick_update=None, name=None):
+    """Run a real (tiny) MultiStartAdam fit on a JAX-traceable quadratic and
+    return how many times `analysis.perform_quick_update` fired.
+
+    The count lives in a closure list rather than on the analysis instance so
+    the assertion cannot be defeated by the framework copying the analysis
+    between construction and the step loop.
+    """
+    pytest.importorskip("jax")
+    pytest.importorskip("optax")
+
+    calls = []
+
+    class QuickUpdateCountingAnalysis(af.Analysis):
+        def log_likelihood_function(self, instance):
+            xp = self._xp
+            values = xp.asarray([instance.one, instance.two])
+            return -0.5 * xp.sum(values**2)
+
+        def perform_quick_update(self, paths, instance):
+            calls.append(instance)
+
+    model = af.Model(af.m.MockClassx2)
+    model.one = af.UniformPrior(lower_limit=-5.0, upper_limit=5.0)
+    model.two = af.UniformPrior(lower_limit=-5.0, upper_limit=5.0)
+
+    search = af.MultiStartAdam(
+        name=name,
+        n_starts=4,
+        n_steps=n_steps,
+        iterations_per_quick_update=iterations_per_quick_update,
+    )
+
+    search.fit(model=model, analysis=QuickUpdateCountingAnalysis(use_jax=True))
+
+    return calls
+
+
+def test__quick_update__fires_once_per_cadence_boundary_in_gradient_steps():
+    """The Witness of the fix: a finite cadence fires `perform_quick_update`
+    once per cadence boundary of the step loop, counted in GRADIENT STEPS.
+
+    n_steps=7 at a cadence of 3 fires at steps 3 and 6 (step 7 is terminal —
+    covered by the framework's unconditional final update). The same run under
+    the per-evaluation batch counting `Fitness` does for the `call_wrap`
+    searches would advance the counter by `n_starts=4 >= 3` every step and
+    fire at every non-terminal step: asserting exactly 2 pins the unit as
+    well as the wiring.
+    """
+    calls = _quick_update_fit(
+        n_steps=7, iterations_per_quick_update=3, name="quick_update_cadence"
+    )
+
+    assert len(calls) == 2
+
+
+def test__quick_update__terminal_boundary_is_skipped():
+    """A cadence boundary that lands on the final step must NOT fire:
+    `start_resume_fit` performs the full final update unconditionally the
+    moment `_fit` returns, so a quick update there is duplicated work (the
+    same doctrine as `_is_final_boundary` skipping `perform_update`)."""
+    calls = _quick_update_fit(
+        n_steps=6, iterations_per_quick_update=3, name="quick_update_terminal"
+    )
+
+    assert len(calls) == 1
+
+
+def test__quick_update__default_never_sentinel_stays_silent():
+    """The packaged default is the `ITERATIONS_NEVER` sentinel: no quick
+    update fires, and (because `_fit` maps the sentinel to `None` before
+    building its `Fitness`) none of the quick-update machinery — warm-up
+    included — is set up for a run that never uses it."""
+    calls = _quick_update_fit(n_steps=4, name="quick_update_disabled")
+
+    assert len(calls) == 0
+
+
+def test__quick_update_message__states_the_gradient_step_unit():
+    """The startup line was the false claim of PyAutoFit#1552 — and once the
+    cadence is real, announcing it in a unit the search does not count in
+    would be a smaller version of the same lie. The override states the unit;
+    the disabled branch defers to the base-class message."""
+    search = af.MultiStartAdam(n_starts=8, iterations_per_quick_update=50)
+
+    assert "every 50 gradient steps" in search.quick_update_message
+    assert "8 starts" in search.quick_update_message
+
+    disabled = af.MultiStartAdam()
+
+    assert "disabled" in disabled.quick_update_message
+
+
+def test__manage_quick_update_step__guards_the_disabled_and_prestart_states():
+    """The per-step feeder must cost nothing when the cadence is off, and must
+    not hand `instance_from_vector` a `None` before the first finite
+    evaluation (a run whose every lane dies immediately)."""
+
+    class RecordingFitness:
+        def __init__(self, iterations_per_quick_update):
+            self.iterations_per_quick_update = iterations_per_quick_update
+            self.fed = []
+
+        def log_likelihood_from(self, figure_of_merit, parameters):
+            return -0.5 * figure_of_merit
+
+        def manage_quick_update(self, parameters, log_likelihood):
+            self.fed.append((parameters, log_likelihood))
+
+    search = af.MultiStartAdam()
+    params = np.array([0.1, 0.2])
+
+    disabled = RecordingFitness(iterations_per_quick_update=None)
+    search._manage_quick_update_step(
+        fitness=disabled, best_params=params, best_fom=1.0
+    )
+    assert disabled.fed == []
+
+    prestart = RecordingFitness(iterations_per_quick_update=3)
+    search._manage_quick_update_step(
+        fitness=prestart, best_params=params, best_fom=np.inf
+    )
+    assert prestart.fed == []
+
+    live = RecordingFitness(iterations_per_quick_update=3)
+    search._manage_quick_update_step(
+        fitness=live, best_params=params, best_fom=4.0
+    )
+    assert len(live.fed) == 1
+    fed_params, fed_log_likelihood = live.fed[0]
+    assert fed_params is params
+    assert fed_log_likelihood == -2.0
