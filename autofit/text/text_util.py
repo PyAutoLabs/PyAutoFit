@@ -196,56 +196,71 @@ def _scaler_summary_from(samples_info) -> [str]:
     return [f"Scaler = {scaler}\n"]
 
 
+def _resampling_summary_from(samples_info) -> [str]:
+    """
+    The ``search.summary`` resampling lines from the gradient searches
+    (``MultiStartGradient``), or none.
+
+    Guarded on the key rather than the search type, following the duck-typed
+    MCMC block in ``search_summary_from_samples``: every search's summary path
+    (``paths/abstract.py`` -> ``search_summary_to_file``) reaches this, so a
+    search whose ``samples_info`` lacks these keys — Nautilus, which is
+    jit-only and has no gradient to be non-finite — must emit nothing at all.
+
+    Rates, not just counts: raw totals are not comparable across runs, since
+    they scale with the lane-step budget. 797 on a 16x3000 run and 10 on an
+    8x300 run differ 80x raw but only ~2x per lane-step.
+
+    Named as the neutral facts they are. These are counts of undefined and
+    non-differentiable likelihood evaluations; they are deliberately NOT
+    presented as a smoothness or sampler-difficulty metric, because the
+    correlation with (for example) HMC divergence rates is unvalidated.
+
+    These lines are diagnostics, not headline results, so they are placed by
+    ``search_summary_to_file`` at the bottom of ``search.summary`` under a
+    ``Resampling Info`` subheader rather than between the sample counts and
+    the timing lines.
+    """
+    if "n_value_nan_lane_steps" not in samples_info:
+        return []
+
+    n_value_nan = int(samples_info.get("n_value_nan_lane_steps", 0))
+    n_grad_nan = int(samples_info.get("n_grad_nan_lane_steps", 0))
+
+    line = [f"Resurrections = {int(samples_info.get('n_resurrections', 0))}\n"]
+    line.append(f"Value-NaN Lane-Steps = {n_value_nan}\n")
+    line.append(f"Gradient-NaN Lane-Steps = {n_grad_nan}\n")
+
+    # The trapped-lane counter (PyAutoFit#1475). It reached ``samples_info``
+    # when it shipped but was never emitted here, so the one artefact a user
+    # reads to find out what the search did did not report it. Keyed
+    # separately from the NaN counters because a ``search_internal`` written
+    # before it existed has no such key, and a zero it never wrote must not
+    # be reported as a measured zero.
+    if "n_constrained_lane_steps" in samples_info:
+        n_constrained = int(samples_info["n_constrained_lane_steps"])
+        line.append(f"Constrained Lane-Steps = {n_constrained}\n")
+
+    # ``n_starts * total_steps`` is the number of lane-steps actually taken.
+    # A search that died before its first step has a zero denominator, so
+    # the rates are omitted rather than reported as a division error.
+    lane_steps = int(samples_info.get("n_starts", 0)) * int(
+        samples_info.get("total_steps", 0)
+    )
+    if lane_steps > 0:
+        line.append(f"Value-NaN Lane-Step Rate = {n_value_nan / lane_steps}\n")
+        line.append(f"Gradient-NaN Lane-Step Rate = {n_grad_nan / lane_steps}\n")
+
+    return line
+
+
 def search_summary_from_samples(samples) -> [str]:
     line = [f"Total Samples = {samples.total_samples}\n"]
     if hasattr(samples, "total_accepted_samples"):
         line.append(f"Total Accepted Samples = {samples.total_accepted_samples}\n")
         line.append(f"Acceptance Ratio = {samples.acceptance_ratio}\n")
 
-    # Per-step non-finite accounting from the gradient searches
-    # (``MultiStartGradient``). Guarded on the key rather than the search type,
-    # following the duck-typed MCMC block above: this function is on every
-    # search's summary path (``paths/abstract.py`` -> ``search_summary_to_file``),
-    # so a search whose ``samples_info`` lacks these keys — Nautilus, which is
-    # jit-only and has no gradient to be non-finite — must emit nothing at all.
-    #
-    # Rates, not just counts: raw totals are not comparable across runs, since
-    # they scale with the lane-step budget. 797 on a 16x3000 run and 10 on an
-    # 8x300 run differ 80x raw but only ~2x per lane-step.
-    #
-    # Named as the neutral facts they are. These are counts of undefined and
-    # non-differentiable likelihood evaluations; they are deliberately NOT
-    # presented as a smoothness or sampler-difficulty metric, because the
-    # correlation with (for example) HMC divergence rates is unvalidated.
     samples_info = getattr(samples, "samples_info", None) or {}
-
-    if "n_value_nan_lane_steps" in samples_info:
-        n_value_nan = int(samples_info.get("n_value_nan_lane_steps", 0))
-        n_grad_nan = int(samples_info.get("n_grad_nan_lane_steps", 0))
-
-        line.append(f"Resurrections = {int(samples_info.get('n_resurrections', 0))}\n")
-        line.append(f"Value-NaN Lane-Steps = {n_value_nan}\n")
-        line.append(f"Gradient-NaN Lane-Steps = {n_grad_nan}\n")
-
-        # The trapped-lane counter (PyAutoFit#1475). It reached ``samples_info``
-        # when it shipped but was never emitted here, so the one artefact a user
-        # reads to find out what the search did did not report it. Keyed
-        # separately from the NaN counters because a ``search_internal`` written
-        # before it existed has no such key, and a zero it never wrote must not
-        # be reported as a measured zero.
-        if "n_constrained_lane_steps" in samples_info:
-            n_constrained = int(samples_info["n_constrained_lane_steps"])
-            line.append(f"Constrained Lane-Steps = {n_constrained}\n")
-
-        # ``n_starts * total_steps`` is the number of lane-steps actually taken.
-        # A search that died before its first step has a zero denominator, so
-        # the rates are omitted rather than reported as a division error.
-        lane_steps = int(samples_info.get("n_starts", 0)) * int(
-            samples_info.get("total_steps", 0)
-        )
-        if lane_steps > 0:
-            line.append(f"Value-NaN Lane-Step Rate = {n_value_nan / lane_steps}\n")
-            line.append(f"Gradient-NaN Lane-Step Rate = {n_grad_nan / lane_steps}\n")
 
     line += _clipper_summary_from(samples_info=samples_info)
     line += _scaler_summary_from(samples_info=samples_info)
@@ -284,6 +299,19 @@ def search_summary_to_file(
 
     if visualization_time is not None:
         summary.append(f"Visualization Time (seconds) = {visualization_time}")
+
+    # The resampling diagnostics close the file, one blank line after the
+    # timing lines. The 'Visualization Time' line above carries no trailing
+    # newline while every other tail line does, so the separator first ends
+    # the previous line where needed and then inserts the one empty line.
+    resampling = _resampling_summary_from(
+        samples_info=getattr(samples, "samples_info", None) or {}
+    )
+    if resampling:
+        if summary and not summary[-1].endswith("\n"):
+            summary.append("\n")
+        summary.append("\nResampling Info\n")
+        summary += resampling
 
     frm.output_list_of_strings_to_file(file=filename, list_of_strings=summary)
 
