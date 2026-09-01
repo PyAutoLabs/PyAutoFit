@@ -76,13 +76,12 @@ def test__quick_update_mid_search_does_not_end_the_search():
     assert int(search_internal["total_steps"]) == 60
     assert search_internal["stop_reason"] == "max_steps"
 
-    # Today the cadence is INERT for this family: the search is an ``EXEMPT``
-    # entry in ``test_quick_update_wiring.py`` (the traced ``fitness.call``
-    # cannot count Python-side), so no quick update fires at all — asserted,
-    # so this test is sensitive to the knob's state rather than vacuously
-    # green. The change that wires real quick updates into the step loop MUST
-    # flip this to assert the updates FIRED (> 0) while keeping the two
-    # ceiling asserts above unchanged — that is the moment "a quick update
-    # mid-search does not end the search" is exercised for real, and a silent
-    # no-op (the PyAutoFit#1434 failure class) becomes a loud failure here.
-    assert analysis.quick_update_count == 0
+    # The cadence is LIVE for this family since the multi-start step loop
+    # wires ``iterations_per_quick_update`` (PyAutoFit#1552): quick updates
+    # fire at the cadence boundaries, and the two ceiling asserts above prove
+    # firing mid-search does not end the search — the real exercise of "a
+    # quick update mid-search does not end the search", where a silent no-op
+    # (the PyAutoFit#1434 failure class) or a boundary-triggered stop both
+    # fail loudly. This flipped the inertness tripwire the test originally
+    # carried (``== 0``), exactly as that tripwire's comment demanded.
+    assert analysis.quick_update_count > 0
