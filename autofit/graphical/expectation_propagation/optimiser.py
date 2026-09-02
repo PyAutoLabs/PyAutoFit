@@ -247,6 +247,7 @@ class EPOptimiser:
         # one successful update; together these identify a factor whose message
         # is still the one it started with. See `_stale_factor_warnings`.
         self._factors_raised: Set[Factor] = set()
+        self._factors_skipped: Set[Factor] = set()
         self._factors_updated: Set[Factor] = set()
 
         self.visualiser = None
@@ -395,7 +396,12 @@ class EPOptimiser:
                 )
                 return True
         else:
-            self._factors_updated.add(factor)
+            if status.updated:
+                self._factors_updated.add(factor)
+            else:
+                # A skipped update (failed line search, bad projection): the
+                # message is unchanged, so this does not count as an update.
+                self._factors_skipped.add(factor)
             self._consecutive_failures.pop(factor, None)
 
         return False
@@ -416,18 +422,20 @@ class EPOptimiser:
         strings are logged as warnings and written into `ep_diagnostics.results`
         alongside the sigma-collapse warnings.
 
-        The condition is deliberately narrow: a factor that raised at least once
+        The condition is deliberately narrow: a factor that raised, or whose
+        update was skipped (failed line search, bad projection), at least once
         and *never once* updated. A factor that failed intermittently but landed
         at least one update has a real message and is not reported.
         """
-        stale = self._factors_raised - self._factors_updated
+        stale = (self._factors_raised | self._factors_skipped) - self._factors_updated
         if not stale:
             return []
 
         names = ", ".join(sorted(factor.name for factor in stale))
         return [
             f"STALE FACTORS: {names} never completed a single update — their "
-            f"optimisers raised on every sweep. The mean field returned for "
+            f"optimisers raised or their updates were skipped on every sweep. "
+            f"The mean field returned for "
             f"them is the prior the fit started with, not a posterior. Do not "
             f"read those values as a result. Note that EP may also report "
             f"convergence in this state: with no factor updating, the KL step "
@@ -489,6 +497,7 @@ class EPOptimiser:
 
         self._consecutive_failures = {}
         self._factors_raised = set()
+        self._factors_skipped = set()
         self._factors_updated = set()
 
         for _ in range(max_steps):
@@ -674,6 +683,7 @@ class ParallelEPOptimiser(EPOptimiser):
 
         self._consecutive_failures = {}
         self._factors_raised = set()
+        self._factors_skipped = set()
         self._factors_updated = set()
 
         for _ in range(max_steps):

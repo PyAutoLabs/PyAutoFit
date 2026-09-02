@@ -112,5 +112,10 @@ def test__dead_newton_variants_removed():
 
     for dead in ("diag_sr1_update_", "diag_sr1_bfgs_update", "bfgs1_update"):
         assert not hasattr(newton, dead)
-    for alive in ("bfgs_update", "sr1_update", "full_bfgs_update"):
+    for alive in (
+        "bfgs_update",
+        "sr1_update",
+        "full_bfgs_update",
+        "finite_difference_hessian",
+    ):
         assert hasattr(newton, alive)

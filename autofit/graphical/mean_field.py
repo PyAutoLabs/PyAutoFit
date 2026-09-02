@@ -374,8 +374,12 @@ class MeanField(Collection, Dict[Variable, AbstractMessage], Factor):
         return self.from_mode_covariance(res.mode, res.hess_inv, res.log_norm)
 
     def from_opt_state(self, state):
+        # Per-variable marginal blocks of the inverse Hessian: a full (e.g.
+        # Cholesky-factorised) Hessian is inverted as one matrix so that its
+        # off-diagonal coupling is accounted for; only the diagonal of each
+        # block is consumed by `from_mode`.
         return self.from_mode_covariance(
-            state.all_parameters, state.full_hessian.inv(), state.value
+            state.all_parameters, state.inv_hessian_blocks(), state.value
         )
 
     def from_mode_covariance(
@@ -477,6 +481,21 @@ class MeanField(Collection, Dict[Variable, AbstractMessage], Factor):
         """
         success, messages, _, flag = status
         updated = False
+        if not status.success and last_dist is not None:
+            # The optimiser did not succeed (failed line search, bad Hessian,
+            # exception): keep the previous message rather than projecting a
+            # start point or a guess. The flag is the optimiser's own.
+            messages += ("factor update skipped: optimisation did not succeed",)
+            return (
+                last_dist,
+                Status(
+                    success=False,
+                    messages=messages,
+                    updated=False,
+                    flag=flag,
+                    result=status.result,
+                ),
+            )
         try:
             with LogWarnings(
                 logger=_log_projection_warnings, action="always"
@@ -494,6 +513,15 @@ class MeanField(Collection, Dict[Variable, AbstractMessage], Factor):
             if not factor_dist.is_valid:
                 success = False
                 messages += (f"model projection for {self} is invalid",)
+                # Name the variables `update_invalid` reverts, with the
+                # precisions that made the quotient invalid (a projected
+                # marginal wider than the cavity has negative factor precision).
+                reverted = [
+                    v
+                    for v, valid in factor_dist.check_valid().items()
+                    if not np.all(valid)
+                ]
+                messages += self._reverted_variable_messages(reverted, cavity_dist)
                 factor_dist = factor_dist.update_invalid(last_dist)
                 # May want to check another way
                 # e.g. factor_dist.check_valid().sum() / factor_dist.check_valid().size
@@ -530,6 +558,29 @@ class MeanField(Collection, Dict[Variable, AbstractMessage], Factor):
                 result=status.result,
             ),
         )
+
+    def _reverted_variable_messages(self, variables, cavity_dist) -> Tuple[str, ...]:
+        """
+        One status message per variable whose projected factor message was
+        invalid and is reverted to its previous message, quoting the projected
+        and cavity precisions where both are messages with a variance.
+        """
+        out = []
+        for v in variables:
+            m, c = self.get(v), cavity_dist.get(v)
+            detail = ""
+            if is_message(m) and is_message(c):
+                try:
+                    with np.errstate(divide="ignore"):
+                        pq = float(np.min(1 / np.asanyarray(m.variance, dtype=float)))
+                        pc = float(np.max(1 / np.asanyarray(c.variance, dtype=float)))
+                    detail = f": precision(q*)={pq:.4g}, precision(cavity)={pc:.4g}"
+                except (AttributeError, NotImplementedError, TypeError):
+                    pass
+            out.append(
+                f"model projection for {v.name} is invalid, previous message kept{detail}"
+            )
+        return tuple(out)
 
 
 class FactorApproximation(AbstractNode):
