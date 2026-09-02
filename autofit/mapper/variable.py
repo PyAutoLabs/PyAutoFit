@@ -96,6 +96,21 @@ class Variable(ModelObject):
         args = ", ".join(chain([self.name], map(repr, self.plates)))
         return f"{self.__class__.__name__}({args})"
 
+    def __eq__(self, other):
+        """
+        Two variables are the same variable only when they were drawn from the
+        same id sequence with the same id. ``Prior`` numbers its instances from
+        its own counter (``Prior._ids``), every other ``Variable`` from
+        ``ModelObject._ids``, so a prior and a plain variable that happen to
+        share an integer id are distinct objects, not equal ones. This is the
+        mirror image of ``Prior.__eq__`` so the comparison is symmetric.
+        """
+        return (
+            isinstance(other, Variable)
+            and type(self)._ids is type(other)._ids
+            and self.id == other.id
+        )
+
     def __hash__(self):
         return self.id
 
@@ -140,9 +155,16 @@ def variables(*vals):
 # that allows us to keep track of the FactorValue vs deterministic
 # values when calculating gradients and jacobians
 class VariableMetaClass(type, Variable):
+    # The sentinel takes a negative id so that no ``Variable`` (or ``Prior``,
+    # which numbers its instances from a separate counter that also starts at
+    # 0) can ever hash or compare equal to it. Before this the first prior of
+    # a process (id 0) collided with ``FactorValue`` (id 0), and a ``dict``
+    # keyed by ``FactorValue`` was silently overwritten by that prior's entry.
+    SENTINEL_ID = -1
+
     def __new__(cls, clsname, bases, attrs):
         newcls = super().__new__(cls, clsname, bases, attrs)
-        Variable.__init__(newcls, clsname)
+        Variable.__init__(newcls, clsname, id_=cls.SENTINEL_ID)
         return newcls
 
 

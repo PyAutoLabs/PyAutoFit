@@ -649,7 +649,21 @@ class FactorApproximation(AbstractNode):
         )
 
         logl = np.sum(fval) + np.sum(log_cavity)
-        grad = fjac.grad(grad_cavity)
+
+        # Only the cavity gradient of the factor's deterministic variables is a
+        # cotangent of one of its outputs and so belongs in the VJP seed; the
+        # cavity gradient of the free variables is added after the pull-back.
+        deterministic_grad = VariableData(
+            {
+                v: grad_cavity[v]
+                for v in self.deterministic_variables
+                if v in grad_cavity
+            }
+        )
+        grad = fjac.grad(deterministic_grad)
+        for v, g in grad_cavity.items():
+            if v not in deterministic_grad:
+                grad[v] = grad.get(v, 0) + g
 
         return logl, grad
 
