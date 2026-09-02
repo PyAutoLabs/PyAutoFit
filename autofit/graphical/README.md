@@ -99,9 +99,22 @@ tilted distribution is then *fitted* by the factor's optimiser:
   is projected per §3.3.
 - **Laplace path** (`LaplaceOptimiser`, `graphical/laplace/`):
   quasi-Newton ascent on `log p̂ₐ` (`newton.py`: BFGS/SR1 with Wolfe
-  line search, `line_search.py`), then a Gaussian at the optimum with
-  covariance from the (approximate) Hessian inverse
-  (`MeanField.from_mode_covariance` via `from_mode` on each message).
+  line search, `line_search.py`), then a Gaussian at the optimum whose
+  covariance is the inverse of the **actual Hessian of `log p̂ₐ` at the
+  mode**, assembled by central finite differences of the tilted gradient
+  (`newton.finite_difference_hessian`; `hessian="fd"`, the default; step
+  `fd_step` = 1e-2 × the mean-field std, floored at `fd_min_step`) and
+  Cholesky-factorised as one full matrix so that the per-variable
+  marginal blocks of its inverse are exact
+  (`OptimisationState.inv_hessian_blocks` → `MeanField.from_opt_state`
+  → `from_mode_covariance`, `from_mode` on each message). If the Hessian
+  is not finite or not negative-definite at the mode — a boundary mode
+  such as a scatter driven to zero — the update is *skipped* with
+  `StatusFlag.BAD_PROJECTION` rather than written. Factors with more
+  than `hessian_max_size` (default 64) flattened free parameters fall
+  back, with a log line, to `hessian="quasi"`, which keeps the
+  pre-2026-09 path (the quasi-Newton diagonal secant, refined at
+  `n_refine` random draws from the mean field; not deterministic).
 - **Exact path** (`ExactFactorFit`,
   `expectation_propagation/factor_optimiser.py`): if the factor is
   itself a message of the same family as the cavity
@@ -181,6 +194,24 @@ every sweep is not going to start working, so after
 resets on any sweep that does not raise. Every raise is recorded in
 `ep_history.csv` as an `EXCEPTION` row and logged as a warning.
 
+**Skipped factor update**: an update whose optimiser returned
+`success=False` (a failed line search), or whose Hessian at the mode is
+not finite or not negative-definite (a boundary mode such as a scatter
+driven to zero), is not written back: `optimise_approx` hands back the
+mean field it was given, unchanged, and `update_factor_mean_field` then
+returns the factor's previous message (`last_dist`) with `updated=False`
+and the flag it arrived with — `FAILURE` from the line search, or
+`BAD_PROJECTION` with a message naming the factor and the reason from
+the Hessian check — plus a "factor update skipped" message. When the
+projection succeeds but dividing out the cavity is invalid for *some*
+variables (their marginal precision is below the cavity's), only those
+variables revert to the previous message (`update_invalid`) and the
+status names each of them with both precisions; the others update, so
+the step is flagged `BAD_PROJECTION` but still counts as an update. A
+skipped update does not count towards `max_consecutive_failures` (only
+raises do), but a factor that is skipped on every sweep never updates,
+and the **STALE FACTORS** warning covers that case too.
+
 The result is still returned in that state — a partly-failed graph may
 still hold converged messages worth having — but never quietly. If
 enough factors raise, *nothing* in the mean field changes, so the KL
@@ -188,12 +219,58 @@ step of Eq. (12) is zero and `EPHistory` declares convergence — in
 practice within two sweeps, before any per-factor count reaches its
 threshold — and the mean field holds the starting priors for those
 factors. `run` therefore checks, once the sweeps are over, whether any
-factor both raised and never once updated, and emits a **STALE FACTORS**
+factor raised or was skipped on every sweep and never once updated, and
+emits a **STALE FACTORS**
 warning naming them: logged, and written into `ep_diagnostics.results`
 beside the sigma-collapse warnings. Read that file before trusting a
 mean field from a run that logged failures. A factor that failed
 intermittently but landed at least one update is not stale and is not
 reported.
+
+### 3.5 Caveat — a hierarchical *scatter* cannot be projected by its mode
+
+For a hierarchical factor `N(xᵢ | μ, σ)` the tilted density in `σ` is
+proportional to `1/σ` at `xᵢ = μ`: it is unbounded as `σ → 0`, so its
+*mode* sits at or near the boundary even when its *mean* does not, and
+its posterior is strongly skewed. A mode-based (Laplace) projection of
+`σ` therefore has no valid Gaussian to write: before 2026-09 the
+secant "covariance" let it write one anyway, collapsing the scatter to
+~0 with a tiny error (#1405); with the Hessian at the mode the update is
+skipped or reverted instead, so the scatter stays near its prior with
+an honest width (closed-form benchmark, seed 0: EP 9.4 ± 3.6 against
+the exact 6.6 ± 2.9, inside the exact 5–95 % interval, where it used to
+read 2e-4 ± 0). The parent **mean** and the per-dataset variables are
+recovered. This is a property of projecting by the mode, not of the
+implementation: a hand-rolled EP with the same Gaussian family
+reproduces the collapse under a Laplace projection and recovers the
+closed form under moment matching
+(`autofit_workspace_test/scripts/graphical/analytic_ep_minimal.py`,
+autofit_workspace_test#91).
+
+What to do with it:
+
+- Trust EP for the parent **mean** and the per-dataset variables; read the
+  hierarchical **scatter** from a joint sampler over
+  `factor_graph.global_prior_model` (the `graphical/` pattern) before
+  quoting it, or wait for a moment-matching projection of the
+  hierarchical factor.
+- Prefer a log-scale parameterisation of the scatter
+  (`LogGaussianPrior`), whose tilted density is bounded, over a
+  `GaussianPrior`/`TruncatedGaussianPrior` truncated at zero: it
+  updates (benchmark: 23 of 25 updates succeed) though it still carries
+  a bias (log σ 1.53 ± 0.39 vs 1.83 ± 0.36 exact).
+- Read `ep_history.csv`: a hierarchical factor with zero `SUCCESS`
+  updates has returned its prior, whatever the numbers look like; the
+  STALE FACTORS warning names it.
+- The achievable ceiling is not zero even for the right projection:
+  moment matching of a Gaussian site onto the skewed `σ` posterior
+  carries a bias of order `|Δmean|/std ≲ 0.08`, `|std/std_ref − 1| ≲ 0.15`
+  on the closed-form benchmark (seeds 0–4). Judge any EP scatter against
+  that, not against a sampler's digits.
+
+The closed-form benchmark and its parity tables are the regression
+check for this section:
+`autofit_workspace_test/scripts/graphical/analytic_*.py`.
 
 ## 4. Convergence — `EPHistory` (`expectation_propagation/history.py`)
 
