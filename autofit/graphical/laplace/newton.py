@@ -1,12 +1,13 @@
 import logging
 import warnings
+from operator import attrgetter
 from typing import Optional, Dict, Tuple, Any, Callable
 
 import numpy as np
 
 from autofit import exc
 from autofit.graphical.laplace.line_search import line_search, OptimisationState
-from autofit.graphical.utils import Status, StatusFlag, LogWarnings
+from autofit.graphical.utils import Status, StatusFlag, LogWarnings, FlattenArrays
 from autofit.mapper.variable_operator import VariableData
 
 
@@ -157,6 +158,46 @@ class QuasiNewtonUpdate:
 full_bfgs_update = QuasiNewtonUpdate(bfgs_update, quasi_deterministic_update)
 full_sr1_update = QuasiNewtonUpdate(sr1_update, quasi_deterministic_update)
 full_diag_update = QuasiNewtonUpdate(diag_sr1_update, diag_quasi_deterministic_update)
+
+
+## Finite-difference Hessian
+
+
+def finite_difference_hessian(
+    state: OptimisationState, step: VariableData
+) -> Tuple[np.ndarray, FlattenArrays]:
+    """
+    Central finite-difference Hessian of `state`'s objective at its parameters.
+
+    The free variables are flattened in `Variable.id` order so the matrix does
+    not depend on dict order, and the result is symmetrised. Costs two gradient
+    evaluations per flattened parameter; each perturbed state is a copy, so
+    `state` itself is untouched.
+
+    Parameters
+    ----------
+    state
+        The optimisation state at which to evaluate the Hessian.
+    step
+        Per-variable finite-difference step, same shapes as `state.parameters`.
+
+    Returns
+    -------
+    The symmetrised Hessian and the `FlattenArrays` describing its layout.
+    """
+    variables = sorted(state.parameters.keys(), key=attrgetter("id"))
+    shapes = FlattenArrays({v: np.shape(state.parameters[v]) for v in variables})
+    x0 = shapes.flatten(state.parameters)
+    h = shapes.flatten(step)
+    n = x0.size
+    H = np.empty((n, n))
+    for i in range(n):
+        e = np.zeros(n)
+        e[i] = h[i]
+        gp = shapes.flatten(state.update(parameters=shapes.unflatten(x0 + e)).gradient)
+        gm = shapes.flatten(state.update(parameters=shapes.unflatten(x0 - e)).gradient)
+        H[i] = (gp - gm) / (2 * h[i])
+    return 0.5 * (H + H.T), shapes
 
 
 ## Newton step

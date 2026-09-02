@@ -298,12 +298,12 @@ def test_full_hierachical(data):
         },
     )
 
-    # This fits a *marginal* hierarchical EP model whose Laplace refinement draws
-    # stochastic samples from the global np.random state (n_refine=3 via
-    # NormalMessage.sample). The fit sits near a convergence boundary, so its
-    # recovered fixed point (good vs sigma-collapse) depends on the ambient RNG
-    # state left by whatever ran before — an inherently stochastic test. Seed here
-    # so the fit is reproducible; this is the pragmatic fix (see PyAutoFit #1352).
+    # The default Laplace path (`hessian="fd"`, PyAutoFit#1561) draws no random
+    # numbers: the projected covariance is a finite-difference Hessian at the
+    # mode, so this fit is deterministic. The seed is kept so that the
+    # `hessian="quasi"` path (whose `n_refine` refinement samples the global
+    # np.random state via NormalMessage.sample) stays reproducible if anyone
+    # switches to it (see PyAutoFit #1352 for the history).
     np.random.seed(0)
 
     laplace = graph.LaplaceOptimiser()
