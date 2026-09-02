@@ -76,6 +76,7 @@ class AbstractMessage(MessageInterface, ABC):
         return dict(
             log_norm=self.log_norm,
             id_=self.id,
+            **self._support_kwargs,
         )
 
     def check_support(self) -> np.ndarray:
@@ -100,6 +101,7 @@ class AbstractMessage(MessageInterface, ABC):
         result = cls(
             *(copy(params) for params in self.parameters),
             log_norm=self.log_norm,
+            **self._support_kwargs,
         )
         result.id = self.id
         return result
@@ -153,7 +155,10 @@ class AbstractMessage(MessageInterface, ABC):
         if index == ():
             return self
         else:
-            return cls(*(param[index] for param in self.parameters))
+            return cls(
+                *(param[index] for param in self.parameters),
+                **self._support_kwargs,
+            )
 
     def __setitem__(self, index, value):
         self._reset_cache()
@@ -166,7 +171,8 @@ class AbstractMessage(MessageInterface, ABC):
             *(
                 update_array(param0, index, param1)
                 for param0, param1 in zip(self.parameters, value.parameters)
-            )
+            ),
+            **self._support_kwargs,
         )
 
     @classmethod
@@ -205,6 +211,7 @@ class AbstractMessage(MessageInterface, ABC):
                 *self.parameters,
                 log_norm=log_norm,
                 id_=self.id,
+                **self._support_kwargs,
             )
 
     def __rmul__(self, other: "AbstractMessage") -> "AbstractMessage":
@@ -220,6 +227,7 @@ class AbstractMessage(MessageInterface, ABC):
                 *self.parameters,
                 log_norm=log_norm,
                 id_=self.id,
+                **self._support_kwargs,
             )
 
     def __pow__(self, other: Real) -> "AbstractMessage":
@@ -230,6 +238,7 @@ class AbstractMessage(MessageInterface, ABC):
             new_params,
             log_norm=log_norm,
             id_=self.id,
+            **self._support_kwargs,
         )
         return new
 
@@ -362,6 +371,7 @@ class AbstractMessage(MessageInterface, ABC):
             *valid_parameters,
             log_norm=self.log_norm,
             id_=self.id,
+            **self._support_kwargs,
         )
         return new
 
@@ -429,12 +439,16 @@ class AbstractMessage(MessageInterface, ABC):
         parameters: Tuple[np.ndarray, ...],
         log_norm: float,
         id_,
+        support_kwargs: Optional[dict] = None,
         *args,
     ):
+        # ``support_kwargs`` defaults to None so pickles written before the
+        # limits became support state (3-tuple payloads) still load.
         return cls(
             *parameters,
             log_norm=log_norm,
             id_=id_,
+            **(support_kwargs or {}),
         )
 
     def __reduce__(self):
@@ -445,6 +459,7 @@ class AbstractMessage(MessageInterface, ABC):
                 self.parameters,
                 self.log_norm,
                 self.id,
+                self._support_kwargs,
             ),
         )
 

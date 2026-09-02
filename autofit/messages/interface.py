@@ -1,3 +1,4 @@
+import math
 from abc import ABC, abstractmethod
 from typing import Tuple, Iterator
 from typing import Union
@@ -222,6 +223,55 @@ class MessageInterface(ABC):
     def update_invalid(self, other: "MessageInterface") -> "MessageInterface":
         pass
 
+    @property
+    def _support_kwargs(self) -> dict:
+        """
+        Constructor keyword arguments describing the *support* of this
+        message -- state that is not a natural parameter and therefore must
+        be carried explicitly through every rebuild (``copy``, ``__pow__``,
+        products, quotients, ``update_invalid``, ``from_natural_parameters``,
+        pickling).
+
+        Unbounded families have no such state and return ``{}``;
+        ``TruncatedNormalMessage`` returns its ``lower_limit`` /
+        ``upper_limit`` and ``TransformedMessage`` delegates to its base
+        message (PyAutoFit#1559).
+        """
+        return {}
+
+    def _combined_support(self, *dists) -> dict:
+        """
+        Support of the product of this message's density with ``dists``.
+
+        The product of densities is supported on the *intersection* of the
+        factors' supports, so a truncated message multiplied by an unbounded
+        one keeps its limits, equal supports are a no-op, and overlapping
+        finite supports narrow to their overlap. Disjoint finite supports
+        leave no density to represent and raise ``MessageException``.
+
+        The result class is always this message's class (a ``NormalMessage``
+        times a truncated one stays a ``NormalMessage``): inside EP every
+        message on a variable shares the prior's class, so the asymmetric
+        user-only case is documented rather than special-cased.
+        """
+        from .. import exc
+
+        kw = self._support_kwargs
+        if not kw:
+            return kw
+        lo, hi = kw["lower_limit"], kw["upper_limit"]
+        for dist in self._iter_dists(dists):
+            if not isinstance(dist, MessageInterface):
+                continue
+            other = dist._support_kwargs
+            lo = max(lo, other.get("lower_limit", -math.inf))
+            hi = min(hi, other.get("upper_limit", math.inf))
+        if not lo < hi:
+            raise exc.MessageException(
+                f"product of messages has empty support ({lo}, {hi})"
+            )
+        return dict(lower_limit=lo, upper_limit=hi)
+
     def sum_natural_parameters(self, *dists: "MessageInterface") -> "MessageInterface":
         """return the unnormalised result of multiplying the pdf
         of this distribution with another distribution of the same
@@ -238,18 +288,24 @@ class MessageInterface(ABC):
         return self.from_natural_parameters(
             new_params,
             id_=self.id,
+            **self._combined_support(*dists),
         )
 
     def sub_natural_parameters(self, other: "MessageInterface") -> "MessageInterface":
         """return the unnormalised result of dividing the pdf
         of this distribution with another distribution of the same
-        type"""
+        type
+
+        The quotient keeps this message's support: in EP a cavity division
+        is always between messages on the same variable, so the supports
+        agree and no intersection or check is needed."""
         log_norm = self.log_norm - other.log_norm
         new_params = self.natural_parameters() - other.natural_parameters()
         return self.from_natural_parameters(
             new_params,
             log_norm=log_norm,
             id_=self.id,
+            **self._support_kwargs,
         )
 
     @abstractmethod

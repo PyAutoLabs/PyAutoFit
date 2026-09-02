@@ -1,7 +1,10 @@
+import pickle
+
 import numpy as np
 import pytest
 from scipy.stats import norm
 
+from autofit import exc
 from autofit.messages.normal import NormalMessage
 from autofit.messages.truncated_normal import (
     TruncatedNaturalNormal,
@@ -174,3 +177,120 @@ def test_truncated_natural_normal_uses_underlying_mu_sigma():
     assert np.allclose(logl_n, logl_s)
     assert np.allclose(grad_n, grad_s)
     assert np.allclose(hess_n, hess_s)
+
+
+# === PyAutoFit#1559: truncation limits are support state, carried through every rebuild ===
+
+
+@pytest.fixture(name="m")
+def make_m():
+    return TruncatedNormalMessage(10, 5, 0, 100)
+
+
+def _support_ops():
+    m = TruncatedNormalMessage(10, 5, 0, 100)
+    other = TruncatedNormalMessage(20, 3, 0, 100)
+    return [
+        pytest.param(lambda m: m ** 0.2, id="pow"),
+        pytest.param(lambda m: m * other, id="multiply"),
+        pytest.param(lambda m: m / other, id="divide"),
+        pytest.param(
+            lambda m: TruncatedNormalMessage.from_natural_parameters(
+                m.natural_parameters(), **m._support_kwargs
+            ),
+            id="from_natural_parameters",
+        ),
+        pytest.param(lambda m: m.copy(), id="copy"),
+        pytest.param(
+            lambda m: m.update_invalid(TruncatedNormalMessage(1, 1, 0, 100)),
+            id="update_invalid",
+        ),
+        pytest.param(lambda m: m.natural, id="natural"),
+        pytest.param(lambda m: m.zeros_like(), id="zeros_like"),
+        pytest.param(lambda m: m * 2.0, id="scalar_multiply"),
+        pytest.param(lambda m: m[()], id="getitem"),
+        pytest.param(lambda m: pickle.loads(pickle.dumps(m)), id="pickle"),
+    ]
+
+
+@pytest.mark.parametrize("op", _support_ops())
+def test__support_survives_natural_parameter_ops(m, op):
+    result = op(m)
+
+    assert isinstance(result, TruncatedNormalMessage)
+    assert (result.lower_limit, result.upper_limit) == (0.0, 100.0)
+
+
+def test__parameters_exclude_the_limits(m):
+    # The limits are support state, not parameters, so ``parameters`` and
+    # ``_parameter_support`` line up.
+    assert m.parameters == (10, 5)
+    assert len(m.parameters) == len(m._parameter_support)
+
+
+def test__truncated_times_normal_keeps_truncated_support(m):
+    result = m * NormalMessage(20, 3)
+    assert isinstance(result, TruncatedNormalMessage)
+    assert (result.lower_limit, result.upper_limit) == (0.0, 100.0)
+
+    # Documented asymmetry: the result takes the left operand's class, so a
+    # NormalMessage times a truncated one stays unbounded. Inside EP every
+    # message on a variable shares the prior's class, so this is user-only.
+    assert type(NormalMessage(20, 3) * m) is NormalMessage
+
+
+def test__mismatched_finite_supports():
+    overlap = TruncatedNormalMessage(1, 1, 0, 10) * TruncatedNormalMessage(1, 1, 5, 30)
+    assert (overlap.lower_limit, overlap.upper_limit) == (5.0, 10.0)
+
+    with pytest.raises(exc.MessageException):
+        TruncatedNormalMessage(1, 1, 0, 10) * TruncatedNormalMessage(1, 1, 20, 30)
+
+
+def test__divide_keeps_own_support(m):
+    result = m / TruncatedNormalMessage(1, 1, 5, 30)
+    assert (result.lower_limit, result.upper_limit) == (0.0, 100.0)
+
+
+def test__from_mode_keeps_class_and_limits():
+    result = TruncatedNormalMessage.from_mode(
+        3.0, 4.0, lower_limit=0.0, upper_limit=100.0
+    )
+    assert type(result) is TruncatedNormalMessage
+    assert (result.lower_limit, result.upper_limit) == (0.0, 100.0)
+    assert result.mean == 3.0
+    assert result.sigma == 2.0
+
+
+def test__update_invalid_vector_truncated():
+    # Vector-shaped truncated messages used to raise TypeError here because
+    # the limits were positional parameters (float() of an array).
+    invalid = TruncatedNormalMessage(
+        np.array([1.0, 2.0]), np.array([1.0, np.nan]), 0, 100
+    )
+    safe = TruncatedNormalMessage(np.array([5.0, 5.0]), np.array([1.0, 1.0]), 0, 100)
+
+    result = invalid.update_invalid(safe)
+
+    assert (result.lower_limit, result.upper_limit) == (0.0, 100.0)
+    assert result.mean == pytest.approx([1.0, 5.0])
+    assert result.sigma == pytest.approx([1.0, 1.0])
+
+
+def test__truncated_natural_normal_copy_keeps_limits():
+    natural = TruncatedNaturalNormal(0.1, -0.5, lower_limit=0.0, upper_limit=100.0)
+
+    for result in (natural.copy(), pickle.loads(pickle.dumps(natural))):
+        assert type(result) is TruncatedNaturalNormal
+        assert (result.lower_limit, result.upper_limit) == (0.0, 100.0)
+
+
+def test__old_three_tuple_pickle_payload_still_loads():
+    # Pickles written before #1559 carried the limits as the 3rd and 4th
+    # positional parameters and no support element.
+    result = TruncatedNormalMessage._reconstruct((10.0, 5.0, 0.0, 100.0), 0.0, 7)
+    assert (result.lower_limit, result.upper_limit) == (0.0, 100.0)
+    assert result.id == 7
+
+    result = TruncatedNormalMessage._reconstruct((10.0, 5.0), 0.0, 7)
+    assert (result.lower_limit, result.upper_limit) == (-np.inf, np.inf)

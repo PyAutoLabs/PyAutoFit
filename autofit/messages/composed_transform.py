@@ -160,6 +160,12 @@ class TransformedMessage(MessageInterface):
     def copy(self):
         return TransformedMessage(self.base_message, *self.transforms, id_=self.id)
 
+    @property
+    def _support_kwargs(self) -> dict:
+        # The base message's (base-space) support; the transformed message's
+        # own ``lower_limit`` / ``upper_limit`` stay +/-inf (PyAutoFit#1527).
+        return self.base_message._support_kwargs
+
     def with_base(self, message: MessageInterface) -> "TransformedMessage":
         """
         Creates a new TransformedMessage with the same id and transforms but a new
@@ -203,7 +209,11 @@ class TransformedMessage(MessageInterface):
         PyAutoFit#1382.)
         """
         return TransformedMessage(
-            self.base_message.project(self._transform(samples), log_weight_list),
+            self.base_message.project(
+                self._transform(samples),
+                log_weight_list,
+                **self.base_message._support_kwargs,
+            ),
             *self.transforms,
             id_=self.id,
         )
@@ -398,15 +408,42 @@ class TransformedMessage(MessageInterface):
 
         return log_likelihood, gradient
 
-    def from_mode(self, mode: np.ndarray, covariance: np.ndarray, **kwargs):
-        jac = None
+    def from_mode(self, mode: np.ndarray, covariance, **kwargs):
+        """
+        Build the message from a mode and covariance given in *physical*
+        space.
+
+        ``mode`` is mapped physical -> base through the transform stack
+        (outermost transform first, exactly as ``_transform`` does) and the
+        covariance is pushed through the Jacobian of *every* transform on the
+        way, ``jac.quad`` being the inverse of the ``invquad`` composition
+        that ``variance`` applies base -> physical. A ``LinearOperator``
+        covariance (the 0-d or n-d ``DiagonalMatrix`` the Laplace optimiser
+        hands over) is reduced to its diagonal first, which is all the base
+        ``from_mode`` reads.
+
+        Physical-space ``lower_limit`` / ``upper_limit`` kwargs are dropped:
+        the base message lives in base space and keeps its own support
+        (PyAutoFit#1559).
+        """
+        from autofit.mapper.operator import LinearOperator
+
+        if isinstance(covariance, LinearOperator):
+            covariance = covariance.diagonal()
+        covariance = np.asanyarray(covariance)
+
+        kwargs.pop("lower_limit", None)
+        kwargs.pop("upper_limit", None)
+
         for _transform in reversed(self.transforms):
             mode, jac = _transform.transform_jac(mode)
-
-        if covariance.shape != ():
             covariance = jac.quad(covariance)
 
-        return self.with_base(self.base_message.from_mode(mode, covariance, **kwargs))
+        return self.with_base(
+            self.base_message.from_mode(
+                mode, covariance, **kwargs, **self.base_message._support_kwargs
+            )
+        )
 
     def update_invalid(self, other: "TransformedMessage") -> "MessageInterface":
         return self.with_base(self.base_message.update_invalid(other.base_message))
