@@ -247,10 +247,12 @@ class Prior(Variable, ABC, ArithmeticMixin):
         return getattr(self.message, item)
 
     def __eq__(self, other):
-        try:
-            return self.id == other.id
-        except AttributeError:
-            return False
+        # Priors are numbered from their own counter (``Prior._ids``), so an id
+        # only identifies a prior among other priors: a non-``Prior`` operand
+        # (a plain ``Variable``, the ``FactorValue`` sentinel, ...) is never
+        # equal, whatever its id. ``Variable.__eq__`` applies the same rule in
+        # the other direction so the comparison is symmetric.
+        return isinstance(other, Prior) and self.id == other.id
 
     def __ne__(self, other):
         return not self.__eq__(other)

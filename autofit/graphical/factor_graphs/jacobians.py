@@ -93,14 +93,43 @@ class AbstractJacobian(VariableLinearOperator):
         cls_name = type(self).__name__
         return f"{cls_name}({out_var} → ∂({in_var})ᵀ {out_var})"
 
+    @property
+    def cotangent_variables(self):
+        """
+        The variables whose cotangents ``self(seed)`` accepts: the factor's
+        outputs, i.e. ``FactorValue`` and its deterministic variables.
+
+        ``VectorJacobianProduct`` exposes these as ``out_variables``;
+        ``JacobianVectorProduct`` (a ``RectVariableOperator`` mapping its
+        ``left_variables`` onto its ``right_variables``) names the same set
+        ``left_variables`` and uses ``out_variables`` for the inputs, so it
+        overrides this property.
+        """
+        return self.out_variables
+
     def grad(self, values=None):
+        """
+        The gradient of the factor value with respect to its input variables,
+        pulled back through this Jacobian.
+
+        Parameters
+        ----------
+        values
+            Optional cotangents. Entries keyed by the factor's output variables
+            (``FactorValue`` and its deterministic variables) seed the
+            vector-Jacobian product; entries keyed by the input variables
+            themselves (e.g. the cavity gradient of the free variables) are not
+            part of the seed and are added to the result after the pull-back.
+        """
         seed = VariableData({FactorValue: 1.0})
+        grad = VariableData(values) if values else VariableData()
         if values:
-            seed.update(values)
+            for v in self.cotangent_variables:
+                if v in values:
+                    seed[v] = values[v]
 
         jac = self(seed)
 
-        grad = VariableData(values) if values else VariableData()
         for v, g in jac.items():
             if v is not FactorValue:
                 grad[v] = grad.get(v, 0) + g
@@ -118,6 +147,10 @@ class JacobianVectorProduct(AbstractJacobian, RectVariableOperator):
     @property
     def out_variables(self):
         return self.right_variables
+
+    @property
+    def cotangent_variables(self):
+        return self.left_variables
 
     @property
     def factor_out(self):
