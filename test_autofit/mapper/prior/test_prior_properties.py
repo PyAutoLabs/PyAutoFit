@@ -17,6 +17,8 @@ of the same shape fails CI instead of surviving for years:
   (would catch the LogGaussian ``with_limits`` crash, #1331-01).
 - P5 ``from_mode(mode, variance)`` reproduces mean and variance at variance != 1
   discriminating points (would catch the Gamma ``from_mode`` inversion, #1331-D3).
+- P7 the message support survives ``**`` (would catch the truncation limits
+  lost on natural-parameter operations, #1559).
 
 House rule: library-level property tests stay NumPy-only; EP-level integration
 coverage lives with the EP framework review and complements this file.
@@ -351,3 +353,25 @@ def test__strictness_flags_agree_with_the_density_at_the_bounds(prior):
             assert at_upper == -np.inf
         else:
             assert np.isfinite(at_upper)
+
+
+# === P7: the message support survives natural-parameter operations ===
+
+
+@pytest.mark.parametrize("prior", all_priors(), ids=prior_id)
+def test__message_power_keeps_the_support(prior):
+    """
+    The general form of PyAutoFit#1559 (D4). EP's very first step raises every
+    prior message to a fractional power (``message_dict``), which rebuilds it
+    from natural parameters; a ``TruncatedGaussianPrior`` used to come out of
+    that with ``(-inf, inf)``. A transformed message's own limits stay +/-inf
+    (#1527), so the sweep is a no-op there and the base message is checked too.
+    """
+    message = prior.message
+
+    result = message ** 0.5
+
+    assert type(result) is type(message)
+    assert result.lower_limit == message.lower_limit
+    assert result.upper_limit == message.upper_limit
+    assert result._support_kwargs == message._support_kwargs

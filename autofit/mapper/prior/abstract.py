@@ -238,6 +238,7 @@ class Prior(Variable, ABC, ArithmeticMixin):
             samples=samples,
             log_weight_list=log_weight_list,
             id_=self.id,
+            **self.message._support_kwargs,
         )
         return result
 

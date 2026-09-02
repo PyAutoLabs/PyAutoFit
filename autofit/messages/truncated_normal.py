@@ -100,16 +100,23 @@ class TruncatedNormalMessage(AbstractMessage):
                 f"TruncatedNormalMessage sigma cannot be negative, got sigma={sigma}."
             )
 
+        # The truncation limits are *support*, not parameters: they are
+        # stored as attributes by ``AbstractMessage.__init__`` and carried
+        # through every rebuild via ``_support_kwargs`` (PyAutoFit#1559).
         super().__init__(
             mean,
             sigma,
-            float(lower_limit),
-            float(upper_limit),
             log_norm=log_norm,
             id_=id_,
+            lower_limit=lower_limit,
+            upper_limit=upper_limit,
         )
 
-        self.mean, self.sigma, self.lower_limit, self.upper_limit = self.parameters
+        self.mean, self.sigma = self.parameters
+
+    @property
+    def _support_kwargs(self) -> dict:
+        return dict(lower_limit=self.lower_limit, upper_limit=self.upper_limit)
 
     def cdf(self, x: Union[float, np.ndarray], xp=np) -> Union[float, np.ndarray]:
         """
