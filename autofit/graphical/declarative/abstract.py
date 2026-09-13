@@ -211,6 +211,7 @@ class AbstractDeclarativeFactor(Analysis, ABC):
             ep_history=opt.ep_history,
             declarative_factor=self,
             updated_ep_mean_field=updated_ep_mean_field,
+            factor_graph=opt.factor_graph,
         )
 
     @property

@@ -292,6 +292,18 @@ actually swept. `kind="model"` draws the structure alone and needs no history at
 raises rather than quietly drawing a diagnostic figure with no diagnostics in it. The default is to show the figure;
 `format="png"` with a `path` writes it instead.
 
+A fit run through the high-level `factor_graph.optimise(...)` builds that optimiser internally, so its result carries
+the swept graph for exactly this purpose:
+
+```bash
+result = factor_graph.optimise(af.LaplaceOptimiser(), max_steps=5)
+
+af.EPPlotter(result.factor_graph, ep_history=result.ep_history).figure(kind="state")
+```
+
+`result.factor_graph` is the graph the optimiser swept -- the one `result.ep_history` is keyed by -- and not a rebuild
+of it.
+
 ## Hierarchical Models
 
 A specific type of graphical model is a hierarchical model, where the shared parameter(s) of a graph are assumed
