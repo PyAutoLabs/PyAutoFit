@@ -60,6 +60,7 @@ class EPResult:
         ep_history: EPHistory,
         declarative_factor,
         updated_ep_mean_field: EPMeanField,
+        factor_graph=None,
     ):
         """
         The result of an EP Optimisation including its history, a declarative
@@ -74,10 +75,18 @@ class EPResult:
             A declarative representation of the factor being optimised
         updated_ep_mean_field
             An updated mean field; effectively the result of the optimisation
+        factor_graph
+            The factor graph the EP optimiser actually swept
+            (``EPOptimiser.factor_graph``), which is the object to hand to
+            ``af.EPPlotter`` for ``kind="state"``. Never
+            ``FactorGraphModel.graph``: that property builds a fresh graph,
+            renaming every prior factor, on every access, so the history's
+            keys would not match it.
         """
         self.ep_history = ep_history
         self.declarative_factor = declarative_factor
         self.updated_ep_mean_field = updated_ep_mean_field
+        self.factor_graph = factor_graph
 
     @property
     def model(self) -> Collection:

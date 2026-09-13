@@ -119,6 +119,7 @@ def test_optimise_forwards_optional_updater(factor_model, updater, monkeypatch):
 
     class StubEPOptimiser:
         ep_history = None
+        factor_graph = None
 
         @staticmethod
         def run(model_approx, **kwargs):
