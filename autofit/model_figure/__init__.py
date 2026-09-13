@@ -12,8 +12,13 @@ importable and testable on its own:
 and is re-exported as ``af.ModelPlotter``.  Importing this package does **not**
 import matplotlib: every drawing import is inside a function, so
 ``import autofit`` stays drawing-free.
+
+The :mod:`autofit.model_figure.ep` sub-package draws the other picture of a
+graphical fit -- the factor graph an ``EPOptimiser`` sweeps, with the run's
+state on it -- through :class:`~autofit.model_figure.ep.plotter.EPPlotter`.
 """
 
 from .plotter import ModelPlotter
+from .ep import EPPlotter
 
-__all__ = ["ModelPlotter"]
+__all__ = ["ModelPlotter", "EPPlotter"]

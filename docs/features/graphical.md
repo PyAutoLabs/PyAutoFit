@@ -228,6 +228,70 @@ The following paper describes the EP framework in formal Bayesian notation:
 
 <https://arxiv.org/pdf/1412.4869.pdf>
 
+## Seeing The EP Run
+
+An EP fit sweeps factor by factor for as long as it takes, and the thing that most often goes wrong is invisible in the
+result: one factor whose update is rejected every sweep, whose reported posterior is therefore the message it started
+with. `af.EPPlotter` draws the factor graph the `EPOptimiser` sweeps so that this is something you look at rather than
+something you infer.
+
+An `EPOptimiser` given `paths` writes two figures into its output directory, beside `graph.info`. `graph_model.png` is
+the structure alone, written once at the start of the run:
+
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/images/model_figures/ep_model.png
+:alt: The EP model figure of the hierarchical graphical model, with square factor nodes, round variable pills, a dashed plate for the three datasets and the HierarchicalFactor above it.
+:width: 600
+```
+
+Square boxes are factors, rounded pills are variables, and a line is an incidence: this variable is one of that
+factor's arguments. The dashed frame is a plate, exactly as in the model figures above -- three `AnalysisFactor`s with
+the same signature are drawn once, and a variable each of them has its own copy of is drawn once inside the plate
+badged `x3`. The `HierarchicalFactor0` box collapses its three members the same way, reading `3 members`, with its own
+`mean` and `sigma` as hyper-variables above it.
+
+`graph_state.png` is the same graph with the run painted on it, rewritten on every `visualise_interval` tick, so the
+file on disk always shows the sweep that just finished. Drawing it costs about a third of a second the first time and
+under a tenth thereafter, so the interval is worth setting deliberately on a long run rather than left at 1:
+
+```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/images/model_figures/ep_state_stale.png
+:alt: The EP state figure of a three dataset run, with the plate noting one of three stale and the stalled AnalysisFactor2 expanded beside it in grey, badged zero updates in four sweeps.
+:width: 600
+```
+
+Each factor carries its updates and sweeps, and its state. **Stale** is grey: the factor completed sweeps and none of
+them updated it -- the same condition the optimiser prints as its `STALE FACTORS` warning at the end of a run.
+**Reverted** is a dashed red edge, and it marks a `(factor, variable)` pair whose projection was confirmed rejected,
+which is a stronger statement than a message that happens not to have moved: EP restarted from its own converged mean
+field reproduces every message exactly and is marked nowhere. **Converged** is a green outline, from the same
+convergence test `EPHistory` stops the fit on.
+
+A plate never hides the member that failed. It shows the aggregate -- `3 datasets`, `4 updates / 4 sweeps` -- and then
+names every member that departs from it, in red beneath the title, and draws that member as a node of its own beside
+the plate. The figure above says `1 of 3 stale: AnalysisFactor2` and then draws `AnalysisFactor2`, grey, badged
+`0 updates / 4 sweeps` with its age and its `BAD_PROJECTION` flag. A stale factor in a plate of thirty is as visible as
+one in a plate of three.
+
+The figures are behind `output.yaml`'s `model_figure` key -- the same key the per-search `model.png` is behind -- which
+is read strictly, so a configuration that does not mention it writes neither file. Switch it on to get them:
+
+```bash
+output:
+  model_figure: true
+```
+
+The same figure can be drawn straight from an `af.graphical.EPOptimiser` that has already run, which is the quickest way to look
+at a fit that is sitting in memory:
+
+```bash
+af.EPPlotter(optimiser.factor_graph, ep_history=optimiser.ep_history).figure(kind="state")
+```
+
+Pass the optimiser's own `factor_graph`, never a factor graph model's `graph` property: that property builds a new
+graph, renaming every prior factor as it goes, on every access -- and the history is keyed by the graph the optimiser
+actually swept. `kind="model"` draws the structure alone and needs no history at all, while `kind="state"` without one
+raises rather than quietly drawing a diagnostic figure with no diagnostics in it. The default is to show the figure;
+`format="png"` with a `path` writes it instead.
+
 ## Hierarchical Models
 
 A specific type of graphical model is a hierarchical model, where the shared parameter(s) of a graph are assumed

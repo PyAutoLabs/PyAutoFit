@@ -16,6 +16,7 @@ from autofit.text import formatter
 from autofit.tools.util import open_, open_atomic, NumpyEncoder
 from autofit.non_linear.samples.samples import Samples
 
+from autofit.model_figure.config import model_figure_enabled
 from autofit.non_linear.test_mode import skip_visualization
 
 from .abstract import AbstractPaths, _test_mode_segment
@@ -29,24 +30,11 @@ from ...visualise import VisualiseGraph
 logger = logging.getLogger(__name__)
 
 
-def _model_figure_enabled() -> bool:
-    """
-    Whether `model.png` -- the model figure drawn beside `model.info` -- is written.
-
-    The `output.yaml` key `model_figure` is read **strictly**: an absent key means
-    off.
-
-    This deliberately does NOT use `autonerves.output.should_output`
-    (`autonerves/output.py:should_output`), which falls back to `output.yaml`'s
-    `default:` entry whenever a key is absent. That entry is `true` in every
-    workspace, so a brand new key that so far only exists in the library's own
-    default config would silently switch the figure ON in every config which has
-    not yet added it. Only a config that explicitly opts in writes the file.
-    """
-    try:
-        return bool(conf.instance["output"]["model_figure"])
-    except KeyError:
-        return False
+#: ``model_figure_enabled`` lives in ``autofit.model_figure.config`` so that the
+#: per-search ``model.png`` hook below and the EP factor-graph figures read the
+#: same ``output.yaml`` key through the same strict accessor. The private alias
+#: is kept because it is the name this module's tests import.
+_model_figure_enabled = model_figure_enabled
 
 
 class DirectoryPaths(AbstractPaths):

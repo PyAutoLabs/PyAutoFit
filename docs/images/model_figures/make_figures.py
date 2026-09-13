@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import List
 
 import matplotlib
+import numpy as np
 
 matplotlib.use("Agg")
 
@@ -34,6 +35,13 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
 
 import autofit as af
+from autofit import graphical as graph
+from autofit.graphical.expectation_propagation.factor_optimiser import (
+    AbstractFactorOptimiser,
+)
+from autofit.mapper.variable import Variable
+from autofit.messages.normal import NormalMessage
+from autofit.tools.namer import namer
 
 OUTPUT_PATH = Path(__file__).resolve().parent
 WIDTH = 14.0
@@ -239,15 +247,15 @@ def graphical_variable():
     return _factor_graph(model_list).global_prior_model
 
 
-def graphical_hierarchical():
+def _hierarchical_factor_graph_model():
     """
-    Plate notation, **hierarchical**: three *different* centres, each drawn from
-    one parent ``GaussianPrior`` whose ``mean`` and ``sigma`` are themselves
-    free (HowToFit chapter 3, tutorial 4).
+    Three *different* centres, each drawn from one parent ``GaussianPrior``
+    whose ``mean`` and ``sigma`` are themselves free (HowToFit chapter 3,
+    tutorial 4).
 
-    The teaching pair of the epic: put this figure beside ``graphical_shared``
-    and the difference between "the same number" and "from a common population"
-    is the difference between a blue reference and a violet arrow.
+    Returned as the ``FactorGraphModel`` rather than its global prior model,
+    because the EP figures below need the factor graph an ``EPOptimiser``
+    sweeps and the model figure needs the model.
     """
     model_list = [_graphical_model() for _ in range(3)]
 
@@ -263,14 +271,26 @@ def graphical_hierarchical():
     for model in model_list:
         hierarchical_factor.add_drawn_variable(model.centre)
 
-    factor_graph = af.FactorGraphModel(
+    return af.FactorGraphModel(
         *[
             af.AnalysisFactor(prior_model=model, analysis=_Analysis(index))
             for index, model in enumerate(model_list)
         ],
         hierarchical_factor,
     )
-    return factor_graph.global_prior_model
+
+
+def graphical_hierarchical():
+    """
+    Plate notation, **hierarchical**: three *different* centres, each drawn from
+    one parent ``GaussianPrior`` whose ``mean`` and ``sigma`` are themselves
+    free (HowToFit chapter 3, tutorial 4).
+
+    The teaching pair of the epic: put this figure beside ``graphical_shared``
+    and the difference between "the same number" and "from a common population"
+    is the difference between a blue reference and a violet arrow.
+    """
+    return _hierarchical_factor_graph_model().global_prior_model
 
 
 def composite_shared_relation_assertion():
@@ -304,6 +324,191 @@ def lens_models():
     }
 
 
+# -- the EP figures ---------------------------------------------------------
+#
+# `af.EPPlotter` draws the factor graph an `EPOptimiser` sweeps, and -- given
+# the run's history -- what the run did to it. These three PNGs are the
+# phase-5 evidence and the images `docs/features/graphical.md` embeds.
+#
+# `ep_state_reverted` is a real `EPOptimiser.run`. `ep_state_stale` is not: a
+# plate only forms over `AnalysisFactor`s, and an `AnalysisFactor` needs a real
+# non-linear search per factor per sweep, which is minutes for a picture whose
+# content is entirely determined by the statuses the run records. Its history
+# is therefore built from exactly the `Status` objects `OverWideFit` produces
+# -- a projection rejected on every sweep, so the factor's message never moves
+# -- which is the same thing the real run below writes for its own factor.
+
+
+def write_ep(plotter, name: str, kind: str):
+    """Render one EP view to ``<name>.png`` in this directory."""
+    plotter.figure(
+        path=str(OUTPUT_PATH),
+        filename=name,
+        format="png",
+        kind=kind,
+        width=WIDTH,
+    )
+    print(f"wrote {name}.png")
+
+
+class OverWideFit(AbstractFactorOptimiser):
+    """
+    A factor fit that comes back wider than its cavity in every variable -- the
+    shape a near-singular or noisy finite-difference Hessian produces. The
+    quotient ``q* / cavity`` then has negative precision, so ``update_invalid``
+    reverts every parameter and the factor's message never moves.
+
+    Copied from ``test_autofit/graphical/functionality/test_factor_failure_recovery.py``,
+    where the reversion bugs (PyAutoFit #1571, #1575, #1579) were fixed against
+    it, so the figures show the behaviour the tests pin.
+    """
+
+    def optimise(self, factor_approx, status=graph.Status()):
+        model_dist = graph.MeanField(
+            {
+                v: NormalMessage(float(m.mean), float(m.sigma) * 3.0)
+                for v, m in factor_approx.cavity_dist.items()
+            }
+        )
+        return model_dist, graph.Status(success=True, messages=(), updated=True)
+
+
+class PartialRevertFit(AbstractFactorOptimiser):
+    """
+    A factor fit that is valid in one variable and over-wide in another, on
+    every sweep: the quotient ``q* / cavity`` has positive precision for the
+    first (so it updates) and negative precision for the second (so
+    ``update_invalid`` reverts every one of its parameters and its message never
+    moves). The factor updates; one of its variables never does.
+    """
+
+    def __init__(self, reverting: str):
+        super().__init__()
+        self.reverting = reverting
+
+    def optimise(self, factor_approx, status=graph.Status()):
+        model_dist = graph.MeanField(
+            {
+                v: NormalMessage(
+                    float(m.mean),
+                    float(m.sigma) * (3.0 if v.name == self.reverting else 0.5),
+                )
+                for v, m in factor_approx.cavity_dist.items()
+            }
+        )
+        return model_dist, graph.Status(success=True, messages=(), updated=True)
+
+
+def ep_model():
+    """
+    The **model** view: the hierarchical factor graph, drawable before the
+    first sweep and written once per run as ``graph_model.png``.
+
+    The same model as ``graphical_hierarchical`` -- so the two figures can be
+    read side by side -- but drawn as the explicit factor graph EP sweeps:
+    square factor nodes, round variable nodes, and the edges between them.
+    """
+    return af.EPPlotter(_hierarchical_factor_graph_model().graph), "model"
+
+
+def ep_state_stale():
+    """
+    The **state** view with a stalled plate member: three datasets, one of
+    which never updates.
+
+    The acceptance the epic review asked for by name -- a plate must never
+    report "3 datasets, working" when one of its members has done nothing. The
+    plate carries the count and names the failure; the failing member is
+    expanded beside it in grey, badged with its zero updates.
+    """
+    from autofit.graphical.declarative.factor.analysis import AnalysisFactor
+    from autofit.graphical.expectation_propagation.history import (
+        EPHistory,
+        FactorHistory,
+    )
+    from autofit.graphical.utils import StatusFlag
+
+    factor_graph = _hierarchical_factor_graph_model().graph
+    analysis_factors = [
+        factor for factor in factor_graph.factors if isinstance(factor, AnalysisFactor)
+    ]
+    stalled = analysis_factors[-1]
+
+    history = EPHistory(kl_tol=None, evidence_tol=None)
+    for factor in factor_graph.factors:
+        entry = FactorHistory(factor)
+        for _ in range(4):
+            if factor is stalled:
+                status = graph.Status(
+                    success=True,
+                    updated=False,
+                    flag=StatusFlag.BAD_PROJECTION,
+                    changed={variable: False for variable in factor.variables},
+                )
+            else:
+                status = graph.Status(
+                    success=True, updated=True, flag=StatusFlag.SUCCESS
+                )
+            entry.history.append((None, status))
+        history.history[factor] = entry
+
+    return af.EPPlotter(factor_graph, ep_history=history), "state"
+
+
+def ep_state_reverted():
+    """
+    The **state** view of a real four-sweep EP run in which one factor's
+    projection is rejected for one of its two variables on every sweep.
+
+    ``like_xy`` updates -- so no factor-level staleness is reported -- while
+    ``y``'s message never moves off the one it started with. The figure marks
+    the ``(factor, variable)`` pair it happened to, which is the only place
+    that fact is visible (PyAutoFit #1575).
+    """
+    from autofit.graphical.expectation_propagation.factor_optimiser import (
+        ExactFactorFit,
+    )
+    from autofit.graphical.expectation_propagation.history import EPHistory
+
+    x, y = Variable("x"), Variable("y")
+
+    def joint(x, y):
+        return -0.5 * (np.sum((x - 3.0) ** 2) + np.sum((y - 2.0) ** 2))
+
+    prior_x = NormalMessage(1.0, 2.0).as_factor(x, name="prior_x")
+    prior_y = NormalMessage(1.0, 2.0).as_factor(y, name="prior_y")
+    likelihood = graph.Factor(joint, x, y, name="like_xy")
+
+    factor_graph = graph.FactorGraph([prior_x, prior_y, likelihood])
+    model_approx = graph.EPMeanField.from_approx_dists(
+        factor_graph,
+        {x: NormalMessage(0.0, 10.0), y: NormalMessage(0.0, 10.0)},
+    )
+
+    optimiser = graph.EPOptimiser(
+        factor_graph,
+        factor_optimisers={
+            prior_x: ExactFactorFit(),
+            prior_y: ExactFactorFit(),
+            likelihood: PartialRevertFit(reverting="y"),
+        },
+        # `kl_tol=None` disables the convergence check: this graph is exact and
+        # would otherwise be declared converged after one sweep.
+        ep_history=EPHistory(kl_tol=None),
+        paths=False,
+    )
+    optimiser.run(model_approx, max_steps=4, max_consecutive_failures=100)
+
+    return af.EPPlotter(factor_graph, ep_history=optimiser.ep_history), "state"
+
+
+EP_FIGURES = {
+    "ep_model": ep_model,
+    "ep_state_stale": ep_state_stale,
+    "ep_state_reverted": ep_state_reverted,
+}
+
+
 FIGURES = {
     "gaussian": gaussian,
     "gaussian_customised": gaussian_customised,
@@ -325,6 +530,24 @@ def main():
 
     for name, model in lens_models().items():
         write(model, name)
+
+    ep_main()
+
+
+def ep_main():
+    """
+    The EP figures alone -- the phase-5 evidence.
+
+    ``namer`` -- the source of a declarative factor's name
+    (``AnalysisFactor0``, ``HierarchicalFactor0``) -- is a global counter, so it
+    is reset before each figure. Otherwise the second graph built in a session
+    is labelled ``AnalysisFactor3`` and a reader comparing two figures is
+    comparing different numbers for the same thing.
+    """
+    for name, builder in EP_FIGURES.items():
+        namer.reset()
+        plotter, kind = builder()
+        write_ep(plotter, name, kind)
 
 
 if __name__ == "__main__":

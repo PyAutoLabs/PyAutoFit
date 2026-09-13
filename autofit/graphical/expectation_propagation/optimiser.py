@@ -285,7 +285,9 @@ class EPOptimiser:
             with open(self.output_path / "graph.info", "w+") as f:
                 f.write(self.factor_graph.info)
 
-            self.visualiser = Visualise(self.ep_history, self.output_path)
+            self.visualiser = Visualise(
+                self.ep_history, self.output_path, factor_graph=self.factor_graph
+            )
 
     @classmethod
     def from_meanfield(
@@ -602,7 +604,7 @@ class EPOptimiser:
 
             else:  # If no break do next iteration
                 if self.visualiser and _should_visualise:
-                    self.visualiser()
+                    self.visualiser(model_approx)
                 if self.output_path and _should_output:
                     self._output_results(model_approx)
                     self._output_diagnostics()
@@ -610,7 +612,7 @@ class EPOptimiser:
             break  # stop iterations
 
         if self.paths:
-            self.visualiser()
+            self.visualiser(model_approx)
             self._output_results(model_approx)
             self._output_diagnostics(final=True, model_approx=model_approx)
         self._warn_sigma_collapse()
