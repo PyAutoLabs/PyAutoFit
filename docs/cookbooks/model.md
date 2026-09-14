@@ -111,7 +111,12 @@ normalization                 LogUniformPrior [2], lower_limit = 1e-06, upper_li
 sigma                         UniformPrior [3], lower_limit = 0.0, upper_limit = 25.0
 ```
 
-We can also draw the model, via `af.ModelPlotter`:
+The same model can also be visualized as a figure, making its structure easier to understand at a glance.
+
+The figure shows how the model is organized: which parameters belong to each component, and whether they are free,
+fixed, shared, linked by an expression, solved during the fit, or not configured. `model.info` provides the
+corresponding numerical details, including the prior assigned to each free parameter and the value of each fixed
+parameter.
 
 ```python
 af.ModelPlotter(model).figure()
@@ -122,13 +127,8 @@ af.ModelPlotter(model).figure()
 :width: 600
 ```
 
-The figure is the **map** of a model and the `info` above is its **legend**: the map shows the structure, meaning
-which components own which parameters and which of those parameters are fixed, shared, related to one another or
-constrained, whereas the `info` lists the priors and values themselves. For a model this simple the two say much the
-same thing, but the map is what stays readable as models grow.
-
 Setting `model_figure: true` in a workspace's `config/output.yaml` writes this figure as a `model.png` beside
-`model.info` for every search, so every fit keeps its own map.
+`model.info` for every search.
 
 ## Priors (Model)
 
@@ -321,8 +321,7 @@ af.ModelPlotter(model).figure()
 :width: 600
 ```
 
-The fixed `centre` is drawn greyed out and the footer counts it as a fixed leaf slot rather than a sampled scalar, so
-the map says at a glance that this model is fitted with two free parameters and not three.
+The `centre` is now fixed rather than sampled, so this model is fitted with two free parameters and not three.
 
 The overwriting of priors shown above can be achieved via the following alternative API:
 
@@ -676,9 +675,8 @@ af.ModelPlotter(model).figure()
 :width: 600
 ```
 
-The map puts the two fixed values (`gaussian.normalization` and `exponential.centre`) and the assertion
-`exponential.rate > 5.0` into a single read. The assertion in particular does not appear in the `info` above at all,
-which is the clearest case of the map carrying something the legend cannot.
+This model fixes two values (`gaussian.normalization` and `exponential.centre`) and adds the assertion
+`exponential.rate > 5.0`. The assertion in particular does not appear in the `info` above at all.
 
 Below is an alternative API that can be used to create the same model as above.
 

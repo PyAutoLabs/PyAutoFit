@@ -153,11 +153,9 @@ af.ModelPlotter(factor_graph.global_prior_model).figure()
 :width: 600
 ```
 
-The dashed frame is a **plate**: one `Gaussian` drawn once, standing for all three datasets, labelled `3 datasets`. The
-`centre` shared by every dataset is hoisted out into the card above, joined to the plate by a blue line, and its chip
-inside the plate carries a blue `shared` badge. The `normalization` and `sigma` chips are marked `independent`, because
-each dataset gets a prior of its own, and the green `data` chip is the observed dataset. The footer counts the fit the
-prose below describes: 1 shared across datasets, 2 per dataset × 3 datasets, 7 unique sampled scalars.
+Every dataset is fitted by the same `Gaussian`, whose `centre` is one prior shared across all three datasets,
+whereas `normalization` and `sigma` each have a prior per dataset. That is 1 shared parameter plus 2 per dataset
+across 3 datasets, 7 free parameters in total.
 
 The factor graph above is made up of two components:
 
@@ -188,30 +186,27 @@ dataset one-by-one.
 
 ## Shared Or Hierarchical
 
-Sharing a parameter and drawing it hierarchically sound alike in words but are different models, and the figure is
-the quickest way to tell them apart.
+Sharing a parameter and drawing it hierarchically sound alike in words but are different models.
 
-A **shared** parameter is one prior object used by every dataset, so the datasets fit literally the same number. Share
-all three of `centre`, `normalization` and `sigma` and every chip carries the blue `shared` badge, the hoisted card
-holds all three, and 3 datasets cost 3 sampled scalars:
+A **shared** parameter is one prior object used by every dataset, so the datasets fit literally the same number.
+Share all three of `centre`, `normalization` and `sigma` and 3 datasets cost just 3 free parameters:
 
 ```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/images/model_figures/graphical_shared.png
 :alt: The model figure of a fully shared graphical model, with centre, normalization and sigma hoisted into one shared card and each chip badged shared.
 :width: 600
 ```
 
-A **hierarchical** parameter is different for every dataset, but each one is *drawn* from a parent distribution whose
-own parameters are fitted. Drawn is not shared. Give each dataset's `centre` an `af.HierarchicalFactor` parent and the
-figure hoists that parent into a violet card of its own, holding the `mean` and `sigma` of the distribution, with a
-violet arrow running into the `centre` chip, which reads `centre · drawn`:
+A **hierarchical** parameter is different for every dataset, but each one is *drawn* from a parent distribution
+whose own parameters are fitted. Drawn is not shared. Give each dataset's `centre` an `af.HierarchicalFactor` parent
+and that parent contributes a `mean` and a `sigma` of its own to the model:
 
 ```{image} https://raw.githubusercontent.com/PyAutoLabs/PyAutoFit/main/docs/images/model_figures/graphical_hierarchical.png
 :alt: The model figure of a hierarchical graphical model, with a violet HierarchicalFactor card holding mean and sigma and a violet arrow into the drawn centre chip inside the plate.
 :width: 600
 ```
 
-The footers say what this costs: the shared figure counts 3 unique sampled scalars, the hierarchical one 2
-hyper-parameters plus 3 per dataset × 3 datasets, so 11. This hierarchical composition is the model built in
+The two cost different amounts: the shared model has 3 free parameters, the hierarchical one 2 hyper-parameters
+plus 3 per dataset × 3 datasets, so 11. This hierarchical composition is the model built in
 [HowToFit chapter 3, tutorial 4](https://github.com/PyAutoLabs/HowToFit/blob/main/notebooks/chapter_3_graphical_models/tutorial_4_hierachical_models.ipynb).
 
 ## Expectation Propagation
@@ -244,8 +239,7 @@ the structure alone, written once at the start of the run:
 ```
 
 Square boxes are factors, rounded pills are variables, and a line is an incidence: this variable is one of that
-factor's arguments. The dashed frame is a plate, exactly as in the model figures above -- three `AnalysisFactor`s with
-the same signature are drawn once, and a variable each of them has its own copy of is drawn once inside the plate
+factor's arguments. The dashed frame is a plate -- three `AnalysisFactor`s with the same signature are drawn once, and a variable each of them has its own copy of is drawn once inside the plate
 badged `x3`. The `HierarchicalFactor0` box collapses its three members the same way, reading `3 members`, with its own
 `mean` and `sigma` as hyper-variables above it.
 

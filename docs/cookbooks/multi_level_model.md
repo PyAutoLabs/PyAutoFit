@@ -107,7 +107,12 @@ gaussian_list
         sigma                      UniformPrior [4], lower_limit = 0.0, upper_limit = 25.0
 ```
 
-The hierarchy the `info` indents is what the model figure draws as containment:
+The same model can also be visualized as a figure, making its structure easier to understand at a glance.
+
+The figure shows how the model is organized: which parameters belong to each component, and whether they are free,
+fixed, shared, linked by an expression, solved during the fit, or not configured. `model.info` provides the
+corresponding numerical details, including the prior assigned to each free parameter and the value of each fixed
+parameter.
 
 ```python
 af.ModelPlotter(model).figure()
@@ -118,11 +123,9 @@ af.ModelPlotter(model).figure()
 :width: 600
 ```
 
-The figure is the **map** of the model and the `info` above is its **legend**: the map shows which component owns
-which parameters, so `higher_level_centre` sits in the outer `MultiLevelGaussians` card while the two `Gaussian`'s
-sit inside the `gaussian_list` frame nested within it. That is exactly the reason to use a multi-level model, drawn
-rather than indented, and the repeated `Gaussian`'s are collapsed into a single frame labelled with how many
-components it stands for.
+The `higher_level_centre` belongs to the outer `MultiLevelGaussians` object whereas the two `Gaussian`'s are
+contained within its `gaussian_list`. That hierarchy is the reason to use a multi-level model, and the `info` above
+can only express it as indentation.
 
 ## Instances
 
