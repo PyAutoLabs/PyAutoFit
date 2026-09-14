@@ -86,10 +86,28 @@ You guide the science; it writes and runs Python scripts you can inspect, rerun 
 ## HowToFit
 
 For users less familiar with Bayesian inference and scientific analysis you may wish to read through
-the **HowToFits** lectures. These teach you the basic principles of Bayesian inference, with the
+the **HowToFit** lectures. These teach you the basic principles of Bayesian inference, with the
 content pitched at undergraduate level and above.
 
 The lectures are available in the [standalone HowToFit repository](https://github.com/PyAutoLabs/HowToFit).
+
+Use the [Jupyter notebooks](https://github.com/PyAutoLabs/HowToFit/tree/main/notebooks) if you want to run
+the code (recommended), or read the available [Markdown lectures](https://github.com/PyAutoLabs/HowToFit/tree/main/markdown)
+directly on GitHub.
+
+For help alongside the lectures, open the [autofit_assistant](https://github.com/PyAutoLabs/autofit_assistant)
+repository in your AI coding agent, following its setup instructions, and paste:
+
+```text
+Enter HowToFit mode.
+
+I want to work through the HowToFit lectures. Show me where to find them
+and how to use Jupyter Notebook or Markdown, then help me with questions
+as I go.
+```
+
+The assistant will answer questions about concepts, equations, code and results as you study, and help with
+notebook errors. Share the lecture link and section or the cell you are working on; you choose when to move on.
 
 ## Support
 
