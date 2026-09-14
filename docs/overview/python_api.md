@@ -11,7 +11,7 @@ extend that code yourself.
 [`scripts/overview/overview_1_the_basics.py`](https://github.com/PyAutoLabs/autofit_workspace/blob/main/scripts/overview/overview_1_the_basics.py)
 and [`notebooks/overview/overview_1_the_basics.ipynb`](https://github.com/PyAutoLabs/autofit_workspace/blob/main/notebooks/overview/overview_1_the_basics.ipynb),
 which you can also
-[run in your browser on Colab](https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.9.11.1/notebooks/overview/overview_1_the_basics.ipynb)
+[run in your browser on Colab](https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.9.14.1/notebooks/overview/overview_1_the_basics.ipynb)
 without installing anything.
 
 **PyAutoFit** is a Python based probabilistic programming language for model fitting and Bayesian inference
