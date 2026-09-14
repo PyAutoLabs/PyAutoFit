@@ -1203,6 +1203,13 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             search_internal=None,
         )
 
+        # Run the analysis' own output hooks, exactly as start_resume_fit does —
+        # a script that writes a file in save_results and reads it back after the
+        # fit (e.g. autofit_workspace overview_2's science_summary.json) sees a
+        # complete result folder only if the bypass calls them too.
+        analysis.save_results(paths=self.paths, result=result)
+        analysis.save_results_combined(paths=self.paths, result=result)
+
         model.unfreeze()
 
         # Mark the fit complete, exactly as start_resume_fit does — a bypassed
