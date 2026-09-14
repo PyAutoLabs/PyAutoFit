@@ -15,7 +15,7 @@
 [Introduction on Colab](https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.9.14.1/notebooks/overview/overview_1_the_basics.ipynb) |
 [HowToFit](https://github.com/PyAutoLabs/HowToFit)
 
-**Bring your models, data and likelihood code. Fit models, explore results and develop your analysis through conversation.**
+**PyAutoFit is designed so scientists can bring their models, data and likelihood code, then fit models, explore results and develop analyses using natural language with an AI coding agent.**
 
 ## Getting Started
 
