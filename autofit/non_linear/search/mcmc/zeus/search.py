@@ -6,6 +6,7 @@ from typing import Dict, Optional, TYPE_CHECKING
 import numpy as np
 import os
 
+from autofit import exc
 from autofit.mapper.model_mapper import ModelMapper
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.fitness import Fitness
@@ -335,11 +336,12 @@ class Zeus(AbstractMCMC):
 
         search_internal = search_internal or self.paths.load_search_internal()
 
-        if is_test_mode():
+        test_mode = is_test_mode()
 
-            samples_after_burn_in = search_internal.get_chain(
-                discard=5, thin=5, flat=True
-            )
+        if test_mode:
+
+            discard = 5
+            thin = 5
 
         else:
             auto_correlations = self.auto_correlations_from(
@@ -348,29 +350,51 @@ class Zeus(AbstractMCMC):
 
             discard = int(3.0 * np.max(auto_correlations.times))
             thin = int(np.max(auto_correlations.times) / 2.0)
-            samples_after_burn_in = search_internal.get_chain(
-                discard=discard, thin=thin, flat=True
+
+        samples_after_burn_in = search_internal.get_chain(
+            discard=discard, thin=thin, flat=True
+        )
+
+        if not test_mode and len(samples_after_burn_in) == 0:
+
+            logging.info(
+                """
+                After thinnng the Zeus samples in order to remove burn-in, no samples were left.
+                
+                To create a samples object containing samples, so that the code can continue and results
+                can be inspected, the full list of samples before removing burn-in has been used. This may 
+                indicate that the sampler has not converged and therefore your results may not be reliable.
+                
+                To fix this, run Zeus with more steps to ensure convergence is achieved or change the auto
+                correlation settings to be less aggressive in thinning samples.                
+                """
             )
 
-            if len(samples_after_burn_in) == 0:
+            discard = 0
+            thin = 1
 
-                logging.info(
-                    """
-                    After thinnng the Zeus samples in order to remove burn-in, no samples were left.
-                    
-                    To create a samples object containing samples, so that the code can continue and results
-                    can be inspected, the full list of samples before removing burn-in has been used. This may 
-                    indicate that the sampler has not converged and therefore your results may not be reliable.
-                    
-                    To fix this, run Zeus with more steps to ensure convergence is achieved or change the auto
-                    correlation settings to be less aggressive in thinning samples.                
-                    """
-                )
-
-                samples_after_burn_in = search_internal.get_chain(flat=True)
+            samples_after_burn_in = search_internal.get_chain(flat=True)
 
         parameter_lists = samples_after_burn_in.tolist()
-        log_posterior_list = search_internal.get_log_prob(flat=True).tolist()
+
+        # The log posteriors must be requested with the *same* `discard` and `thin`
+        # as whichever branch above produced the chain, otherwise sample `i`'s
+        # parameters are paired with a different sample's log posterior, and the
+        # `zip` below silently truncates to the shorter list (PyAutoFit#1628).
+        log_posterior_list = search_internal.get_log_prob(
+            discard=discard, thin=thin, flat=True
+        ).tolist()
+
+        if len(parameter_lists) != len(log_posterior_list):
+            raise exc.SamplesException(
+                "The number of Zeus parameter samples does not match the number of log "
+                "posterior values returned by the sampler: "
+                f"{len(parameter_lists)} parameter samples versus "
+                f"{len(log_posterior_list)} log posterior values. "
+                "The parameters and log posteriors are therefore not in correspondence "
+                "and the samples cannot be built."
+            )
+
         log_prior_list = model.log_prior_list_from(parameter_lists=parameter_lists)
 
         log_likelihood_list = [

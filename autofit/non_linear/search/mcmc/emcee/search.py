@@ -9,6 +9,7 @@ import numpy as np
 
 from autonerves import conf
 
+from autofit import exc
 from autofit.mapper.model_mapper import ModelMapper
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.fitness import Fitness
@@ -293,9 +294,8 @@ class Emcee(AbstractMCMC):
         search_internal = search_internal or self.backend
 
         if is_test_mode():
-            samples_after_burn_in = search_internal.get_chain(
-                discard=5, thin=5, flat=True
-            )
+            discard = 5
+            thin = 5
 
         else:
             auto_correlations = self.auto_correlations_from(
@@ -304,19 +304,31 @@ class Emcee(AbstractMCMC):
 
             discard = int(3.0 * np.max(auto_correlations.times))
             thin = int(np.max(auto_correlations.times) / 2.0)
-            samples_after_burn_in = search_internal.get_chain(
-                discard=discard, thin=thin, flat=True
-            )
+
+        samples_after_burn_in = search_internal.get_chain(
+            discard=discard, thin=thin, flat=True
+        )
 
         parameter_lists = samples_after_burn_in.tolist()
 
         log_prior_list = model.log_prior_list_from(parameter_lists=parameter_lists)
 
-        total_samples = len(parameter_lists)
+        # The log posteriors must be requested with the *same* `discard` and `thin`
+        # as the chain above, otherwise sample `i`'s parameters are paired with a
+        # different sample's log posterior (PyAutoFit#1628).
+        log_posterior_list = search_internal.get_log_prob(
+            discard=discard, thin=thin, flat=True
+        ).tolist()
 
-        log_posterior_list = search_internal.get_log_prob(flat=True)[
-            -total_samples - 1 : -1
-        ].tolist()
+        if len(parameter_lists) != len(log_posterior_list):
+            raise exc.SamplesException(
+                "The number of Emcee parameter samples does not match the number of log "
+                "posterior values returned by the sampler: "
+                f"{len(parameter_lists)} parameter samples versus "
+                f"{len(log_posterior_list)} log posterior values. "
+                "The parameters and log posteriors are therefore not in correspondence "
+                "and the samples cannot be built."
+            )
 
         log_likelihood_list = [
             log_posterior - log_prior
