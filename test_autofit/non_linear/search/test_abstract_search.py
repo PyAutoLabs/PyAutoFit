@@ -423,6 +423,71 @@ class TestBypassWritesCompleted:
         assert result is not None
 
 
+class _SaveResultsRecordingAnalysis(af.m.MockAnalysis):
+    """Records every call its output hooks receive, so a test can assert the
+    bypass ran them rather than inspecting files (the test config runs with
+    `remove_files: true`)."""
+
+    def __init__(self):
+        super().__init__()
+        self.save_results_calls = []
+        self.save_results_combined_calls = []
+
+    def log_likelihood_function(self, instance):
+        # A float, not `MockAnalysis`' `[1]`: mode 2 calls the likelihood once
+        # and casts the return with `float()`.
+        return 1.0
+
+    def save_results(self, paths, result):
+        self.save_results_calls.append((paths, result))
+
+    def save_results_combined(self, paths, result):
+        self.save_results_combined_calls.append((paths, result))
+
+
+class TestBypassCallsSaveResults:
+    """
+    The bypass (PYAUTO_TEST_MODE=2/3) promises "all expected output files so
+    that downstream code sees a complete result folder", but it wrote only
+    samples, samples_summary and the .completed marker — it never ran the
+    analysis' own output hooks, which start_resume_fit calls unconditionally.
+    Any script that writes a file in `save_results` and reads it back after the
+    fit therefore failed under smoke: autofit_workspace
+    `overview_2_scientific_workflow` died on a missing `science_summary.json`
+    in Heart's workspace-smoke run (PyAutoFit #1624).
+
+    The hooks are NOT gated on `skip_fit_output()` — the normal path does not
+    gate them either, and the smoke profile that exposed the bug sets
+    `PYAUTO_SKIP_FIT_OUTPUT=1`, so gating would reproduce the bug under exactly
+    the conditions this fix targets.
+    """
+
+    @pytest.mark.parametrize("mode", ["2", "3"])
+    def test__bypassed_fit__calls_both_save_results_hooks_with_paths_and_result(
+        self, monkeypatch, mode
+    ):
+        monkeypatch.setenv("PYAUTO_TEST_MODE", mode)
+
+        analysis = _SaveResultsRecordingAnalysis()
+
+        search = af.DynestyStatic(
+            name=f"bypass_save_results_{mode}",
+            unique_tag=f"bypass_save_results_{mode}_test",
+        )
+
+        result = search.fit(model=af.Model(af.m.MockClassx2), analysis=analysis)
+
+        assert len(analysis.save_results_calls) == 1
+        assert len(analysis.save_results_combined_calls) == 1
+
+        for paths, recorded_result in (
+            analysis.save_results_calls[0],
+            analysis.save_results_combined_calls[0],
+        ):
+            assert paths is search.paths
+            assert recorded_result is result
+
+
 class _FitExceptionAnalysis(af.m.MockAnalysis):
     """Analysis whose likelihood always raises `FitException`, mimicking a
     pathological instance (non-PD inversion / NaN Delaunay mesh) that a real
