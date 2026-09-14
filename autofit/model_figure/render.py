@@ -420,6 +420,11 @@ def save(figure, path=None, filename="model", format="show"):
     Show or write the figure, mirroring
     ``autofit/non_linear/plot/plot_util.py:output_figure`` with ``svg`` added.
 
+    ``format="show"`` returns ``None``, as ``output_figure`` does: the figure has
+    already been drawn, and handing a ``Figure`` back to a notebook makes IPython
+    render it a *second* time as the cell's ``execute_result`` beside the one
+    ``plt.show()`` published.
+
     ``format=None`` builds the figure and neither shows nor writes it; any other
     unrecognised format raises rather than silently doing nothing.
 
@@ -434,7 +439,8 @@ def save(figure, path=None, filename="model", format="show"):
         return figure
     if format == "show":
         plt.show()
-        return figure
+        plt.close(figure)
+        return None
     if format not in ("png", "pdf", "svg"):
         raise ValueError(
             f"format must be one of None, 'show', 'png', 'svg', 'pdf', not {format!r}"
