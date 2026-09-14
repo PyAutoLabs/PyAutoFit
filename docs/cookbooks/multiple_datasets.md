@@ -172,8 +172,12 @@ To inspect the model, we print `factor_graph.global_prior_model.info`.
 print(factor_graph.global_prior_model.info)
 ```
 
-The figure is the **map** of this global model and the `info` is its **legend**: the map shows the structure, meaning
-which dataset gets which component and which parameters are shared between them, while the `info` lists the priors.
+The same model can also be visualized as a figure, making its structure easier to understand at a glance.
+
+The figure shows how the model is organized: which parameters belong to each component, and whether they are free,
+fixed, shared, linked by an expression, solved during the fit, or not configured. `model.info` provides the
+corresponding numerical details, including the prior assigned to each free parameter and the value of each fixed
+parameter.
 
 ```python
 af.ModelPlotter(factor_graph.global_prior_model).figure()
@@ -184,9 +188,8 @@ af.ModelPlotter(factor_graph.global_prior_model).figure()
 :width: 600
 ```
 
-Because every dataset is fitted by the same `Gaussian`, the three components collapse into one frame and each of
-`centre`, `normalization` and `sigma` carries a shared badge, which is the picture of a three-parameter fit to three
-datasets.
+Because every dataset is fitted by the same `Gaussian`, this global model has just three free parameters, `centre`,
+`normalization` and `sigma`, which are shared across all three datasets.
 
 To fit multiple datasets, we pass the `FactorGraphModel` to a non-linear search.
 
@@ -422,8 +425,8 @@ af.ModelPlotter(factor_graph.global_prior_model).figure()
 :width: 600
 ```
 
-Only `centre` now carries the shared badge; `normalization` and `sigma` are marked as independent, meaning one prior
-per dataset, and the footer counts the seven unique sampled scalars this makes.
+Only `centre` is now shared between the datasets, whereas `normalization` and `sigma` have one prior per dataset,
+giving seven free parameters in total.
 
 Fit this model to the data using dynesty.
 
@@ -572,8 +575,8 @@ af.ModelPlotter(factor_graph.global_prior_model).figure()
 :width: 600
 ```
 
-Each dataset's `sigma` pill states the expression that defines it, and `centre` and `normalization` are badged as
-shared, so the map says directly that adding a fourth dataset would add a fourth card and no new parameters.
+Each dataset's `sigma` is defined by an expression rather than sampled, and `centre` and `normalization` are shared
+between the datasets, so adding a fourth dataset would add no new free parameters.
 
 We can fit the model as per usual.
 
