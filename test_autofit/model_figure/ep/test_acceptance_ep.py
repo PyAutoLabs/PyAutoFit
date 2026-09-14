@@ -285,6 +285,30 @@ def test_the_filename_defaults_by_kind_and_the_formats_are_the_usual_four(
         plotter.figure(path=tmp_path, format="gif")
 
 
+def test_show_returns_nothing_so_a_notebook_draws_it_once(
+    stalled_plate, tmp_path, monkeypatch
+):
+    """
+    ``EPPlotter`` shares ``ModelPlotter``'s ``save``, so it shares the fix:
+    returning the ``Figure`` from the show path made IPython render it a second
+    time as the cell's ``execute_result``.
+    """
+    import matplotlib.pyplot as plt
+
+    shown = []
+    monkeypatch.setattr(plt, "show", lambda *args, **kwargs: shown.append(True))
+    open_before = set(plt.get_fignums())
+
+    factor_graph, _, _ = stalled_plate
+
+    figure = af.EPPlotter(factor_graph).figure(path=tmp_path, format="show")
+
+    assert shown == [True]
+    assert figure is None
+    assert set(plt.get_fignums()) == open_before
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_format_none_builds_the_figure_and_writes_nothing(stalled_plate, tmp_path):
     factor_graph, _, _ = stalled_plate
 

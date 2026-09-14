@@ -158,7 +158,9 @@ class ModelPlotter:
 
         Returns
         -------
-        The ``matplotlib`` ``Figure``.
+        The ``matplotlib`` ``Figure``, or ``None`` when ``format="show"``: the
+        figure has been shown and closed, and returning it would make a notebook
+        draw it a second time as the cell's own output.
         """
         from .render import draw, save
 

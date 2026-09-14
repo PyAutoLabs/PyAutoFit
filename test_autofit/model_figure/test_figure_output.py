@@ -43,16 +43,26 @@ def test_a_missing_directory_is_created(model, tmp_path):
     assert (target / "model.png").exists()
 
 
-def test_show_returns_a_figure_and_writes_nothing(model, tmp_path, monkeypatch):
+def test_show_returns_nothing_so_a_notebook_draws_it_once(model, tmp_path, monkeypatch):
+    """
+    The show path shows the figure and hands nothing back.
+
+    A returned ``Figure`` is rendered a second time by IPython's ``image/png``
+    formatter, as the ``execute_result`` of a cell ending on
+    ``af.ModelPlotter(model).figure()`` -- so the tutorials drew every model
+    twice.  ``output_figure``, the convention this mirrors, returns nothing and
+    always closes; so does this.
+    """
     shown = []
     monkeypatch.setattr(plt, "show", lambda *args, **kwargs: shown.append(True))
+    open_before = set(plt.get_fignums())
 
     figure = af.ModelPlotter(model).figure(path=tmp_path, format="show")
 
     assert shown == [True]
-    assert figure is not None
+    assert figure is None
+    assert set(plt.get_fignums()) == open_before
     assert list(tmp_path.iterdir()) == []
-    plt.close(figure)
 
 
 def test_an_unknown_format_raises_rather_than_silently_doing_nothing(model, tmp_path):
