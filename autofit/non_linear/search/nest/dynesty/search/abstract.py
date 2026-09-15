@@ -119,7 +119,8 @@ class AbstractDynesty(AbstractNest, ABC):
         iterations_per_full_update
             The number of iterations performed between every Dynesty back-up.
         number_of_cores
-            The number of cores sampling is performed using a Python multiprocessing Pool instance.
+            The number of cores sampling is performed using a Python multiprocessing Pool instance. A value of 1
+            builds no pool and runs serially.
         silence
             If True, the default print output of the non-linear search is silenced.
         force_x1_cpu
@@ -189,9 +190,12 @@ class AbstractDynesty(AbstractNest, ABC):
         Fit a model using the search and the Analysis class which contains the data and returns the log likelihood from
         instances of the model, which the `NonLinearSearch` seeks to maximize.
 
-        By default, Dynesty runs using an in-built multiprocessing Pool option. This occurs even
-        if `number_of_cores=1`, because the dynesty savestate includes this pool, meaning that a resumed run can
-        then increase the `number_of_cores`.
+        A multiprocessing pool is built only when `number_of_cores > 1`. At `number_of_cores=1` the search runs
+        fully serially with no pool, because a `Pool(1)` forces every likelihood call through a forked worker,
+        which deadlocks in XLA compilation when the likelihood touches JAX and hangs forever if that worker dies
+        (the same fix Nautilus received in #1442 / #1443; see #1630). Consequently, a run started with
+        `number_of_cores=1` cannot be resumed with more cores (`check_pool` raises a `SearchException`), exactly
+        as on the existing `force_x1_cpu` path.
 
         However, certain operating systems (e.g. Windows) do not support Python multiprocessing particularly well.
         This can cause Dynesty to crash when a pool is included. If this occurs (raising a `RunTimeException`)
@@ -241,7 +245,7 @@ class AbstractDynesty(AbstractNest, ABC):
 
         while not finished:
             try:
-                if self.force_x1_cpu or analysis._use_jax:
+                if self.number_of_cores <= 1 or self.force_x1_cpu or analysis._use_jax:
                     raise RuntimeError
 
                 Pool = _fork_pool_cls()
@@ -274,6 +278,10 @@ class AbstractDynesty(AbstractNest, ABC):
                     elif self.force_x1_cpu:
                         self.logger.info(
                             "Running Dynesty single-CPU per `force_x1_cpu=True` (no pool)."
+                        )
+                    elif self.number_of_cores <= 1:
+                        self.logger.info(
+                            "Running Dynesty single-CPU (number_of_cores=1, no pool)."
                         )
                     else:
                         self.logger.info(

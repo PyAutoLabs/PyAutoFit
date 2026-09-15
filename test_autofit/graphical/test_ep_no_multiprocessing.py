@@ -87,11 +87,7 @@ def test__ep_refuses_multi_core_search(factor_model, no_forking):
 
 
 @pytest.mark.filterwarnings("ignore::RuntimeWarning")
-def test__ep_single_core_search_unchanged(factor_model):
-    # No `no_forking` here: the guard is the only thing this change adds, and
-    # Dynesty's own single-core path still enters a `Pool(1)` of its own
-    # (`_fork_pool_cls`, with a serial RuntimeError fallback) — pre-existing
-    # behaviour this issue does not touch.
+def test__ep_single_core_search_unchanged(factor_model, no_forking):
     search = af.DynestyStatic(maxcall=5, number_of_cores=1)
 
     result, status = search.optimise(
