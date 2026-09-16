@@ -87,3 +87,41 @@ def test_extract_fits_closes_files(summary):
     after = len(os.listdir("/proc/self/fd"))
 
     assert after <= before + 1
+
+
+def test_json_does_not_shadow_fits(tmp_path):
+    """
+    A fit writes both `files/<name>.json` and `image/<name>.fits` (e.g. a lens fit's
+    `tracer`). `SearchOutput.value` searches JSONs first, so resolving the FITS source
+    through it returned the JSON object instead of the HDUList.
+    """
+    import json
+    import shutil
+
+    directory = tmp_path / "aggregate_summary"
+    shutil.copytree(
+        Path(__file__).parent / "aggregate_summary",
+        directory,
+    )
+    for fit_directory in directory.glob("fit_*"):
+        with open(fit_directory / "files" / "fit.json", "w+") as f:
+            json.dump({"shadow": "not the fits file"}, f)
+
+    from autofit.aggregator import Aggregator
+
+    summary = af.AggregateFITS(Aggregator.from_directory(directory))
+
+    result = summary.extract_fits(
+        [
+            FITSFit.ModelData,
+            FITSFit.ResidualMap,
+        ],
+    )
+    assert len(result) == 5
+
+
+def test_fits_source_missing(aggregator):
+    from autofit.aggregator.summary.aggregate_fits import fits_source
+
+    with pytest.raises(FileNotFoundError):
+        fits_source(list(aggregator)[0], "not_a_fits_file")

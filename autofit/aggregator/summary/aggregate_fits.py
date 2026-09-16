@@ -20,6 +20,32 @@ def subplot_filename(subplot: Enum) -> str:
         .lstrip("_")
     )
 
+def fits_source(result: SearchOutput, name: str):
+    """
+    The opened HDUList of the FITS output called `name` for a given search.
+
+    Resolved through `result.fits` rather than `result.value`, because `value` searches
+    JSON outputs first and a same-named JSON (e.g. `files/tracer.json` beside
+    `image/tracer.fits`) therefore shadows the FITS file.
+
+    Parameters
+    ----------
+    result
+        The search output.
+    name
+        The name of the fits file, without a suffix.
+
+    Returns
+    -------
+    The opened fits file.
+    """
+    for output in result.fits:
+        if output.name == name:
+            return output.value
+
+    raise FileNotFoundError(f"No FITS output named '{name}' in {result.directory}")
+
+
 class AggregateFITS:
     def __init__(self, aggregator: Union[Aggregator, List[SearchOutput]]):
         """
@@ -69,7 +95,7 @@ class AggregateFITS:
             for hdu in hdus:
                 source_name = subplot_filename(hdu)
                 if source_name not in sources:
-                    sources[source_name] = result.value(source_name)
+                    sources[source_name] = fits_source(result, source_name)
                 source = sources[source_name]
                 source_hdu = source[source.index_of(hdu.value)]
 
@@ -133,7 +159,7 @@ class AggregateFITS:
 
         output = []
         for result in self.aggregator:
-            source = result.value(filename)
+            source = fits_source(result, filename)
             try:
                 output.append(Table.read(source, format="fits").copy())
             finally:
