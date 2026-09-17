@@ -2299,6 +2299,14 @@ class AbstractPriorModel(AbstractModel):
         ``functools.cached_property`` writes to ``__dict__[name]``
         without a leading underscore, which would leak the string as
         a non-array JAX pytree leaf and break ``jax.jit(fit_from)``.
+
+        The free parameter count of each node is computed bottom-up and
+        memoised by object identity (``_subtree_unique_priors``) rather than
+        read from ``prior_count``. Every prefix of every leaf path is
+        described here, so asking each node for its own ``prior_count``
+        re-walks the whole subtree beneath it once per leaf below it, an
+        ``O(leaves x subtree)`` blowup that dominates the call on a large
+        model; memoising makes it one walk per node.
         """
         cached = self.__dict__.get("_parameterization_cache")
         if cached is not None:
@@ -2309,6 +2317,9 @@ class AbstractPriorModel(AbstractModel):
         formatter = TextFormatter(line_length=info_whitespace())
 
         paths = []
+
+        memo = {}
+        prefix_cache = {}
 
         for t in self.path_instance_tuples_for_class(
             (
@@ -2321,18 +2332,28 @@ class AbstractPriorModel(AbstractModel):
         ):
             for i in range(len(t[0])):
                 path = t[0][:i]
-                obj = self.object_for_path(path)
-                if isinstance(obj, TuplePrior):
-                    continue
-                if isinstance(obj, AbstractPriorModel):
-                    n = obj.prior_count
-                else:
-                    n = 0
-                if isinstance(obj, Model):
-                    name = obj.cls.__name__
-                else:
-                    name = type(obj).__name__
+                try:
+                    resolved = prefix_cache[path]
+                except KeyError:
+                    obj = self.object_for_path(path)
+                    if isinstance(obj, TuplePrior):
+                        resolved = None
+                    else:
+                        if isinstance(obj, AbstractPriorModel):
+                            n = len(_subtree_unique_priors(obj, memo))
+                        else:
+                            n = 0
+                        if isinstance(obj, Model):
+                            name = obj.cls.__name__
+                        else:
+                            name = type(obj).__name__
+                        resolved = (name, n)
+                    prefix_cache[path] = resolved
 
+                if resolved is None:
+                    continue
+
+                name, n = resolved
                 paths.append((("model",) + path, f"{name} (N={n})"))
 
         for group in find_groups(paths, limit=0):
@@ -2541,6 +2562,65 @@ class AbstractPriorModel(AbstractModel):
         """
 
         return [f"${label}$" for label in self.parameter_labels_with_superscripts]
+
+
+def _subtree_unique_priors(obj, memo: dict) -> dict:
+    """
+    The distinct ``Prior`` objects reachable from ``obj``, keyed by prior.
+
+    This mirrors, exactly, the set of priors that
+    ``path_instances_of_class(obj, Prior, ignore_class=None, ignore_children=True)``
+    would report (and hence ``obj.prior_count``), but memoised by object
+    identity in ``memo`` so that a node is walked at most once across the
+    whole enclosing call.
+
+    Parameters
+    ----------
+    obj
+        The object to search recursively.
+    memo
+        A dictionary mapping ``id(obj)`` to a ``(obj, result)`` pair. The
+        object itself is kept in the value so that its id cannot be recycled
+        by the garbage collector while the memo is alive.
+
+    Returns
+    -------
+    A dictionary mapping each distinct prior to itself.
+    """
+    key = id(obj)
+    hit = memo.get(key)
+    if hit is not None:
+        return hit[1]
+
+    if isinstance(obj, Prior):
+        result = {obj: obj}
+        memo[key] = (obj, result)
+        return result
+
+    # Inserted before recursing so that a cyclic reference terminates, in the
+    # same way that ``path_instances_of_class`` relies on
+    # ``DynamicRecursionCache``.
+    result = {}
+    memo[key] = (obj, result)
+
+    if isinstance(obj, list):
+        for item in obj:
+            result.update(_subtree_unique_priors(item, memo))
+        return result
+
+    # The AnnotationPriorModel special case in ``path_instances_of_class``
+    # only rewrites the *path* of a result, never its membership, so it has
+    # no bearing on the set of priors collected here.
+    try:
+        d = obj if isinstance(obj, dict) else obj.__dict__
+        for key_, value in d.items():
+            if key_.startswith("_"):
+                continue
+            result.update(_subtree_unique_priors(value, memo))
+    except (AttributeError, TypeError):
+        return result
+
+    return result
 
 
 def transfer_classes(instance, mapper, model_classes=None):
