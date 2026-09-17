@@ -280,3 +280,208 @@ centre                                                                          
 normalization                                                                   UniformPrior [1], lower_limit = 0.0, upper_limit = 1.0
 sigma                                                                           UniformPrior [2], lower_limit = 0.0, upper_limit = 1.0"""
     )
+
+
+# ---------------------------------------------------------------------------
+# Equivalence witness for the memoised ``parameterization`` implementation.
+#
+# ``_reference_parameterization`` below is the pre-optimisation algorithm,
+# copied verbatim from ``AbstractPriorModel.parameterization``: every prefix of
+# every leaf path is resolved with ``object_for_path`` and each model node is
+# asked for its own ``prior_count``. It is the oracle the current
+# implementation (which memoises the per-subtree prior set bottom-up) must
+# reproduce byte-for-byte.
+# ---------------------------------------------------------------------------
+
+
+def _reference_parameterization(model):
+    """The pre-optimisation ``parameterization`` algorithm, verbatim."""
+    from autofit.mapper.prior.abstract import Prior
+    from autofit.mapper.prior.constant import Constant
+    from autofit.mapper.prior.tuple_prior import TuplePrior
+    from autofit.mapper.prior_model.abstract import AbstractPriorModel
+    from autofit.mapper.prior_model.prior_model import Model
+    from autofit.mapper.prior_model.representative import find_groups
+    from autofit.text.formatter import TextFormatter
+    from autofit.tools.util import info_whitespace
+
+    formatter = TextFormatter(line_length=info_whitespace())
+
+    paths = []
+
+    for t in model.path_instance_tuples_for_class(
+        (
+            Prior,
+            float,
+            Constant,
+            tuple,
+        ),
+        ignore_children=True,
+    ):
+        for i in range(len(t[0])):
+            path = t[0][:i]
+            obj = model.object_for_path(path)
+            if isinstance(obj, TuplePrior):
+                continue
+            if isinstance(obj, AbstractPriorModel):
+                n = obj.prior_count
+            else:
+                n = 0
+            if isinstance(obj, Model):
+                name = obj.cls.__name__
+            else:
+                name = type(obj).__name__
+
+            paths.append((("model",) + path, f"{name} (N={n})"))
+
+    for group in find_groups(paths, limit=0):
+        formatter.add(*group)
+
+    return formatter.text
+
+
+def _build_benchmark_model(n_groups=2, n_gal=2, n_profiles=2):
+    """A nested model with priors shared across groups.
+
+    A shrunken copy of the micro-benchmark model that motivated memoising the
+    per-node prior count: deep nesting plus one prior shared by every group,
+    so a node's count is not simply the sum of its children's counts.
+    """
+    shared = af.UniformPrior(0.0, 1.0)
+    groups = []
+    for _ in range(n_groups):
+        gals = []
+        for _ in range(n_gal):
+            profiles = {f"p{k}": af.Model(af.ex.Gaussian) for k in range(n_profiles)}
+            profiles["p0"].centre = shared
+            gals.append(af.Collection(**profiles))
+        groups.append(af.Collection(galaxies=gals))
+    return af.Collection(groups=groups)
+
+
+def _nested_collections():
+    return af.Collection(
+        outer=af.Collection(
+            inner=af.Collection(
+                gaussian=af.Model(af.ex.Gaussian),
+                other=af.Model(af.ex.Gaussian),
+            ),
+            gaussian=af.Model(af.ex.Gaussian),
+        )
+    )
+
+
+def _shared_prior():
+    shared = af.UniformPrior(0.0, 1.0)
+    one = af.Model(af.ex.Gaussian)
+    two = af.Model(af.ex.Gaussian)
+    one.centre = shared
+    two.centre = shared
+    return af.Collection(one=one, two=two)
+
+
+def _list_children():
+    return af.Collection([af.Model(af.ex.Gaussian), af.Model(af.ex.Gaussian)])
+
+
+def _tuple_prior_model():
+    centre = af.TuplePrior()
+    centre.centre_0 = af.UniformPrior()
+    centre.centre_1 = af.UniformPrior()
+    return af.Model(af.ex.Gaussian, centre=centre)
+
+
+def _constant_and_float():
+    return af.Collection(a=1.0, b=af.Constant(2.0), g=af.Model(af.ex.Gaussian))
+
+
+def _zero_dimension_child():
+    return af.Collection(instance=af.ex.Gaussian(), model=af.Model(af.ex.Gaussian))
+
+
+def _integer_attribute():
+    model = af.Model(af.ex.Gaussian)
+    model.centre = 2
+    return model
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [
+        _nested_collections,
+        _shared_prior,
+        _list_children,
+        _tuple_prior_model,
+        _constant_and_float,
+        _zero_dimension_child,
+        _integer_attribute,
+        _build_benchmark_model,
+    ],
+)
+def test_parameterization_matches_reference(factory):
+    model = factory()
+
+    # The reference is computed on the same object, before ``parameterization``
+    # is ever touched, so both see identical prior ids and the
+    # ``_parameterization_cache`` cannot short-circuit the comparison.
+    reference = _reference_parameterization(model)
+    assert "_parameterization_cache" not in model.__dict__
+
+    assert model.parameterization == reference
+
+
+def test_shared_prior_counted_once():
+    """A prior shared by two children is counted once by their parent."""
+    model = _shared_prior()
+
+    lines = model.parameterization.split("\n")
+
+    # Two Gaussians (3 free parameters each) sharing one prior => 5, not 6.
+    assert lines[0].split()[-2:] == ["Collection", "(N=5)"]
+    assert model.prior_count == 5
+
+
+def test_parameterization_walks_each_node_once():
+    """``parameterization`` must not re-walk the tree once per leaf path.
+
+    The witness: the number of recursive ``path_instances_of_class`` calls a
+    whole ``parameterization`` makes is no more than the number a single
+    leaf-path listing makes -- i.e. at most one visit per node.
+    """
+    import autofit.mapper.model as model_module
+
+    from autofit.mapper.prior.abstract import Prior
+    from autofit.mapper.prior.constant import Constant
+
+    def count_calls(fn):
+        calls = {"n": 0}
+        original = model_module.path_instances_of_class
+
+        def counting(*args, **kwargs):
+            calls["n"] += 1
+            return original(*args, **kwargs)
+
+        model_module.path_instances_of_class = counting
+        try:
+            fn()
+        finally:
+            model_module.path_instances_of_class = original
+        return calls["n"]
+
+    model = _build_benchmark_model()
+    parameterization_calls = count_calls(lambda: model.parameterization)
+
+    other = _build_benchmark_model()
+    listing_calls = count_calls(
+        lambda: other.path_instance_tuples_for_class(
+            (
+                Prior,
+                float,
+                Constant,
+                tuple,
+            ),
+            ignore_children=True,
+        )
+    )
+
+    assert parameterization_calls == listing_calls
