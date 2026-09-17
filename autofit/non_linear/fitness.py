@@ -844,19 +844,38 @@ class Fitness:
         """
         Vectorized and JIT-compiled likelihood function.
 
-        This wraps the base likelihood function (`self.call`) with both
-        `jax.jit` and `jax.vmap`, producing a function that can evaluate
-        batches of parameter vectors efficiently in parallel. The first
-        call incurs compilation time, but subsequent calls are highly
-        optimized.
+        This wraps the base likelihood function (`self.call`) so that it evaluates a whole batch of
+        parameter vectors at once, as `jax.jit(jax.vmap(self.call))`. The order is jit **of** vmap:
+        the conventional composition, and the one `analysis/latent.py` already uses.
 
-        Because this is a `cached_property`, the compiled function is stored
-        after its first creation, avoiding repeated JIT compilation overhead.
+        That order means the batch is one XLA program. The outer jit traces `vmap(call)` once, keyed
+        on the shape of the batch it was given, and caches the compiled executable; a second call at
+        the same batch shape is a cache hit served from jit's C++ fast path, with no Python batching
+        trace in between. The previous composition, `jax.vmap(jax.jit(self.call))`, re-entered
+        Python's batching machinery on every call and dispatched the inner `pjit` eagerly underneath
+        the batching trace, which is where the `autogalaxy_workspace_test#118` hangs are parked.
+
+        The inner jit is dropped rather than kept: a jit nested inside a jit is inlined, so it adds a
+        call boundary and nothing else.
+
+        This is **not** a fix for the XLA CPU Eigen-pool FFT deadlock (`PyAutoFit#1530`). That fires
+        at execution time, and execution still happens once per call whatever the tracing order is.
+        The only measured effect of the ordering is the A/B run of 2026-08-23 on `rectangular_mge.py`
+        (control 8/10 stalls against 3/10 for jit-of-vmap, Fisher exact p=0.070), recorded there as
+        contributory rather than causal.
+
+        The compiled executable is still specialised per batch *length*, so a search that varies its
+        batch size recompiles per distinct length (see the PyAutoMind draft
+        `vmap_jit_recompiles_per_nautilus_batch_length.md`). This change neither fixes nor worsens
+        that.
+
+        Because this is a `cached_property`, the compiled function is stored after its first
+        creation, avoiding repeated JIT compilation overhead.
         """
         import jax
 
         return log_on_first_compile(
-            jax.vmap(jax.jit(self.call)),
+            jax.jit(jax.vmap(self.call)),
             "vectorized (vmap) likelihood function",
         )
 

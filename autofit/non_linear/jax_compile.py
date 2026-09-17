@@ -297,7 +297,8 @@ def log_on_first_compile(func, description):
 
     Returns
     -------
-    A callable with the same signature as `func`.
+    A callable with the same signature as `func`, carrying the wrapped callable
+    itself on `__wrapped__`.
     """
     state = {"compiled": False}
 
@@ -355,5 +356,11 @@ def log_on_first_compile(func, description):
         )
 
         return result
+
+    # Keep the jitted callable reachable for tests and diagnostics: its
+    # `_cache_size()` is the compile-count probe. Set explicitly rather than via
+    # `functools.wraps`, which would also copy the jit object's `__dict__` onto
+    # the wrapper.
+    wrapper.__wrapped__ = func
 
     return wrapper
