@@ -453,6 +453,34 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             log_norm=log_evidence if log_evidence is not None else 0.0,
         )
 
+        # Release the in-memory search internal before the result is pinned on
+        # the `Status`.
+        #
+        # `EPHistory`/`FactorHistory` append every `(approx, status)` pair of
+        # the run, so every `Status`, and therefore every `Result`, lives until
+        # the EP fit ends. `Result._search_internal` is the sampler, the
+        # sampler's likelihood callable is a `Fitness`, and a `Fitness` owns
+        # that factor step's compiled JAX executables (its `_vmap` / `_jit` /
+        # `_grad` `cached_property` caches). Left attached, an EP run therefore
+        # accumulates the compiled code of every factor search it has ever run:
+        # RAL job 342410 (`slope_hierarchy_scale`, 25 analysis factors) held 76
+        # searches' executables and died with `LLVM ERROR: Unable to allocate
+        # section memory!` inside 64 GB, after ~3 EP steps.
+        #
+        # Nothing in `autofit.graphical` reads the sampler afterwards (the
+        # consumers of `latest_result` use `.projected_model`, `.samples` and
+        # `.model`), and `Result.search_internal` still falls back to
+        # `paths.load_search_internal()`, so the sampler remains reachable from
+        # the on-disk dill for anything that does want it.
+        #
+        # Guarded because `optimise` does not require a `Result`: the regression
+        # suite's `StaticSearch` returns a bare object carrying only
+        # `projected_model` (as the `getattr` on `samples` above allows for).
+        release_search_internal = getattr(result, "release_search_internal", None)
+
+        if release_search_internal is not None:
+            release_search_internal()
+
         status.result = result
 
         return new_model_dist, status
