@@ -450,6 +450,32 @@ class Result(AbstractResult):
         except FileNotFoundError:
             pass
 
+    def release_search_internal(self):
+        """
+        Drop the in-memory reference to the non-linear search's internal sampler.
+
+        The internal sampler (e.g. the `nautilus.Sampler` or the dynesty sampler)
+        holds its likelihood callable, which is a `Fitness`, which in turn owns
+        that fit's compiled JAX executables via its `_vmap` / `_jit` / `_grad`
+        `cached_property` caches. A `Result` that is kept alive therefore keeps
+        an entire fit's compiled code alive with it.
+
+        This only releases the *in-memory* reference: the `search_internal`
+        property falls back to `paths.load_search_internal()`, so the sampler is
+        still reachable for any caller that needs it, provided the fit wrote its
+        `search_internal.dill` to disk.
+
+        Child results (a `CombinedResult` shares one search internal with every
+        child) are released too.
+        """
+        self._search_internal = None
+
+        for child_result in self.child_results or []:
+            release = getattr(child_result, "release_search_internal", None)
+
+            if release is not None:
+                release()
+
     @property
     def projected_model(self) -> AbstractPriorModel:
         """
