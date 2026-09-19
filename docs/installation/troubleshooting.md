@@ -22,8 +22,10 @@ The reasons for this are so that **PyAutoFit** can:
 If you have any errors relating to importing modules, loading data or outputting results it is likely because you
 are not running the script with the `autofit_workspace` as the working directory!
 
-## Support
+## Community & Support
 
-If you are still having issues with installation or using **PyAutoFit** in general, please raise an issue on the
-[autofit_workspace issues page](https://github.com/PyAutoLabs/autofit_workspace/issues) with a description of the
-problem and your system setup (operating system, Python version, etc.).
+Questions, help with your code or your analysis, and ideas: the
+[PyAutoLabs Discussions](https://github.com/orgs/PyAutoLabs/discussions).
+Bug reports with a reproducer (a snippet, the traceback, your versions):
+an issue on the library's tracker. The Slack is for collaborators, by
+invitation.

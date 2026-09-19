@@ -25,14 +25,16 @@ The following links are useful for new starters:
 - [The autofit_workspace GitHub repository](https://github.com/PyAutoLabs/autofit_workspace), which includes example scripts demonstrating **PyAutoFit**'s features.
 - [The standalone HowToFit repository](https://github.com/PyAutoLabs/HowToFit), a series of Jupyter notebook lectures which give new users a step-by-step introduction to **PyAutoFit**.
 
-## Support
+## Community & Support
 
-Support for installation issues, help with Fit modeling and using **PyAutoFit** is available by
-[raising an issue on the GitHub issues page](https://github.com/PyAutoLabs/PyAutoFit/issues).
+Questions, help with your code or your analysis, and ideas: the
+[PyAutoLabs Discussions](https://github.com/orgs/PyAutoLabs/discussions).
+Bug reports with a reproducer (a snippet, the traceback, your versions):
+an issue on the library's tracker. The Slack is for collaborators, by
+invitation.
 
-We also offer support on the **PyAutoFit** [Slack channel](https://pyautoFit.slack.com/), where we also provide the
-latest updates on **PyAutoFit**. Slack is invitation-only, so if you'd like to join send
-an [email](https://github.com/Jammy2211) requesting an invite.
+Collaborators receive the latest **PyAutoFit** updates in the [Slack channel](https://pyautoFit.slack.com/).
+Contact [James Nightingale](https://github.com/Jammy2211) about collaborator access.
 
 ## HowToFit
 

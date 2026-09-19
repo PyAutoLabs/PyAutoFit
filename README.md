@@ -109,11 +109,13 @@ as I go.
 The assistant will answer questions about concepts, equations, code and results as you study, and help with
 notebook errors. Share the lecture link and section or the cell you are working on; you choose when to move on.
 
-## Support
+## Community & Support
 
-Support for installation issues, help with Fit modeling and using **PyAutoFit** is available by
-[raising an issue on the GitHub issues page](https://github.com/PyAutoLabs/PyAutoFit/issues).
+Questions, help with your code or your analysis, and ideas: the
+[PyAutoLabs Discussions](https://github.com/orgs/PyAutoLabs/discussions).
+Bug reports with a reproducer (a snippet, the traceback, your versions):
+an issue on the library's tracker. The Slack is for collaborators, by
+invitation.
 
-We also offer support on the **PyAutoFit** [Slack channel](https://pyautoFit.slack.com/), where we also provide the
-latest updates on **PyAutoFit**. Slack is invitation-only, so if you'd like to join send
-an [email](https://github.com/Jammy2211) requesting an invite.
+Collaborators receive the latest **PyAutoFit** updates in the [Slack channel](https://pyautoFit.slack.com/).
+Contact [James Nightingale](https://github.com/Jammy2211) about collaborator access.
