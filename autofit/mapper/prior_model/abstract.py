@@ -1005,23 +1005,31 @@ class AbstractPriorModel(AbstractModel):
         model_instance : autofit.mapper.model.ModelInstance
             An object containing reconstructed model_mapper instances
         """
-        if len(vector) != self.prior_count:
+        priors = self._vector_priors()
+        if len(vector) != len(priors):
             raise AssertionError(
-                f"Vector length {len(vector)} != prior count {self.prior_count}"
+                f"Vector length {len(vector)} != prior count {len(priors)}"
             )
-        arguments = dict(
-            map(
-                lambda prior_tuple, physical_unit: (prior_tuple.prior, physical_unit),
-                self.prior_tuples_ordered_by_id,
-                vector,
-            )
-        )
+        arguments = dict(zip(priors, vector))
 
         return self.instance_for_arguments(
             arguments,
             ignore_assertions=ignore_assertions,
             xp=xp
         )
+
+    @frozen_cache
+    def _vector_priors(self) -> tuple:
+        """
+        The unique priors of this model in the canonical (id-sorted) parameter
+        order that ``instance_from_vector`` pairs with the entries of a vector.
+
+        Cached while the model is frozen (a search freezes its model for the whole
+        fit), so the per-call rebuild of the ``prior_tuples_ordered_by_id``
+        name/value wrappers is skipped on the likelihood hot path. Unfrozen models
+        recompute it on every call.
+        """
+        return tuple(prior_tuple.prior for prior_tuple in self.prior_tuples_ordered_by_id)
 
     def constrained_model_tuples(self):
         """
@@ -1835,8 +1843,12 @@ class AbstractPriorModel(AbstractModel):
         -------
             An instance of the class
         """
-        if not (
-            conf.instance["general"]["test"]["exception_override"] or ignore_assertions
+        # A model with no assertions has nothing to check, so the config lookup
+        # (a hot-path cost on every likelihood call) is skipped for it.
+        if (
+            getattr(self, "_assertions", None)
+            and not ignore_assertions
+            and not conf.instance["general"]["test"]["exception_override"]
         ):
             self.check_assertions(arguments, xp=xp)
 
