@@ -203,3 +203,35 @@ def test__save_samples__writes_samples_csv_when_the_best_point_is_rejected(
     assert instance is None
     assert (paths._files_path / "samples.csv").exists()
     assert (paths._files_path / "samples_summary.json").exists()
+
+
+def test__visualize__disabled_skips_all():
+    """
+    With ``visualization_enabled=False`` (EP factor searches, #1642) neither the
+    analysis visuals nor the search's ``plot_results`` run, and no samples are
+    loaded for plotting.
+    """
+    updater = SearchUpdater(
+        paths=MagicMock(),
+        timer=MagicMock(),
+        search_logger=logging.getLogger("test_updater"),
+        plot_results_func=MagicMock(),
+        samples_from_func=MagicMock(),
+        disable_output=False,
+        iterations_per_full_update=1.0,
+        visualization_enabled=False,
+    )
+    analysis = MagicMock()
+
+    updater.visualize(
+        model=MagicMock(),
+        analysis=analysis,
+        during_analysis=False,
+        samples_summary=MagicMock(),
+    )
+
+    analysis.should_visualize.assert_not_called()
+    analysis.visualize.assert_not_called()
+    analysis.visualize_combined.assert_not_called()
+    updater._samples_from.assert_not_called()
+    updater._plot_results.assert_not_called()

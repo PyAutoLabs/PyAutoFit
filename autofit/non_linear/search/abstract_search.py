@@ -136,6 +136,14 @@ def configure_handler(func):
 
 
 class NonLinearSearch(AbstractFactorOptimiser, ABC):
+    # Visualization switches toggled per factor search by ``optimise`` (EP),
+    # governed by ``general.yaml -> output -> visualize_ep_factor_searches``.
+    # Class-level (not set in ``__init__``) so search doubles that skip
+    # ``__init__`` (e.g. the regression suite's ``StaticSearch``) still have
+    # them. Outside EP both are always True.
+    _visualize_fit = True
+    _visualize_before_fit = True
+
     def __init__(
         self,
         name: Optional[str] = None,
@@ -430,7 +438,28 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             is_flat=True,
         )
 
-        result = self.fit(model=model, analysis=analysis)
+        # EP re-enters the same factor search once per EP step. By default only
+        # the first search of each factor draws its before-fit visuals and no
+        # factor search draws per-search visuals (corner plots, model-fit
+        # images): at small per-factor fits the plotting dominates the wall
+        # time and the images are overwritten every step anyway. Samples and
+        # summaries are still written, and the EP optimiser's own visuals
+        # (graph.png, ep_history) are unaffected. `.get` with a default so user
+        # configs that predate the key keep working.
+        visualize_ep_factor_searches = bool(
+            conf.instance["general"]["output"].get(
+                "visualize_ep_factor_searches", False
+            )
+        )
+
+        self._visualize_fit = visualize_ep_factor_searches
+        self._visualize_before_fit = visualize_ep_factor_searches or number == 0
+
+        try:
+            result = self.fit(model=model, analysis=analysis)
+        finally:
+            self._visualize_fit = True
+            self._visualize_before_fit = True
 
         # Record the sampler's log-evidence of this tilted-distribution fit on
         # the projected mean field — the per-factor Ẑₐ that README §5 documents
@@ -755,7 +784,9 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             )
             analysis.save_attributes(paths=self.paths)
 
-        if analysis.should_visualize(paths=self.paths):
+        if self._visualize_before_fit and analysis.should_visualize(
+            paths=self.paths
+        ):
             analysis.visualize_before_fit(
                 paths=self.paths,
                 model=model,
@@ -1469,6 +1500,9 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
                 disable_output=self.disable_output,
                 iterations_per_full_update=self.iterations_per_full_update,
             )
+        # Re-applied on every access: ``optimise`` toggles ``_visualize_fit``
+        # per EP factor search, and the cached updater must follow it.
+        self._search_updater.visualization_enabled = self._visualize_fit
         return self._search_updater
 
     def perform_update(
