@@ -47,6 +47,7 @@ class SearchUpdater:
         samples_from_func: Callable[[AbstractPriorModel, ...], Samples],
         disable_output: bool,
         iterations_per_full_update: float,
+        visualization_enabled: bool = True,
     ):
         self._paths = paths
         self._timer = timer
@@ -56,6 +57,10 @@ class SearchUpdater:
         self._disable_output = disable_output
         self._iterations_per_full_update = iterations_per_full_update
         self._iterations = 0
+        # When False, ``visualize`` is a no-op (analysis visuals and the
+        # search's ``plot_results``). Set per factor search by EP; see
+        # ``general.yaml -> output -> visualize_ep_factor_searches``.
+        self.visualization_enabled = visualization_enabled
 
     @property
     def iterations(self) -> int:
@@ -138,7 +143,12 @@ class SearchUpdater:
 
         Delegates to the analysis object for model-specific plots and to the
         search's ``plot_results`` for search-specific plots.
+
+        Returns immediately when ``visualization_enabled`` is False.
         """
+        if not self.visualization_enabled:
+            return
+
         self._logger.debug("Visualizing")
 
         paths = paths_override or self._paths
