@@ -8,7 +8,7 @@ from typing import *
 
 from autonerves.class_path import get_class_path
 from autonerves.exc import ConfigException
-from autofit.mapper.model import ModelInstance, assert_not_frozen
+from autofit.mapper.model import ModelInstance, assert_not_frozen, frozen_cache
 from autofit.mapper.model_object import ModelObject
 from autofit.mapper.prior.abstract import Prior
 from autofit.mapper.prior.constant import Constant
@@ -498,6 +498,11 @@ class Model(AbstractPriorModel):
         -------
             An instance of the class
         """
+        if getattr(self, "_is_frozen", False):
+            return self._instance_for_arguments_frozen(
+                arguments, ignore_assertions=ignore_assertions, xp=xp
+            )
+
         model_arguments = dict()
         attribute_arguments = {
             key: value
@@ -577,6 +582,131 @@ class Model(AbstractPriorModel):
                     value = value.value
                 elif isinstance(value, Prior):
                     value = arguments[value]
+                try:
+                    setattr(result, key, value)
+                except AttributeError:
+                    pass
+
+        return result
+
+    @frozen_cache
+    def _instance_plan(self):
+        """
+        The parts of ``_instance_for_arguments`` that depend only on the model's
+        structure, never on the argument values: which attributes are constructor
+        arguments, which are tuple priors / child models / priors, whether the
+        model is deferred, how the class is constructed, and which attributes are
+        candidates for being set on the instance after construction.
+
+        Only ever built for a frozen model (whose ``__dict__`` cannot change) and
+        cached until ``unfreeze()``; see ``_instance_for_arguments_frozen``.
+        """
+        cls = self.cls
+        is_class = inspect.isclass(cls)
+        excluded = type(self)._cached_property_names()
+        constructor_argument_names = self.constructor_argument_names
+
+        attribute_arguments = {
+            key: value
+            for key, value in self.__dict__.items()
+            if key in constructor_argument_names
+        }
+        tuple_priors = tuple(
+            (name, tuple_prior)
+            for name, tuple_prior in self.direct_tuples_with_type(TuplePrior)
+        )
+        child_models = tuple(
+            (name, prior_model)
+            for name, prior_model in self.direct_tuples_with_type(AbstractPriorModel)
+        )
+        priors = tuple(
+            (name, prior) for name, prior in self.direct_tuples_with_type(Prior)
+        )
+        # ``(key, value)`` pairs that pass every value-independent condition of the
+        # post-construction loop; ``hasattr(result, key)`` is checked per call.
+        post_construction = tuple(
+            (key, value)
+            for key, value in self.__dict__.items()
+            if not isinstance(value, Prior)
+            and not key == "cls"
+            and not key.startswith("_")
+            and key not in excluded
+        )
+        return (
+            attribute_arguments,
+            tuple_priors,
+            child_models,
+            priors,
+            self.is_deferred_arguments,
+            is_class and issubclass(cls, Prior),
+            None if is_class else inspect._findclass(cls),
+            post_construction,
+        )
+
+    def _instance_for_arguments_frozen(
+        self,
+        arguments: {ModelObject: object},
+        ignore_assertions=False,
+        xp=np,
+    ):
+        """
+        ``_instance_for_arguments`` for a frozen model: identical behaviour, with
+        the value-independent structure read from the cached ``_instance_plan``
+        instead of being rediscovered from ``__dict__`` on every call.
+        """
+        (
+            attribute_arguments,
+            tuple_priors,
+            child_models,
+            priors,
+            is_deferred,
+            is_prior_class,
+            found_class,
+            post_construction,
+        ) = self._instance_plan()
+
+        constructor_arguments = dict(attribute_arguments)
+
+        for name, tuple_prior in tuple_priors:
+            constructor_arguments[name] = tuple_prior.value_for_arguments(arguments)
+        for name, prior_model in child_models:
+            constructor_arguments[name] = prior_model.instance_for_arguments(
+                arguments, ignore_assertions=ignore_assertions, xp=xp
+            )
+        for name, prior in priors:
+            try:
+                constructor_arguments[name] = arguments[prior]
+            except KeyError as e:
+                raise KeyError(f"No argument given for prior {name}") from e
+
+        constructor_arguments = {
+            key: value.value if isinstance(value, Constant) else value
+            for key, value in constructor_arguments.items()
+        }
+
+        if is_deferred:
+            return DeferredInstance(self.cls, constructor_arguments)
+
+        if is_prior_class and any(
+            isinstance(value, tuple) for value in constructor_arguments.values()
+        ):
+            # See ``_instance_for_arguments``: a bounds pair on a Prior model.
+            return ModelInstance(constructor_arguments)
+
+        if found_class is not None:
+            result = object.__new__(found_class)
+            self.cls(result, **constructor_arguments)
+        else:
+            result = self.cls(**constructor_arguments)
+
+        for key, value in post_construction:
+            if not hasattr(result, key):
+                if isinstance(value, Model):
+                    value = value.instance_for_arguments(
+                        arguments, ignore_assertions=ignore_assertions, xp=xp
+                    )
+                elif isinstance(value, Constant):
+                    value = value.value
                 try:
                     setattr(result, key, value)
                 except AttributeError:
