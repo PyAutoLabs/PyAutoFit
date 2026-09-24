@@ -12,23 +12,29 @@ See PyAutoFit issue #1284 for the motivating measurements.
 """
 
 import numpy as np
+from scipy.special import ndtr as _np_ndtr
+from scipy.special import ndtri as _np_ndtri
 
 
 def _norm_cdf(z, xp):
-    """Standard-normal CDF (== ``scipy.stats.norm.cdf(z)`` to ULPs)."""
+    """Standard-normal CDF (== ``scipy.stats.norm.cdf(z)`` to ULPs).
+
+    The NumPy branch uses the module-level ``scipy.special.ndtr`` binding, so the
+    hot EP message maths pays no per-call import lookup.
+    """
     if xp is np:
-        from scipy.special import ndtr
-    else:
-        from jax.scipy.special import ndtr
+        return _np_ndtr(z)
+    from jax.scipy.special import ndtr
+
     return ndtr(z)
 
 
 def _norm_ppf(p, xp):
     """Standard-normal PPF (== ``scipy.stats.norm.ppf(p)`` to ULPs)."""
     if xp is np:
-        from scipy.special import ndtri
-    else:
-        from jax.scipy.special import ndtri
+        return _np_ndtri(p)
+    from jax.scipy.special import ndtri
+
     return ndtri(p)
 
 

@@ -50,14 +50,16 @@ class TruncatedNormalMessage(AbstractMessage):
         float
             The log-partition (log of the normalizing constant).
         """
-        from scipy.stats import norm
+        from autofit.mapper.prior._erf_helpers import _norm_cdf
 
         # Untruncated Gaussian log-partition — see NormalMessage.log_partition.
         gaussian = (self.mean ** 2) / (2 * self.sigma ** 2) + xp.log(self.sigma)
 
         a = (self.lower_limit - self.mean) / self.sigma
         b = (self.upper_limit - self.mean) / self.sigma
-        Z = norm.cdf(b) - norm.cdf(a)
+        # `scipy.special.ndtr` is the routine `scipy.stats.norm.cdf` wraps: bit-identical,
+        # without the `rv_continuous` argument-checking overhead.
+        Z = _norm_cdf(b, np) - _norm_cdf(a, np)
         log_Z = xp.log(Z) if Z > 0 else -xp.inf
         return gaussian + log_Z
 
@@ -340,15 +342,16 @@ class TruncatedNormalMessage(AbstractMessage):
         if (self.lower_limit != dist.lower_limit) or (self.upper_limit != dist.upper_limit):
             raise ValueError("KL divergence between truncated Gaussians with different support is not implemented.")
 
-        from scipy.stats import norm, truncnorm
+        from scipy.stats import truncnorm
+        from autofit.mapper.prior._erf_helpers import _norm_cdf
 
         a_p = (self.lower_limit - self.mean) / self.sigma
         b_p = (self.upper_limit - self.mean) / self.sigma
         a_q = (self.lower_limit - dist.mean) / dist.sigma
         b_q = (self.upper_limit - dist.mean) / dist.sigma
 
-        log_Z_p = np.log(norm.cdf(b_p) - norm.cdf(a_p))
-        log_Z_q = np.log(norm.cdf(b_q) - norm.cdf(a_q))
+        log_Z_p = np.log(_norm_cdf(b_p, np) - _norm_cdf(a_p, np))
+        log_Z_q = np.log(_norm_cdf(b_q, np) - _norm_cdf(a_q, np))
 
         # Truncated mean and variance of p (scipy returns them for the
         # standardised bounds with loc/scale applied).
@@ -419,11 +422,11 @@ class TruncatedNormalMessage(AbstractMessage):
         sigma: Union[float, np.ndarray],
         x: np.ndarray,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        from scipy.stats import norm
+        from autofit.mapper.prior._erf_helpers import _norm_cdf
 
         a = (self.lower_limit - mean) / sigma
         b = (self.upper_limit - mean) / sigma
-        Z = norm.cdf(b) - norm.cdf(a)
+        Z = _norm_cdf(b, np) - _norm_cdf(a, np)
         log_Z = np.log(Z) if Z > 0 else -np.inf
 
         shape = np.shape(x)

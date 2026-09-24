@@ -35,6 +35,9 @@ from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.mapper.model import ModelInstance
 from autofit.non_linear.initializer import Initializer
 from autofit.non_linear.fitness import Fitness
+# `ITERATIONS_NEVER` is defined in `fitness.py` (so `Fitness.manage_quick_update` can
+# use it) and re-exported here for existing importers, e.g. `multi_start_gradient`.
+from autofit.non_linear.fitness import ITERATIONS_NEVER  # noqa: F401
 from autofit.non_linear.parallel import SneakyPool, SneakierPool, fork_context
 from autofit.non_linear.paths.abstract import AbstractPaths
 from autofit.non_linear.paths.database import DatabasePaths
@@ -57,13 +60,6 @@ from autofit.non_linear.test_mode import (
 
 logger = logging.getLogger(__name__)
 
-#: Iteration cadences at or above this mean "never". The packaged config default
-#: for both ``iterations_per_quick_update`` and ``iterations_per_full_update`` is
-#: the inf-like ``1e99`` sentinel documented on ``_steps_until_full_update`` --
-#: kept as a float so ``search.json`` stores a readable ``1e99`` rather than a
-#: 99-digit integer. Compared against a threshold rather than ``1e99`` exactly so
-#: a hand-set ``1e100`` in a workspace config reads as "never" too.
-ITERATIONS_NEVER = 1e90
 
 # A reduced test-mode fit needs a valid representative instance for result
 # construction and search chaining.  Keep fallback sampling bounded so an

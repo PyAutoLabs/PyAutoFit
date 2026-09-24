@@ -19,6 +19,13 @@ from autofit.non_linear.jax_compile import log_on_first_compile
 from autofit.non_linear.paths.abstract import AbstractPaths
 from autofit.non_linear.analysis import Analysis
 
+#: Iteration cadences at or above this mean "never". The packaged config default
+#: for both ``iterations_per_quick_update`` and ``iterations_per_full_update`` is
+#: the inf-like ``1e99`` sentinel documented on ``_steps_until_full_update`` --
+#: kept as a float so ``search.json`` stores a readable ``1e99`` rather than a
+#: 99-digit integer. Compared against a threshold rather than ``1e99`` exactly so
+#: a hand-set ``1e100`` in a workspace config reads as "never" too.
+ITERATIONS_NEVER = 1e90
 
 
 def get_timeout_seconds():
@@ -649,7 +656,14 @@ class Fitness:
           not detailed science-quality outputs.
         """
 
-        if self.iterations_per_quick_update is None:
+        # Quick updates disabled (the packaged 1e99 default): return before any
+        # per-call bookkeeping. The running max / count only ever feed the quick
+        # update body, which can never fire at this cadence, and this method is
+        # called once per likelihood evaluation.
+        if (
+            self.iterations_per_quick_update is None
+            or self.iterations_per_quick_update >= ITERATIONS_NEVER
+        ):
             return
 
         try:
