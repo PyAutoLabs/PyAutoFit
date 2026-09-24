@@ -71,3 +71,17 @@ def test__no_update_body_runs_when_the_cadence_is_not_reached():
     fitness.manage_quick_update(parameters=[50.0, 25.0, 10.0], log_likelihood=-10.0)
 
     assert fitness.quick_update_count == 1
+
+
+@pytest.mark.parametrize("cadence", [1e99, 1e100])
+def test__disabled_cadence_returns_before_any_bookkeeping(cadence):
+    # The packaged 1e99 default (and anything at or above `ITERATIONS_NEVER`)
+    # disables quick updates, so the per-likelihood-call bookkeeping is skipped
+    # entirely (#1642): no count, no running maximum, no render.
+    fitness = _fitness(iterations_per_quick_update=cadence)
+
+    fitness.manage_quick_update(parameters=[50.0, 25.0, 10.0], log_likelihood=-10.0)
+
+    assert fitness.quick_update_count == 0
+    assert fitness.quick_update_max_lh_parameters is None
+    assert fitness.paths.results == []

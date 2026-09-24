@@ -294,3 +294,86 @@ def test__old_three_tuple_pickle_payload_still_loads():
 
     result = TruncatedNormalMessage._reconstruct((10.0, 5.0), 0.0, 7)
     assert (result.lower_limit, result.upper_limit) == (-np.inf, np.inf)
+
+
+_NDTR_GRID = [
+    (mean, sigma, lower, upper)
+    for mean in (-3.0, 0.0, 0.7, 50.0)
+    for sigma in (0.05, 1.0, 20.0)
+    for lower, upper in (
+        (-np.inf, np.inf),
+        (-np.inf, 0.5),
+        (-1.0, np.inf),
+        (-1.0, 0.5),
+        (0.0, 100.0),
+        (-40.0, -39.0),
+    )
+]
+
+
+def test__ndtr_swap_bit_identical():
+    """
+    The truncated-normal message maths uses `scipy.special.ndtr` (via
+    `_erf_helpers._norm_cdf`) instead of `scipy.stats.norm.cdf` (#1642): the same
+    Cephes routine without the `rv_continuous` wrapper. The swap must be bit
+    identical, including infinite truncation limits, for `log_partition`, `kl` and
+    `_normal_gradient_hessian_from`, each checked against a reference evaluated with
+    `scipy.stats.norm.cdf` directly.
+    """
+    from scipy.stats import truncnorm
+    from autofit.mapper.prior._erf_helpers import _norm_cdf
+
+    for mean, sigma, lower, upper in _NDTR_GRID:
+        a = (lower - mean) / sigma
+        b = (upper - mean) / sigma
+
+        # The primitive itself: exact equality, 0 ulp.
+        assert _norm_cdf(a, np) == norm.cdf(a)
+        assert _norm_cdf(b, np) == norm.cdf(b)
+
+        message = TruncatedNormalMessage(
+            mean=mean, sigma=sigma, lower_limit=lower, upper_limit=upper
+        )
+
+        Z = norm.cdf(b) - norm.cdf(a)
+        log_Z = np.log(Z) if Z > 0 else -np.inf
+        expected_log_partition = (
+            mean**2 / (2 * sigma**2) + np.log(sigma) + log_Z
+        )
+        assert message.log_partition() == expected_log_partition
+
+        x = np.array([lower + 1e-3 if np.isfinite(lower) else mean - sigma, mean])
+        logl, grad, hess = message._normal_gradient_hessian_from(mean, sigma, x)
+        deltax = x - mean
+        expected_logl = (
+            message.log_base_measure
+            + 0.5 * (deltax * -(sigma**-2)) * deltax
+            - np.log(sigma)
+            - log_Z
+        )
+        in_bounds = (x >= lower) & (x <= upper)
+        expected_logl = np.where(in_bounds, expected_logl, -np.inf)
+        np.testing.assert_array_equal(logl, expected_logl)
+
+        if not Z > 0:
+            continue
+
+        other = TruncatedNormalMessage(
+            mean=mean + 0.3 * sigma,
+            sigma=1.5 * sigma,
+            lower_limit=lower,
+            upper_limit=upper,
+        )
+        a_q = (lower - other.mean) / other.sigma
+        b_q = (upper - other.mean) / other.sigma
+        log_Z_q = np.log(norm.cdf(b_q) - norm.cdf(a_q))
+        m_p, V_p = truncnorm.stats(a, b, loc=mean, scale=sigma, moments="mv")
+        e_zp2 = (V_p + (m_p - mean) ** 2) / sigma**2
+        e_zq2 = (V_p + (m_p - other.mean) ** 2) / other.sigma**2
+        expected_kl = (
+            np.log(other.sigma / sigma)
+            + (log_Z_q - log_Z)
+            + 0.5 * (e_zq2 - e_zp2)
+        )
+        kl = message.kl(other)
+        assert kl == expected_kl or (np.isnan(kl) and np.isnan(expected_kl))
