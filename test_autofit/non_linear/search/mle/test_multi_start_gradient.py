@@ -1077,6 +1077,76 @@ def test__batch_size_within_budget__degenerate_inputs(
     assert batch_size_within_budget(fixed, per_start, n_starts, budget) == expected
 
 
+# The guard that consumes the projection. Each `batched_memory_bytes` probe is
+# a full throwaway XLA compile of the batched value_and_grad, so the guard's
+# backend gate is what decides whether a fit pays for two of them. The stubs
+# below record calls instead of compiling; `jax.default_backend` is patched so
+# the tests pin the gate rather than whichever backend the suite runs on.
+
+
+class _RecordingProbeAnalysis:
+    def __init__(self, bytes_at_1=2 * GB + INCIDENT_PER_START):
+        self.calls = []
+        self._bytes_at_1 = bytes_at_1
+
+    def batched_memory_bytes(self, model, batch_size, gradient):
+        self.calls.append(batch_size)
+        return self._bytes_at_1 + (batch_size - 1) * INCIDENT_PER_START
+
+
+class _RecordingLogger:
+    def __init__(self):
+        self.warnings = []
+
+    def warning(self, message):
+        self.warnings.append(message)
+
+
+def test__unbatched_memory_guard__never_probes_on_cpu(monkeypatch):
+    # Release-integrate run 36226772178: on CPU the two probe compiles ran in
+    # full (jax 0.10.2 CPU reports non-zero memory_analysis) and one drew the
+    # slow compile mode, pushing imaging/start_here.py past 3600 s.
+    jax = pytest.importorskip("jax")
+    monkeypatch.setattr(jax, "default_backend", lambda: "cpu")
+
+    search = af.MultiStartProdigy(n_starts=48)
+    monkeypatch.setattr(search, "_memory_budget_bytes", lambda: 16 * GB)
+    analysis = _RecordingProbeAnalysis()
+
+    search._warn_if_unbatched_exceeds_memory(model=None, analysis=analysis)
+
+    assert analysis.calls == []
+
+
+def test__unbatched_memory_guard__probes_and_warns_on_gpu(monkeypatch):
+    jax = pytest.importorskip("jax")
+    monkeypatch.setattr(jax, "default_backend", lambda: "gpu")
+
+    search = af.MultiStartProdigy(n_starts=48)
+    monkeypatch.setattr(search, "_memory_budget_bytes", lambda: 16 * GB)
+    search._logger = _RecordingLogger()
+    analysis = _RecordingProbeAnalysis()
+
+    search._warn_if_unbatched_exceeds_memory(model=None, analysis=analysis)
+
+    assert analysis.calls == [1, 2]
+    assert len(search._logger.warnings) == 1
+    assert "batch_size=" in search._logger.warnings[0]
+
+
+def test__unbatched_memory_guard__unknown_budget_skips_the_probe(monkeypatch):
+    jax = pytest.importorskip("jax")
+    monkeypatch.setattr(jax, "default_backend", lambda: "gpu")
+
+    search = af.MultiStartProdigy(n_starts=48)
+    monkeypatch.setattr(search, "_memory_budget_bytes", lambda: None)
+    analysis = _RecordingProbeAnalysis()
+
+    search._warn_if_unbatched_exceeds_memory(model=None, analysis=analysis)
+
+    assert analysis.calls == []
+
+
 # --- Per-lane best preservation (PyAutoFit#1514) ------------------------------
 #
 # Same contract as the _nan_lane_counts tests above: the update rule is pure

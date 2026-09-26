@@ -828,12 +828,17 @@ class AbstractMultiStartGradient(AbstractMLE):
         changing the execution shape of every existing run on the strength of a
         projection is not a trade this should make on its own.
 
-        **Known limitation.** ``memory_analysis`` reports 0 on a CPU-only JAX
-        build, which is where the release harness runs. The projection is
-        skipped entirely in that case rather than guessing, so this guard
-        currently helps GPU users and leaves the CPU path to the (now
-        unfiltered) traceback. Making the CPU path measurable is follow-up
-        work and needs validating against a real run, not a unit test.
+        **CPU is skipped deliberately.** Each probe is a full, throwaway XLA
+        compile of the batched ``value_and_grad`` (at batch 1 and batch 2), and
+        on a release-sized lens model those two compiles can cost more than
+        the fit itself. This was once skipped by accident, because
+        ``memory_analysis`` reported 0 on CPU; from jax 0.10.2 it reports a
+        non-zero value, both compiles ran, and one of them drew the slow CPU
+        compile mode (~54 min), pushing ``imaging/start_here.py`` to a 3605 s
+        TIMEOUT in release-integrate run 36226772178 (2026-09-26). The guard
+        exists for device-memory OOM on GPU (PyAutoFit#1452), so the CPU path
+        is left to the (unfiltered) traceback. The memory budget is also read
+        before any probe, so an undeterminable budget never pays a compile.
 
         Any failure here is swallowed: a memory projection must never be the
         reason a fit does not start.
@@ -843,16 +848,23 @@ class AbstractMultiStartGradient(AbstractMLE):
             if probe is None or self.n_starts is None or self.n_starts <= 1:
                 return
 
-            bytes_at_1 = probe(model=model, batch_size=1, gradient=True)
-            if not bytes_at_1:  # None (not on JAX) or 0 (CPU-only: unmeasurable)
-                return
+            import jax
 
-            bytes_at_2 = probe(model=model, batch_size=2, gradient=True)
-            if not bytes_at_2:
+            # Each probe below is a full model compile; never pay for them on
+            # CPU (see the docstring).
+            if jax.default_backend() == "cpu":
                 return
 
             budget = self._memory_budget_bytes()
             if not budget:
+                return
+
+            bytes_at_1 = probe(model=model, batch_size=1, gradient=True)
+            if not bytes_at_1:  # None (not on JAX) or 0 (unmeasurable)
+                return
+
+            bytes_at_2 = probe(model=model, batch_size=2, gradient=True)
+            if not bytes_at_2:
                 return
 
             fixed, per_start = batch_memory_model(bytes_at_1, bytes_at_2)
