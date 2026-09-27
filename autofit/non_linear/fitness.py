@@ -15,6 +15,7 @@ from autofit.text import text_util
 
 
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
+from autofit.jax.gradient import validate_gradient_mode
 from autofit.non_linear.jax_compile import log_on_first_compile
 from autofit.non_linear.paths.abstract import AbstractPaths
 from autofit.non_linear.analysis import Analysis
@@ -182,6 +183,7 @@ class Fitness:
         iterations_per_quick_update: Optional[int] = None,
         background_quick_update: bool = False,
         live_visual_update: bool = False,
+        gradient_mode: Optional[str] = None,
     ):
         """
         Interfaces with any non-linear search to fit the model to the data and return a log likelihood via
@@ -240,6 +242,10 @@ class Fitness:
             chi-squared value that is minimized.
         store_history
             If `True`, the parameters and log likelihood values of every model-fit are stored in lists.
+        gradient_mode
+            How `grad` differentiates the likelihood: `"reverse"` (`jax.grad`) or `"forward"` (`jax.jacfwd`
+            over the flat parameter vector). `None` (default) uses the analysis's declared
+            `Analysis.gradient_mode`. See `autofit.jax.gradient`.
         """
 
         self.analysis = analysis
@@ -264,6 +270,7 @@ class Fitness:
 
         self.use_jax_vmap = use_jax_vmap
         self.use_jax_jit = use_jax_jit
+        self.gradient_mode = validate_gradient_mode(gradient_mode)
 
         if getattr(self.analysis, "_use_jax", False):
             from autofit.jax.pytrees import enable_pytrees, register_model
@@ -847,6 +854,8 @@ class Fitness:
             or "_apply_assertions_traced" not in self.__dict__
         ):
             self._set_traced_assertions()
+        # `Fitness` objects pickled before the gradient-mode override existed defer to the analysis.
+        self.__dict__.setdefault("gradient_mode", None)
         self._call = self.call
         if getattr(self, "use_jax_vmap", False):
             self._call = self._vmap
@@ -916,22 +925,22 @@ class Fitness:
     @cached_property
     def _grad(self):
         """
-        Gradient of the JIT-compiled likelihood function.
+        Gradient of the likelihood function (`self.call`) with respect to the flat parameter vector.
 
-        This wraps the JIT-compiled likelihood function (`self._call`) with
-        `jax.grad`, returning a function that computes gradients of the
-        likelihood with respect to its input parameters. Useful for gradient-
-        based optimization and inference methods.
+        The transform is chosen by `autofit.jax.gradient.resolve_gradient_mode`: this `Fitness`'s
+        `gradient_mode` override if set, otherwise the analysis's declared `Analysis.gradient_mode`
+        -- `jax.grad` in reverse mode, `jax.jacfwd` in forward mode. Both give the same gradient.
 
-        Since this is a `cached_property`, the gradient function is compiled
-        and cached on first access, ensuring that expensive setup is done
-        only once.
+        Since this is a `cached_property`, the gradient function is built and cached on first
+        access, ensuring that expensive setup is done only once.
         """
-        import jax
+        from autofit.jax import gradient
+
+        mode = gradient.resolve_gradient_mode(self.analysis, self.gradient_mode)
 
         return log_on_first_compile(
-            jax.grad(self.call),
-            "likelihood function gradient",
+            gradient.grad_from(self.call, mode),
+            f"likelihood function gradient ({mode} mode)",
         )
 
     def grad(self, *args, **kwargs):

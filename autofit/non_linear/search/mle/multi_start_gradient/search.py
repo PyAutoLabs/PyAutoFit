@@ -12,6 +12,11 @@ from autofit.non_linear.search.abstract_search import ITERATIONS_NEVER
 from autofit.non_linear.search.mle.abstract_mle import AbstractMLE
 from autofit.non_linear.analysis import Analysis
 from autofit.non_linear.fitness import Fitness
+from autofit.jax.gradient import (
+    resolve_gradient_mode,
+    validate_gradient_mode,
+    value_and_grad_from,
+)
 from autofit.non_linear.bijector import AbstractBijector, BijectorNone
 from autofit.non_linear.clipper import (
     AbstractClipper,
@@ -58,6 +63,7 @@ class AbstractMultiStartGradient(AbstractMLE):
         n_steps: int = 300,
         learning_rate: Optional[float] = None,
         batch_size: Optional[int] = None,
+        gradient_mode: Optional[str] = None,
         max_consecutive_nan: int = 8,
         start_lower_limit: float = 0.15,
         start_upper_limit: float = 0.85,
@@ -142,6 +148,23 @@ class AbstractMultiStartGradient(AbstractMLE):
             algorithmic knob (how many points it proposes per iteration) that
             autofit merely forwards. Here ``n_starts`` is the algorithm; this
             only decides how many of those starts are evaluated at a time.
+        gradient_mode
+            How the objective is differentiated: ``"reverse"``
+            (``jax.value_and_grad``) or ``"forward"`` (``jax.jacfwd`` over the
+            flat parameter vector). ``None`` (default) uses the analysis's
+            declared ``Analysis.gradient_mode`` -- ``"reverse"`` for every
+            analysis except those that declare otherwise, e.g.
+            ``autolens.AnalysisPoint`` declares ``"forward"`` because its
+            source-plane likelihood carries an inner forward-mode lensing
+            Hessian (autolens_profiling #327/#331). Pass a value to override
+            the declaration for this search. Both modes give the same gradient
+            and so the same fit; only speed, compile time and memory differ.
+
+            Memory caveat, alongside ``batch_size`` above: forward mode carries
+            one tangent per free parameter, so under the vmap over starts its
+            memory scales with ``n_starts * n_params`` (a ``batch_size``-wide
+            chunk's worth when batching). If a forward-mode fit exhausts memory,
+            set ``batch_size`` or override with ``gradient_mode="reverse"``.
         start_lower_limit, start_upper_limit
             The unit-cube bounds broad starts are drawn uniformly from. The
             interior default ``(0.15, 0.85)`` avoids the prior edges where many
@@ -371,6 +394,10 @@ class AbstractMultiStartGradient(AbstractMLE):
         self.n_starts = n_starts
         self.n_steps = n_steps
         self.batch_size = batch_size
+        # Validated at construction so a mistyped mode fails here rather than
+        # at the first compile; resolved against the analysis at fit time
+        # (``_resolved_gradient_mode``), since no analysis exists yet.
+        self.gradient_mode = validate_gradient_mode(gradient_mode)
         self.max_consecutive_nan = max_consecutive_nan
         self.learning_rate = (
             learning_rate if learning_rate is not None else self._default_learning_rate
@@ -435,6 +462,17 @@ class AbstractMultiStartGradient(AbstractMLE):
         self.iterations_per_log = int(iterations_per_log)
 
         self.logger.debug(f"Creating {self.optax_method} MultiStartGradient Search")
+
+    def _resolved_gradient_mode(self, analysis) -> str:
+        """
+        The gradient mode this fit uses: the search's ``gradient_mode`` if set,
+        otherwise the analysis's declaration. ``getattr`` because a search
+        unpickled from before the keyword existed carries no attribute and must
+        defer to the analysis.
+        """
+        return resolve_gradient_mode(
+            analysis, override=getattr(self, "gradient_mode", None)
+        )
 
     def _is_final_boundary(self, converged: bool, total_steps: int) -> bool:
         """
@@ -971,7 +1009,23 @@ class AbstractMultiStartGradient(AbstractMLE):
         # compile) while the chunk alone compiles in minutes. The tiling is
         # numerically identical to the vmap; `batch_size` never changes
         # results, it only bounds memory and compile.
-        _value_and_grad = jax.value_and_grad(fitness.call)
+        #
+        # The AD mode (``gradient_mode``) is resolved once here, against the
+        # analysis's declaration and this search's override, and used for both
+        # objectives below. Forward and reverse give the same ``(value, grad)``;
+        # everything downstream of the two builders is mode-agnostic.
+        gradient_mode = self._resolved_gradient_mode(analysis)
+        if not self.silence:
+            source = (
+                "search override"
+                if getattr(self, "gradient_mode", None) is not None
+                else f"declared by {type(analysis).__name__}"
+            )
+            self.logger.info(
+                f"MultiStartGradient gradient mode: {gradient_mode} ({source})."
+            )
+
+        _value_and_grad = value_and_grad_from(fitness.call, gradient_mode)
 
         # Per-start gradient finiteness is reduced *inside* the jitted call, as a
         # third output, rather than by a separate op on its result. The reduction
@@ -1069,7 +1123,9 @@ class AbstractMultiStartGradient(AbstractMLE):
         # objective: ``_broad_starts`` below jits it directly to filter candidate
         # draws, and those draws are, and stay, physical.
         _value_and_grad_stepped = (
-            jax.value_and_grad(lambda phi: fitness.call(_to_physical(phi)))
+            value_and_grad_from(
+                lambda phi: fitness.call(_to_physical(phi)), gradient_mode
+            )
             if (has_scaler or has_bijector)
             else _value_and_grad
         )
@@ -1609,6 +1665,9 @@ class AbstractMultiStartGradient(AbstractMLE):
                 "params": params_physical,
                 "scale": scale,
                 "bijector": self.bijector.kinds if has_bijector else None,
+                # The AD mode this process ran with, resolved against the
+                # analysis (which ``samples_via_internal_from`` cannot see).
+                "gradient_mode": gradient_mode,
                 "opt_state": opt_state,
                 "best_params": best_params,
                 "best_fom": best_fom,
@@ -1983,6 +2042,14 @@ class AbstractMultiStartGradient(AbstractMLE):
             "n_starts": self.n_starts,
             "n_steps": self.n_steps,
             "batch_size": self.batch_size,
+            # The RESOLVED AD mode (search override, else the analysis's
+            # declaration), read from ``search_internal`` because the analysis
+            # is not available here. Falls back to the search's own setting
+            # (possibly ``None`` = "the analysis's declaration, unrecorded") for
+            # a ``search_internal`` written before the mode was persisted.
+            "gradient_mode": search_internal.get(
+                "gradient_mode", getattr(self, "gradient_mode", None)
+            ),
             "total_steps": total_steps,
             "optax_method": self.optax_method,
             "learning_rate": self.learning_rate,
