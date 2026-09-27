@@ -59,6 +59,32 @@ class Analysis(ABC):
     # `ZeroSolver`.
     LATENT_BATCH_MODE = "vmap"
 
+    # How gradient-based searches differentiate this analysis's likelihood
+    # (resolved by `autofit.jax.gradient.resolve_gradient_mode`; used by
+    # `Fitness.grad` and the `MultiStartGradient` searches).
+    #
+    # - "reverse" (default): `jax.value_and_grad`. Its cost is a small constant
+    #   multiple of one likelihood evaluation whatever the number of free
+    #   parameters, so it is right for almost every analysis.
+    #
+    # - "forward": `jax.jacfwd` over the flat parameter vector. Declare it when
+    #   the likelihood itself contains an inner forward-mode derivative (reverse
+    #   mode then runs reverse-over-forward through it) and the model has a
+    #   modest number of free parameters. The source-plane point-source
+    #   likelihood is the reference case: its lensing Hessian is built with
+    #   `jax.jacfwd`, and forward mode measured 2-4.5x faster and up to 8x
+    #   faster to compile through 24 free parameters (autolens_profiling
+    #   #327/#331), so `autolens.AnalysisPoint` declares it.
+    #
+    #   Memory caveat: forward mode carries one tangent per free parameter, so
+    #   under `jax.vmap` (e.g. `MultiStartGradient`'s starts) its memory scales
+    #   with `n_starts * n_params`.
+    #
+    # A search may override the declaration, e.g.
+    # `af.MultiStartAdam(gradient_mode="reverse")`. Both modes compute the same
+    # gradient; only speed and memory differ.
+    gradient_mode = "reverse"
+
     def __init__(
         self,
         use_jax: bool = False,
