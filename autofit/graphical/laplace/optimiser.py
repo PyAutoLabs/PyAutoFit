@@ -7,7 +7,7 @@ import numpy as np
 from autofit.graphical.expectation_propagation.ep_mean_field import EPMeanField
 from autofit.graphical.expectation_propagation.optimiser import AbstractFactorOptimiser
 from autofit.graphical.factor_graphs.factor import Factor
-from autofit.graphical.laplace import newton
+from autofit.graphical.laplace import moments, newton
 from autofit.graphical.mean_field import MeanField, FactorApproximation
 from autofit.graphical.utils import FlattenArrays, Status, StatusFlag
 from autofit.mapper.variable_operator import VariableData, VariableFullOperator
@@ -41,6 +41,22 @@ class LaplaceOptimiser(AbstractFactorOptimiser):
     A failed optimisation (line-search failure) returns the mean field it was
     handed, unchanged, so that the caller's projection reproduces the previous
     message exactly.
+
+    ``projection="moments"`` replaces the mode/curvature pair by a moment match
+    of the tilted distribution, computed by nested quadrature
+    (`autofit.graphical.laplace.moments`): an outer Gauss–Legendre rule of
+    ``n_quadrature`` nodes over each scale variable of a hierarchical factor
+    (``_HierarchicalFactor.scale_variables``) or bounded-support variable
+    (e.g. a ``TruncatedGaussianPrior`` σ), windowed to the support and to the
+    cavity ``mean ± quadrature_half_width · std``, and an inner conditional
+    Laplace approximation over the remaining variables at each node. This is
+    the projection that recovers a hierarchical scatter whose tilted density
+    sits on σ = 0, where the mode path has no interior mode (PyAutoFit#1654).
+    It is deterministic (no random draws). A factor with no such variable, more
+    than ``moment_max_outer`` of them, a non-scalar one, more than
+    ``moment_max_size`` flattened free parameters, or deterministic variables
+    takes the mode path unchanged. The default ``"mode"`` is the Laplace
+    projection described above.
     """
 
     def __init__(
@@ -64,6 +80,11 @@ class LaplaceOptimiser(AbstractFactorOptimiser):
         quasi_newton_kws: Optional[Dict[str, Any]] = None,
         stop_kws: Optional[Dict[str, Any]] = None,
         check_limits=True,
+        projection: str = "mode",
+        n_quadrature: int = 64,
+        quadrature_half_width: float = 8.0,
+        moment_max_size: int = 4,
+        moment_max_outer: int = 2,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -71,6 +92,10 @@ class LaplaceOptimiser(AbstractFactorOptimiser):
         if hessian not in ("fd", "quasi"):
             raise ValueError(
                 f"hessian must be 'fd' or 'quasi', got {hessian!r}"
+            )
+        if projection not in ("mode", "moments"):
+            raise ValueError(
+                f"projection must be 'mode' or 'moments', got {projection!r}"
             )
 
         self.make_hessian = make_hessian
@@ -103,6 +128,14 @@ class LaplaceOptimiser(AbstractFactorOptimiser):
         self.quasi_newton_kws = quasi_newton_kws or {}
         self.stop_kws = stop_kws or {}
         self.check_limits = check_limits
+
+        # Tilted-distribution projection: "mode" (Laplace, default) or
+        # "moments" (nested-quadrature moment match, `laplace.moments`).
+        self.projection = projection
+        self.n_quadrature = n_quadrature
+        self.quadrature_half_width = quadrature_half_width
+        self.moment_max_size = moment_max_size
+        self.moment_max_outer = moment_max_outer
 
     @property
     def default_kws(self):
@@ -278,6 +311,13 @@ class LaplaceOptimiser(AbstractFactorOptimiser):
     ) -> Tuple[MeanField, Status]:
 
         mean_field = mean_field or factor_approx.model_dist
+        if self.projection == "moments":
+            result = self._moment_projection(
+                factor_approx, mean_field, params, **kwargs
+            )
+            if result is not None:
+                return result
+
         state = self.prepare_state(factor_approx, mean_field, params)
         next_state, status = self.optimise_state(state, **kwargs)
         if not status.success:
@@ -329,6 +369,23 @@ class LaplaceOptimiser(AbstractFactorOptimiser):
 
         projection = mean_field.from_opt_state(next_state)
         return projection, status
+
+    def _moment_projection(
+        self,
+        factor_approx: FactorApprox,
+        mean_field: MeanField,
+        params: VariableData = None,
+        **kwargs
+    ) -> Optional[Tuple[MeanField, Status]]:
+        """
+        The moment-matching projection of `factor_approx`'s tilted distribution
+        (`laplace.moments.moment_projection`), or ``None`` when the factor has
+        no scale / bounded-support variable to integrate over (or too many, or
+        deterministic variables), in which case the mode path runs unchanged.
+        """
+        return moments.moment_projection(
+            self, factor_approx, mean_field, params, **kwargs
+        )
 
     def refine_state(self, state, new_param, n_refine=None):
         """
