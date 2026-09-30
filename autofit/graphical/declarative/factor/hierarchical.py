@@ -3,6 +3,9 @@ from typing import Set, Optional, Type, List, Tuple, Dict
 import numpy as np
 
 from autofit import exc
+from autofit.graphical.expectation_propagation.diagnostics import (
+    _SCALE_ARGUMENT_NAMES,
+)
 from autofit.mapper.model import ModelInstance
 from autofit.mapper.prior.abstract import Prior
 from autofit.mapper.prior_model.collection import Collection
@@ -202,6 +205,24 @@ class _HierarchicalFactor(AbstractModelFactor):
     @property
     def variable(self):
         return self.drawn_prior
+
+    @property
+    def scale_variables(self) -> frozenset:
+        """
+        The priors parameterising the parent distribution's *scale* — the
+        argument named ``sigma`` (or ``scale``/``std``/``stddev``, see
+        ``_SCALE_ARGUMENT_NAMES``) of e.g. ``af.GaussianPrior``.
+
+        These are the variables whose tilted density can sit on the ``0``
+        boundary, so ``LaplaceOptimiser(projection="moments")`` integrates
+        them by quadrature on their positive support instead of seeking a
+        mode (PyAutoFit#1654).
+        """
+        return frozenset(
+            prior
+            for name, prior in self.distribution_model.prior_tuples
+            if name in _SCALE_ARGUMENT_NAMES
+        )
 
     def log_likelihood_function(self, instance, shared=None):
         return instance.distribution_model.message(instance.drawn_prior, xp=self._xp)

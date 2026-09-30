@@ -44,6 +44,9 @@ logger = logging.getLogger(__name__)
 #: recognised on a ``HierarchicalFactor``. ``GaussianPrior`` and
 #: ``LogGaussianPrior`` call it ``sigma``; the others are accepted so a
 #: distribution that names it differently is still covered.
+#: Shared with ``_HierarchicalFactor.scale_variables`` (the variables the
+#: moment projection integrates by quadrature); this module imports nothing
+#: from ``autofit``, so both can import it without a cycle.
 _SCALE_ARGUMENT_NAMES = frozenset({"sigma", "scale", "std", "stddev"})
 
 
