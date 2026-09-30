@@ -61,6 +61,39 @@ def test_projected_model():
     assert isinstance(projected_model.centre, af.UniformPrior)
 
 
+def test_projected_model_nonfinite_names_path_and_prior_id():
+    """
+    A non-finite sample for one parameter raises `ProjectionException` (not a
+    bare `AssertionError`) naming the parameter path and the prior id
+    (PyAutoFit#1653).
+    """
+    model = af.Model(af.ex.Gaussian, centre=af.UniformPrior())
+    samples = af.Samples(
+        model,
+        [
+            af.Sample(
+                -1.0,
+                -1.0,
+                weight=random() + 0.1,
+                kwargs={
+                    ("centre",): np.nan if i == 3 else random(),
+                    ("normalization",): random(),
+                    ("sigma",): random(),
+                },
+            )
+            for i in range(100)
+        ],
+    )
+    result = af.mock.MockResult(samples=samples)
+
+    with np.errstate(all="ignore"):
+        with pytest.raises(ValueError, match="path=centre") as info:
+            result.projected_model
+
+    assert isinstance(info.value, af.exc.ProjectionException)
+    assert f"id={model.centre.id}" in str(info.value)
+
+
 def test_projected_model_moments():
     """
     Regression test for PyAutoFit#1382: `projected_model` must convert the
