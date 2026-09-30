@@ -429,6 +429,60 @@ class MeanField(Collection, Dict[Variable, AbstractMessage], Factor):
 
         return projection
 
+    def from_weighted_nodes(
+        self,
+        nodes: Dict[Variable, np.ndarray],
+        log_weights: np.ndarray,
+        log_norm: float = 0.0,
+    ) -> "MeanField":
+        """
+        Moment-matching projection of a weighted node set onto this mean
+        field's message families.
+
+        Each variable in ``nodes`` is projected with its own message's
+        ``project`` — the exponential-family member whose expected sufficient
+        statistics match the weighted nodes (a ``TransformedMessage`` maps the
+        physical nodes to its base space itself; a truncated message keeps its
+        limits). The log weights are shifted so every projected message has
+        ``log_norm`` 0, and the returned mean field carries ``log_norm``: the
+        tilted normalisation estimate Ẑ (``logsumexp`` of the weights for a
+        quadrature rule). Fixed-value variables are carried over unchanged.
+
+        Parameters
+        ----------
+        nodes
+            Per variable, the node values, leading axis the node index.
+        log_weights
+            One log weight per node (shape ``(n_nodes,)``), e.g. quadrature
+            log weights plus the tilted log-density.
+        log_norm
+            The projection's log normalisation.
+        """
+        log_weights = np.asarray(log_weights, dtype=float)
+        n_nodes = log_weights.shape[0]
+        # `project` takes the *mean* of the unshifted weights as its log_norm:
+        # shift so that mean is 1.
+        log_w_max = np.max(log_weights)
+        shifted = (
+            log_weights
+            - (log_w_max + np.log(np.sum(np.exp(log_weights - log_w_max))))
+            + np.log(n_nodes)
+        )
+        dists = {}
+        for v in self.keys() & nodes.keys():
+            message = self[v]
+            values = np.asarray(nodes[v], dtype=float)
+            weights = np.broadcast_to(
+                shifted.reshape((n_nodes,) + (1,) * (values.ndim - 1)), values.shape
+            )
+            dists[v] = message.project(
+                values, weights, id_=message.id, **message._support_kwargs
+            )
+        for v, value in self.fixed_values.items():
+            if v in self and v not in dists:
+                dists[v] = self[v]
+        return MeanField(dists, log_norm=log_norm)
+
     def sample(self, n_samples=None):
         return VariableData({v: dist.sample(n_samples) for v, dist in self.items()})
 
