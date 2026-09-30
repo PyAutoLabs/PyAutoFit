@@ -62,6 +62,21 @@ class SearchException(Exception):
     pass
 
 
+class ProjectionException(ValueError):
+    """
+    Raised when an importance-weighted message projection
+    (`AbstractMessage.project`) produces non-finite sufficient statistics —
+    from non-finite samples, nan / +inf log weights, all-zero weights, or
+    overflow of the weighted moments.
+
+    A `ValueError` subclass, deliberately: EP's `factor_step` recovers from
+    it by keeping the factor's previous message for that sweep (a failed
+    sweep update, not a failed graph fit). It is not a `MessageException`,
+    which several callers turn into a silent revert or a -inf likelihood, and
+    not a `SearchException`, which signals a misconfigured search.
+    """
+
+
 class SamplesWarning(Warning):
     """
     Raises warnings associated with the `non_linear` module and `NonLinearSearch` classes.

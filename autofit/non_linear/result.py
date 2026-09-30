@@ -495,13 +495,18 @@ class Result(AbstractResult):
             )
         with np.errstate(divide="ignore"):
             log_weight_list = np.log(weights)
-        arguments = {
-            prior: prior.project(
-                samples=np.array(self.samples.values_for_path(path)),
-                log_weight_list=log_weight_list,
-            )
-            for path, prior in self.samples.model.path_priors_tuples
-        }
+        arguments = {}
+        for path, prior in self.samples.model.path_priors_tuples:
+            try:
+                arguments[prior] = prior.project(
+                    samples=np.array(self.samples.values_for_path(path)),
+                    log_weight_list=log_weight_list,
+                )
+            except exc.ProjectionException as e:
+                raise exc.ProjectionException(
+                    f"Projecting the model parameter path={'.'.join(path)} "
+                    f"failed: {e}"
+                ) from e
         return self.samples.model.mapper_from_prior_arguments(arguments)
 
     @property

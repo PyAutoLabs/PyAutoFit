@@ -12,6 +12,7 @@ from typing import Optional, Union, Type, List
 import numpy as np
 
 from autonerves import cached_property
+from .. import exc
 from ..mapper.variable import Variable
 
 from .interface import MessageInterface
@@ -313,10 +314,62 @@ class AbstractMessage(MessageInterface, ABC):
         w /= norm
         suff_stats = (tx * w[None, ...]).mean(1)
 
-        assert np.isfinite(suff_stats).all()
+        if not np.isfinite(suff_stats).all():
+            raise exc.ProjectionException(
+                cls._nonfinite_projection_reason(samples, log_weight_list, suff_stats)
+            )
 
         cls_ = cls._projection_class or cls._Base_class or cls
         return cls_.from_sufficient_statistics(suff_stats, log_norm=log_norm, **kwargs)
+
+    @classmethod
+    def _nonfinite_projection_reason(
+        cls, samples: np.ndarray, log_weight_list: np.ndarray, suff_stats: np.ndarray
+    ) -> str:
+        """
+        Explain why `project` produced non-finite sufficient statistics.
+
+        Only called on the failure path. The inputs are checked in the order
+        a cause propagates: non-finite samples, then nan / +inf log weights,
+        then all log weights -inf (every sample has zero weight), then
+        overflow of the weighted sufficient statistics T(x)·w.
+        """
+        prefix = (
+            f"{cls.__name__}.project: non-finite sufficient statistics "
+            f"{suff_stats}; "
+        )
+        samples = np.asarray(samples, dtype=float)
+        log_weights = np.asarray(log_weight_list, dtype=float)
+
+        flat = samples.ravel()
+        bad = ~np.isfinite(flat)
+        if bad.any():
+            return prefix + (
+                f"{int(bad.sum())} non-finite samples of {flat.size} "
+                f"(nan={int(np.isnan(flat).sum())}, "
+                f"inf={int(np.isinf(flat).sum())}), "
+                f"first at index {int(np.flatnonzero(bad)[0])}"
+            )
+
+        flat_w = log_weights.ravel()
+        bad_w = np.isnan(flat_w) | (flat_w == np.inf)
+        if bad_w.any():
+            return prefix + (
+                f"{int(bad_w.sum())} log weights are nan or +inf "
+                f"(nan={int(np.isnan(flat_w).sum())}, "
+                f"+inf={int((flat_w == np.inf).sum())}), "
+                f"first at index {int(np.flatnonzero(bad_w)[0])}"
+            )
+
+        if flat_w.size and np.all(flat_w == -np.inf):
+            return prefix + (
+                "all log weights are -inf (every sample has zero weight)"
+            )
+
+        return prefix + (
+            "overflow in the weighted sufficient statistics T(x)·w "
+            f"(max |x| = {np.max(np.abs(flat)) if flat.size else float('nan')})"
+        )
 
     @classmethod
     def from_mode(
