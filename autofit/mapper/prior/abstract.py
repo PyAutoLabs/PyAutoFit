@@ -8,6 +8,7 @@ import numpy as np
 
 from autonerves import conf
 
+from autofit import exc
 from autofit.mapper.prior.arithmetic import ArithmeticMixin
 from autofit.mapper.prior.constant import Constant
 from autofit.mapper.prior.deferred import DeferredArgument
@@ -234,12 +235,17 @@ class Prior(Variable, ABC, ArithmeticMixin):
             the prior bounds (see PyAutoFit#1382).
         """
         result = copy(self)
-        result.message = self.message.project(
-            samples=samples,
-            log_weight_list=log_weight_list,
-            id_=self.id,
-            **self.message._support_kwargs,
-        )
+        try:
+            result.message = self.message.project(
+                samples=samples,
+                log_weight_list=log_weight_list,
+                id_=self.id,
+                **self.message._support_kwargs,
+            )
+        except exc.ProjectionException as e:
+            raise exc.ProjectionException(
+                f"Projecting prior id={self.id} ({type(self).__name__}) failed: {e}"
+            ) from e
         return result
 
     def __getattr__(self, item):

@@ -152,6 +152,7 @@ def factor_step(factor_approx, optimiser, model_approx=None):
         ArithmeticError,
         RuntimeError,
         exc.InitializerException,
+        exc.ProjectionException,
     ) as e:
         # `InitializerException` is raised when a factor's own optimiser cannot
         # find a start point — most commonly because EP has driven the factor to
@@ -160,6 +161,11 @@ def factor_step(factor_approx, optimiser, model_approx=None):
         # degrade to the factor's previous message and let the sweep continue,
         # with the failure recorded. `EPOptimiser` aborts if one factor keeps
         # failing (see `max_consecutive_failures`).
+        #
+        # `ProjectionException` (a `ValueError`, listed for intent) is raised
+        # when one factor's weighted samples project to non-finite sufficient
+        # statistics: a non-finite projection of one factor's samples is a
+        # failed sweep update, not a failed graph fit, and takes the same path.
         logger.exception(e)
         status = Status(
             success=False,

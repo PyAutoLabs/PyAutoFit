@@ -701,3 +701,73 @@ def test_a_group_no_member_of_which_moves_a_variable_is_named_once(tmp_path):
     assert "STALE FACTORS" in warnings[0]
     assert "variable 's' of group_stale" in warnings[0]
     assert "updates (reverted on every projection of that factor)" in warnings[0]
+
+
+class NonFiniteProjectionOptimiser(AbstractFactorOptimiser):
+    """
+    Stands in for a per-factor search whose weighted samples project to
+    non-finite sufficient statistics (RAL 342411, PyAutoFit#1653): the first
+    `n_failures` calls project a sample set containing a nan, then it defers
+    to an exact fit.
+    """
+
+    def __init__(self, n_failures=1):
+        super().__init__()
+        self.n_failures = n_failures
+        self.call_count = 0
+
+    def optimise(self, factor_approx, status=graph.Status()):
+        self.call_count += 1
+        if self.call_count <= self.n_failures:
+            with np.errstate(all="ignore"):
+                NormalMessage.project(np.array([1.0, 2.0, np.nan]), np.zeros(3))
+        return self.exact_fit(factor_approx, status)
+
+
+def test_nonfinite_projection_degrades_factor_step_to_previous_message():
+    """
+    A non-finite projection of one factor's samples is a failed sweep update,
+    not a failed graph fit: `factor_step` keeps the factor's previous message
+    and records the failure, rather than letting the error kill the run.
+    """
+    from autofit.graphical.expectation_propagation.optimiser import factor_step
+
+    model_approx, _, prior, _ = make_shared_variable_approx()
+    factor_approx = model_approx.factor_approximation(prior)
+
+    new_dist, status = factor_step(factor_approx, NonFiniteProjectionOptimiser(1))
+
+    assert status.flag is StatusFlag.EXCEPTION
+    assert status.updated is False
+    assert new_dist is factor_approx.model_dist
+    assert "non-finite" in status.messages[0]
+    assert "samples" in status.messages[0]
+
+
+def test_nonfinite_projection_does_not_abort_the_ep_run():
+    """
+    End to end: one bad projection on the first sweep leaves the EP run going,
+    it returns a finite mean field, and the failure stays loud in the
+    diagnostics rows.
+    """
+    model_approx, factor_graph, prior, likelihood = make_shared_variable_approx()
+
+    failing = NonFiniteProjectionOptimiser(n_failures=1)
+    optimiser = graph.EPOptimiser(
+        factor_graph,
+        factor_optimisers={prior: failing, likelihood: ExactFactorFit()},
+        paths=False,
+    )
+
+    result = optimiser.run(model_approx, max_steps=4)
+
+    assert failing.call_count > 1, "the failing factor was never retried"
+    (x,) = [v for v in result.mean_field if v.name == "x"]
+    assert np.isfinite(result.mean_field[x].mean)
+
+    flags = [
+        row["flag"]
+        for row in optimiser.diagnostics.factor_rows
+        if row["factor"] == prior.name
+    ]
+    assert StatusFlag.EXCEPTION.name in flags
