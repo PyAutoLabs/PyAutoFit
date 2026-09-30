@@ -17,6 +17,60 @@ requires_nautilus = pytest.mark.skipif(
 )
 
 
+@pytest.mark.parametrize(
+    "steps, limit, expected_budgets, expected_updates",
+    [
+        ([(40, True)], None, [300], 0),
+        ([(320, False), (360, True)], None, [300, 620], 1),
+        ([(320, False), (640, False)], 600, [300, 600], 1),
+        ([(300, False)], 300, [300], 0),
+        ([(0, False)], None, [300], 0),
+    ],
+)
+def test__completion_and_likelihood_budgets(
+    monkeypatch, steps, limit, expected_budgets, expected_updates
+):
+    """Convergence ends immediately; incomplete chunks advance by real calls."""
+    search = af.Nautilus(
+        name="completion_budget", n_live=10,
+        iterations_per_full_update=300, n_like_max=limit,
+    )
+    updates = []
+    monkeypatch.setattr(search, "perform_update", lambda **kw: updates.append(kw))
+
+    class Sampler:
+        n_like = 0
+
+        def __init__(self):
+            self.budgets = []
+
+        def run(self, **kwargs):
+            self.budgets.append(kwargs["n_like_max"])
+            self.n_like, converged = steps[len(self.budgets) - 1]
+            return converged
+
+        def posterior(self):
+            raise AssertionError("Posterior sample count is not a call budget")
+
+    sampler = Sampler()
+    assert search.call_search(sampler, None, None, None) is sampler
+    assert sampler.budgets == expected_budgets
+    assert len(updates) == expected_updates
+    assert all(update["during_analysis"] for update in updates)
+
+
+@pytest.mark.parametrize("limit", [None, float("inf"), 100])
+def test__null_paths_likelihood_budget(limit):
+    from types import SimpleNamespace
+    from autofit.non_linear.paths.null import NullPaths
+
+    search = af.Nautilus(n_like_max=limit)
+    assert isinstance(search.paths, NullPaths)
+    budget, calls = search.iterations_from(SimpleNamespace(n_like=40))
+    assert calls == 40
+    assert budget == (100 if limit == 100 else int(1e99))
+
+
 def test__explicit_params():
     search = af.Nautilus(
         n_live=500,

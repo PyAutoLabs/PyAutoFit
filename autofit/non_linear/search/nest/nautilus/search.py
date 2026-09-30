@@ -603,7 +603,7 @@ class Nautilus(abstract_nest.AbstractNest):
                 search_internal=search_internal
             )
 
-            search_internal.run(
+            converged = search_internal.run(
                 f_live=self.f_live,
                 n_shell=self.n_shell,
                 n_eff=self.n_eff,
@@ -615,8 +615,12 @@ class Nautilus(abstract_nest.AbstractNest):
             iterations_after_run = self.iterations_from(search_internal=search_internal)[1]
 
             if (
-                    total_iterations == iterations_after_run
-                    or iterations_after_run == self.n_like_max
+                converged
+                or total_iterations == iterations_after_run
+                or (
+                    self.n_like_max is not None
+                    and iterations_after_run >= self.n_like_max
+                )
             ):
                 finished = True
 
@@ -636,33 +640,27 @@ class Nautilus(abstract_nest.AbstractNest):
         self, search_internal
     ) -> Tuple[int, int]:
         """
-        Returns the next number of iterations that a dynesty call will use and the total number of iterations
-        that have been performed so far.
+        Return the next cumulative likelihood-call budget and calls performed.
 
-        This is used so that the `iterations_per_full_update` input leads to on-the-fly output of dynesty results.
-
-        It also ensures dynesty does not perform more samples than the `n_like_max` input variable.
+        Nautilus budgets likelihood evaluations, not posterior samples. Batches
+        can overshoot a budget, so advance from the sampler's actual call count.
 
         Parameters
         ----------
         search_internal
-            The Dynesty sampler (static or dynamic) which is run and performs nested sampling.
+            The Nautilus sampler.
 
         Returns
         -------
-        The next number of iterations that a dynesty run sampling will perform and the total number of iterations
-        it has performed so far.
+        The next cumulative likelihood-call limit and current likelihood count.
         """
+
+        total_iterations = search_internal.n_like
 
         if isinstance(self.paths, NullPaths):
             if self.n_like_max is not None and self.n_like_max != float("inf"):
-                return int(self.n_like_max), int(self.n_like_max)
-            return int(1e99), int(1e99)
-
-        try:
-            total_iterations = len(search_internal.posterior()[1])
-        except ValueError:
-            total_iterations = 0
+                return int(self.n_like_max), total_iterations
+            return int(1e99), total_iterations
 
         iterations = total_iterations + self.iterations_per_full_update
 
