@@ -62,6 +62,42 @@ def test__explicit_params():
     assert search.number_of_cores == 1
 
 
+def test__dynamic_n_effective_passed_to_run_nested_only_when_set():
+
+    search = af.DynestyDynamic(n_effective=5000)
+
+    assert search.n_effective == 5000
+    assert search.run_kwargs["n_effective"] == 5000
+
+    search = af.DynestyDynamic()
+
+    assert search.n_effective is None
+    assert "n_effective" not in search.run_kwargs
+
+
+@pytest.mark.parametrize("search_cls", [af.DynestyStatic, af.DynestyDynamic])
+def test__null_paths_iteration_budget_fits_c_long(search_cls):
+    """
+    Without an output directory (NullPaths) the per-chunk budget is "unbounded".
+    It must be ``sys.maxsize``, not ``int(1e99)``: dynesty's dynamic sampler
+    subtracts a numpy int64 ``ncall`` from it, which raised
+    ``OverflowError: Python int too large to convert to C long``.
+    """
+    import sys
+    from autofit.non_linear.paths.null import NullPaths
+
+    search = search_cls()
+    assert isinstance(search.paths, NullPaths)
+
+    iterations, total = search.iterations_from(MockDynestySampler(results=None))
+
+    assert iterations == total == sys.maxsize
+    assert iterations - np.int64(40) == sys.maxsize - 40
+
+    search = search_cls(maxcall=100)
+    assert search.iterations_from(MockDynestySampler(results=None)) == (100, 100)
+
+
 @pytest.mark.parametrize("search_cls", [af.DynestyStatic, af.DynestyDynamic])
 def test__null_paths_iteration_budget_fits_c_long(search_cls):
     """
