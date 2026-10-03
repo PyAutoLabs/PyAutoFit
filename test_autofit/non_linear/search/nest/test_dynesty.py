@@ -1,3 +1,5 @@
+import sys
+
 import numpy as np
 import pytest
 
@@ -177,6 +179,7 @@ class _FakeRunSampler:
             samples=None, logl=None, logwt=None, ncall=[], logz=None, nlive=None
         )
         self.maxcalls = []
+        self.maxbatches = []
 
     def run_nested(self, maxcall, **kwargs):
         self.maxcalls.append(maxcall)
@@ -227,6 +230,115 @@ def test__run_search_internal__global_maxcall_is_finished():
 
     assert search.run_search_internal(search_internal=sampler) is True
     assert sampler.maxcalls == [100]
+
+
+class _FakeCumulativeRunSampler(_FakeRunSampler):
+    """
+    Mirrors dynesty's *dynamic* sampler, whose `run_nested` compares `maxcall` against
+    the cumulative number of calls made so far: a run adds its scripted calls only up
+    to that cumulative budget, and adds nothing if the budget is already spent.
+    """
+
+    def run_nested(self, maxcall, **kwargs):
+        self.maxcalls.append(maxcall)
+        self.maxbatches.append(kwargs.get("maxbatch"))
+        total = sum(self.results.ncall)
+        wanted = self.calls_per_run.pop(0)
+        self.results.ncall.append(max(0, min(wanted, maxcall - total)))
+
+
+def _dynamic_search_with_directory_paths(name, **kwargs):
+    search = af.DynestyDynamic(nlive_init=20, number_of_cores=1, silence=True, **kwargs)
+    search.paths = af.DirectoryPaths(name=name)
+    return search
+
+
+def test__dynamic__first_chunk_runs_whole_baseline_then_batches_are_cumulative():
+    """
+    Under the default (inf-like) cadence nothing is chunked and the budget is simply
+    capped. With a finite cadence the first chunk is the whole baseline run (no call
+    budget, `maxbatch=0`) and later chunks are budgeted by cumulative calls.
+    """
+    search = af.DynestyDynamic()
+    assert search.chunked is False
+    assert search.maxcall_from(iterations=1e99, total_iterations=0) == sys.maxsize
+    assert search.maxcall_from(iterations=1e99, total_iterations=120) == sys.maxsize
+    assert search.chunk_kwargs(total_iterations=0) == {}
+
+    search = af.DynestyDynamic(iterations_per_full_update=50)
+    assert search.chunked is True
+    assert search.maxcall_from(iterations=50, total_iterations=0) == sys.maxsize
+    assert search.chunk_kwargs(total_iterations=0) == {"maxbatch": 0}
+    assert search.maxcall_from(iterations=50, total_iterations=120) == 170
+    assert search.chunk_kwargs(total_iterations=120) == {}
+
+    search = af.DynestyDynamic(iterations_per_full_update=50, maxcall=300)
+    assert search.maxcall_from(iterations=300, total_iterations=0) == 300
+
+    static = af.DynestyStatic(iterations_per_full_update=50)
+    assert static.maxcall_from(iterations=50, total_iterations=120) == 50
+    assert static.chunk_kwargs(total_iterations=120) == {}
+
+
+def test__dynamic__chunk_that_reaches_cumulative_budget_is_not_finished():
+    """
+    The baseline-only first chunk is never finished. A batch chunk that lands exactly
+    on its cumulative budget is budget-limited, not converged; one that stops short of
+    it converged.
+    """
+    search = _dynamic_search_with_directory_paths(
+        "dynesty_dynamic_budget", iterations_per_full_update=50
+    )
+
+    sampler = _FakeCumulativeRunSampler(calls_per_run=[30])
+    assert search.run_search_internal(search_internal=sampler) is False
+    assert sampler.maxcalls == [sys.maxsize]
+    assert sampler.maxbatches == [0]
+
+    sampler = _FakeCumulativeRunSampler(calls_per_run=[40, 50])
+    search.run_search_internal(search_internal=sampler)
+    assert search.run_search_internal(search_internal=sampler) is False
+    assert sampler.maxcalls[-1] == 90
+
+    sampler = _FakeCumulativeRunSampler(calls_per_run=[40, 20])
+    search.run_search_internal(search_internal=sampler)
+    assert search.run_search_internal(search_internal=sampler) is True
+
+
+def test__fit__dynamic_finite_cadence_runs_to_convergence(monkeypatch):
+    """
+    Regression test: with a finite `iterations_per_full_update` the dynamic sampler
+    used to be handed the same per-chunk `maxcall` on every pass. Because it compares
+    `maxcall` with its cumulative call count, the second pass added nothing and the
+    no-new-calls criterion returned a truncated baseline as finished. Now the first
+    pass is the whole baseline run, the batch passes get cumulative budgets, and the
+    run continues until dynesty converges (the third pass here, which stops short of
+    its budget), with an intermediate update after each unfinished pass.
+    """
+    search = _dynamic_search_with_directory_paths(
+        "dynesty_dynamic_finite_cadence", iterations_per_full_update=50
+    )
+    sampler = _FakeCumulativeRunSampler(calls_per_run=[40, 50, 20])
+
+    monkeypatch.setattr(
+        search, "search_internal_from", lambda *args, **kwargs: sampler
+    )
+    updates = []
+    monkeypatch.setattr(
+        search,
+        "perform_update",
+        lambda *args, **kwargs: updates.append(kwargs.get("during_analysis")),
+    )
+
+    model = af.Model(af.ex.Gaussian)
+    analysis = af.ex.Analysis(data=np.full(10, 1.0), noise_map=np.full(10, 1.0))
+
+    search._fit(model=model, analysis=analysis)
+
+    assert sampler.maxcalls == [sys.maxsize, 90, 140]
+    assert sampler.maxbatches == [0, None, None]
+    assert sampler.results.ncall == [40, 50, 20]
+    assert updates == [True, True]
 
 
 def test__fit__finite_cadence_loops_through_intermediate_updates(monkeypatch):

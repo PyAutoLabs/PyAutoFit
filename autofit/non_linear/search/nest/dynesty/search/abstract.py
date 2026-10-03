@@ -405,16 +405,59 @@ class AbstractDynesty(AbstractNest, ABC):
             # "unbounded" sentinel dynesty itself uses when ``maxcall=None``.
             return sys.maxsize, sys.maxsize
 
-        try:
-            total_iterations = np.sum(search_internal.results.ncall)
-        except AttributeError:
-            total_iterations = 0
+        total_iterations = self.total_calls_from(search_internal=search_internal)
 
         if self.maxcall is not None:
             iterations = self.maxcall - total_iterations
 
             return int(iterations), int(total_iterations)
         return self.iterations_per_full_update, int(total_iterations)
+
+    def total_calls_from(self, search_internal) -> int:
+        """
+        The total number of likelihood calls the sampler has made so far, or 0 for a sampler that has not run.
+
+        For the static sampler this is the sum of the per-sample call counts in `results.ncall`.
+        `DynestyDynamic` overrides this to use the sampler's own `ncall` counter, which is what dynesty
+        compares `maxcall` against: `results.ncall` omits the calls spent initialising each batch's live
+        points, so it undercounts and would compare a different quantity with the cumulative budget.
+        """
+        try:
+            return int(np.sum(search_internal.results.ncall))
+        except AttributeError:
+            return 0
+
+    def maxcall_from(self, iterations: int, total_iterations: int) -> int:
+        """
+        The `maxcall` handed to `run_nested` for a chunk of `iterations` likelihood calls, given that
+        `total_iterations` calls have already been made.
+
+        The static sampler counts calls per `run_nested` call, so the budget is the increment itself.
+        `DynestyDynamic` overrides this because the dynamic sampler counts cumulatively.
+        """
+        return iterations
+
+    def chunk_kwargs(self, total_iterations: int) -> Dict:
+        """
+        Extra `run_nested` keyword arguments for a chunk, given the number of likelihood calls made before it.
+
+        The static sampler continues a partially run sampler when `run_nested` is simply called again, so
+        nothing is needed. `DynestyDynamic` overrides this to run the baseline to completion in the first
+        chunk, because the dynamic sampler cannot continue a baseline run that was cut short.
+        """
+        return {}
+
+    def chunk_is_finished(
+        self, iterations: int, total_iterations: int, iterations_after_run: int
+    ) -> bool:
+        """
+        Whether a `run_nested` chunk stopped on dynesty's own termination criterion rather than on its
+        budget, given the budget (`iterations`) and the total calls before and after the chunk.
+
+        The static sampler stops on its budget only once its per-run counter is strictly above `maxcall`, so
+        a chunk that added no more calls than its budget converged. `DynestyDynamic` overrides this.
+        """
+        return iterations_after_run - total_iterations <= iterations
 
     def run_search_internal(
         self, search_internal: "Union[NestedSampler, DynamicNestedSampler]"
@@ -429,17 +472,30 @@ class AbstractDynesty(AbstractNest, ABC):
 
         1. No output paths (`NullPaths`): there are no on-the-fly updates, so one pass is always final.
         2. The global `maxcall` has been reached.
-        3. Dynesty stopped itself inside the budget. Dynesty's per-run call counter resets on every
-           `run_nested` call and it stops on the budget only once that counter is *strictly above* `maxcall`,
-           while `sum(results.ncall)` grows by at least that counter. So a pass that added no more calls than
-           its budget stopped on dynesty's own termination criterion (`dlogz`, `maxiter`, ...) and is
-           converged. Under the default `iterations_per_full_update` (1e99) every converged run is therefore
-           finished in a single pass, with no intermediate `perform_update`, checkpoint restore or second
-           no-op `run_nested`.
+        3. Dynesty stopped itself inside the budget (`chunk_is_finished`). The two samplers count `maxcall`
+           differently, so the budget handed to `run_nested` (`maxcall_from`) and this criterion are
+           per-sampler:
+
+           - The static sampler's per-run call counter resets on every `run_nested` call and it stops on the
+             budget only once that counter is *strictly above* `maxcall`, while `sum(results.ncall)` grows by
+             at least that counter. So `maxcall` is the per-chunk increment, and a pass that added no more
+             calls than its budget stopped on dynesty's own termination criterion (`dlogz`, `maxiter`, ...).
+           - The dynamic sampler compares `maxcall` against its *cumulative* call count (`self.ncall` carried
+             over from previous `run_nested` calls). Handing it the per-chunk increment again on the second
+             chunk is a budget it has already spent, so it returns without sampling, criterion 4 fires and a
+             truncated baseline run is returned as the result. Nor can a baseline run that `maxcall` cut
+             short be continued (the next call restarts it, and `resume=True` refuses after `RUN_DONE`).
+             `DynestyDynamic` therefore runs the whole baseline in the first chunk (`maxbatch=0`, no budget),
+             then chunks the batch phase by cumulative budget `total_iterations + iterations`, and a batch
+             chunk is finished only when it stopped strictly inside that budget. See `DynestyDynamic.chunk_kwargs`.
+
+           Under the default `iterations_per_full_update` (1e99) every converged run is finished in a single
+           pass for both samplers, with no intermediate `perform_update`, checkpoint restore or second no-op
+           `run_nested`.
         4. Legacy criterion: the pass performed no new likelihood calls (e.g. re-running an already converged
            sampler restored from its checkpoint).
 
-        A pass that overran its budget (a finite `iterations_per_full_update` chunk) is not finished, so the
+        A pass that exhausted its budget (a finite `iterations_per_full_update` chunk) is not finished, so the
         search loops through `perform_update` and runs the next chunk.
 
         Parameters
@@ -461,13 +517,16 @@ class AbstractDynesty(AbstractNest, ABC):
                 warnings.simplefilter("ignore")
 
                 search_internal.run_nested(
-                    maxcall=iterations,
+                    maxcall=self.maxcall_from(
+                        iterations=iterations, total_iterations=total_iterations
+                    ),
                     print_progress=not self.silence,
                     checkpoint_file=self.checkpoint_file,
                     **self.run_kwargs,
+                    **self.chunk_kwargs(total_iterations=total_iterations),
                 )
 
-        iterations_after_run = np.sum(search_internal.results.ncall)
+        iterations_after_run = self.total_calls_from(search_internal=search_internal)
 
         if isinstance(self.paths, NullPaths):
             return True
@@ -475,7 +534,11 @@ class AbstractDynesty(AbstractNest, ABC):
         if self.maxcall is not None and iterations_after_run >= self.maxcall:
             return True
 
-        if iterations > 0 and iterations_after_run - total_iterations <= iterations:
+        if iterations > 0 and self.chunk_is_finished(
+            iterations=iterations,
+            total_iterations=total_iterations,
+            iterations_after_run=iterations_after_run,
+        ):
             return True
 
         return bool(total_iterations == iterations_after_run)

@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import sys
 from typing import Dict, Optional
 
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
@@ -109,6 +111,79 @@ class DynestyDynamic(AbstractDynesty):
         if self.n_effective is not None:
             run_kwargs["n_effective"] = self.n_effective
         return run_kwargs
+
+    @property
+    def chunked(self) -> bool:
+        """
+        Whether a run is split into `run_nested` chunks for on-the-fly output, i.e. whether
+        `iterations_per_full_update` is finite rather than the inf-like default (1e99).
+        """
+        return self.iterations_per_full_update is not None and self.iterations_per_full_update < sys.maxsize
+
+    def total_calls_from(self, search_internal) -> int:
+        """
+        The dynamic sampler's own cumulative call counter, the quantity dynesty compares the cumulative
+        `maxcall` with. `results.ncall` undercounts it (it omits each batch's live-point initialisation),
+        which would make a budget-limited batch chunk look converged. Falls back to the `results` count for
+        objects without the counter.
+        """
+        try:
+            return int(search_internal.ncall)
+        except AttributeError:
+            return super().total_calls_from(search_internal=search_internal)
+
+    def maxcall_from(self, iterations: int, total_iterations: int) -> int:
+        """
+        The `maxcall` for a chunk of the dynamic sampler.
+
+        dynesty's `DynamicNestedSampler.run_nested` compares `maxcall` with its *cumulative* call count
+        (`self.ncall`, carried over from earlier calls), unlike the static sampler whose counter resets per
+        call. The budget for a chunk is therefore the calls made so far plus the chunk size, capped at
+        `sys.maxsize` (dynesty's own "unbounded" value) so an inf-like value cannot overflow the C long
+        dynesty subtracts from.
+
+        The first chunk of a chunked run is the exception: it is given the whole budget (`maxcall` if set,
+        otherwise unbounded) because the baseline run must never be cut short, see `chunk_kwargs`.
+        """
+        if self.chunked and total_iterations == 0:
+            return self.maxcall if self.maxcall is not None else sys.maxsize
+        return int(min(total_iterations + iterations, sys.maxsize))
+
+    def chunk_kwargs(self, total_iterations: int) -> Dict:
+        """
+        Extra `run_nested` keyword arguments for a chunk of the dynamic sampler.
+
+        A dynamic run is a baseline nested sampling run followed by batches of live points. dynesty cannot
+        continue a baseline run that `maxcall` cut short: the next `run_nested` call restarts it from scratch
+        (`sample_initial` calls `reset()`), and `resume=True` refuses because the previous call ended in the
+        `RUN_DONE` state. Batches, however, can be added across `run_nested` calls: once `self.base` is set the
+        baseline is skipped and the batch loop continues from `self.batch`, evaluating the stopping criterion
+        (including `n_effective`) first.
+
+        A chunked run therefore completes the baseline in its first chunk (`maxbatch=0`, no call budget) and
+        chunks only the batch phase, by cumulative `maxcall` (`maxcall_from`). Intermediate output starts
+        after the baseline run.
+        """
+        if self.chunked and total_iterations == 0:
+            return {"maxbatch": 0}
+        return {}
+
+    def chunk_is_finished(
+        self, iterations: int, total_iterations: int, iterations_after_run: int
+    ) -> bool:
+        """
+        The baseline-only first chunk of a chunked run is never finished: the batch phase (and so the
+        `n_effective` stopping criterion) has not run yet. If it turns out to be satisfied already, the next
+        chunk adds no calls and `run_search_internal`'s no-new-calls criterion finishes the search.
+
+        A batch chunk stops sampling once its cumulative call count reaches the cumulative `maxcall` (it may
+        land exactly on it), so it converged only if it stopped strictly inside that budget.
+        """
+        if self.chunked and total_iterations == 0:
+            return False
+        return iterations_after_run < self.maxcall_from(
+            iterations=iterations, total_iterations=total_iterations
+        )
 
     @property
     def search_internal(self):
