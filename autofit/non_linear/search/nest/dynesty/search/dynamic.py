@@ -30,6 +30,7 @@ class DynestyDynamic(AbstractDynesty):
             maxcall_init: Optional[int] = None,
             maxiter: Optional[int] = None,
             maxiter_init: Optional[int] = None,
+            n_effective: Optional[int] = None,
             iterations_per_quick_update: int = None,
             iterations_per_full_update: int = None,
             number_of_cores: int = 1,
@@ -57,6 +58,13 @@ class DynestyDynamic(AbstractDynesty):
             Number of live points used during the initial exploration phase.
         dlogz_init
             Stopping criterion for the initial baseline run.
+        n_effective
+            The minimum effective posterior sample size (ESS) of the whole run. After the baseline run, dynesty
+            keeps adding batches of live points until its default stopping function judges the estimated ESS to
+            have reached this value (`target_n_effective`). If `None` (the default), the argument is not passed
+            and dynesty's own default applies, which in dynesty 2.x is `max(10000, ndim ** 2)`. It has no effect
+            if a custom `stop_function` is used. It is not an identifier field, so changing it alone does not
+            give the search a new output folder.
         iterations_per_full_update
             The number of iterations performed between update (e.g. output latest model to hard-disk, visualization).
         number_of_cores
@@ -78,6 +86,7 @@ class DynestyDynamic(AbstractDynesty):
         self.dlogz_init = dlogz_init
         self.logl_max_init = logl_max_init
         self.maxcall_init = maxcall_init
+        self.n_effective = n_effective
         self.maxiter = maxiter
         self.maxiter_init = maxiter_init
 
@@ -89,7 +98,7 @@ class DynestyDynamic(AbstractDynesty):
 
     @property
     def run_kwargs(self) -> Dict:
-        return {
+        run_kwargs = {
             "dlogz_init": self.dlogz_init,
             "logl_max_init": self.logl_max_init,
             "maxcall_init": self.maxcall_init,
@@ -97,6 +106,9 @@ class DynestyDynamic(AbstractDynesty):
             "maxiter_init": self.maxiter_init,
             "nlive_init": self.nlive_init,
         }
+        if self.n_effective is not None:
+            run_kwargs["n_effective"] = self.n_effective
+        return run_kwargs
 
     @property
     def search_internal(self):
