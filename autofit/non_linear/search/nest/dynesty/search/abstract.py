@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from abc import ABC
 from pathlib import Path
 from typing import Dict, Optional, Tuple, Union, TYPE_CHECKING
@@ -397,7 +398,12 @@ class AbstractDynesty(AbstractNest, ABC):
         if isinstance(self.paths, NullPaths):
             if self.maxcall is not None:
                 return self.maxcall, self.maxcall
-            return int(1e99), int(1e99)
+            # ``sys.maxsize`` rather than ``int(1e99)``: dynesty's dynamic sampler
+            # computes ``maxcall - ncall`` where ``ncall`` is a numpy int64, and a
+            # 99-digit Python int overflows that subtraction (OverflowError:
+            # Python int too large to convert to C long). ``sys.maxsize`` is the
+            # "unbounded" sentinel dynesty itself uses when ``maxcall=None``.
+            return sys.maxsize, sys.maxsize
 
         try:
             total_iterations = np.sum(search_internal.results.ncall)
