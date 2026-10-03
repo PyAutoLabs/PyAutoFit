@@ -63,6 +63,29 @@ def test__explicit_params():
 
 
 @pytest.mark.parametrize("search_cls", [af.DynestyStatic, af.DynestyDynamic])
+def test__null_paths_iteration_budget_fits_c_long(search_cls):
+    """
+    Without an output directory (NullPaths) the per-chunk budget is "unbounded".
+    It must be ``sys.maxsize``, not ``int(1e99)``: dynesty's dynamic sampler
+    subtracts a numpy int64 ``ncall`` from it, which raised
+    ``OverflowError: Python int too large to convert to C long``.
+    """
+    import sys
+    from autofit.non_linear.paths.null import NullPaths
+
+    search = search_cls()
+    assert isinstance(search.paths, NullPaths)
+
+    iterations, total = search.iterations_from(MockDynestySampler(results=None))
+
+    assert iterations == total == sys.maxsize
+    assert iterations - np.int64(40) == sys.maxsize - 40
+
+    search = search_cls(maxcall=100)
+    assert search.iterations_from(MockDynestySampler(results=None)) == (100, 100)
+
+
+@pytest.mark.parametrize("search_cls", [af.DynestyStatic, af.DynestyDynamic])
 def test__single_core_builds_no_pool(search_cls, monkeypatch):
     """
     number_of_cores=1 must not construct a multiprocessing pool: dynesty treats
