@@ -23,11 +23,25 @@ def fork_context():
     restore old behaviour. This helper reproduces the pre-3.14 default on
     every platform.
 
+    On macOS and Windows the ``multiprocessing`` module itself is returned
+    rather than ``multiprocessing.get_context()``. Both expose the same
+    ``Process`` / ``Queue`` / ``Pool`` API, but calling ``get_context()`` with
+    no argument *fixes* the interpreter's default start method, and this
+    function runs at import time (``class Process(fork_context().Process)``).
+    That made ``multiprocessing.set_start_method("fork")`` raise
+    ``RuntimeError: context has already been set`` in any script or test
+    suite that imports autofit before choosing its start method (the autofit
+    test suite does exactly this on macOS in ``test_autofit/conftest.py``).
+    The module-level API defers the choice until a process actually starts,
+    which is the pre-3.14 behaviour this helper exists to preserve.
+
     Returns
     -------
     The "fork" multiprocessing context on POSIX platforms other than macOS,
-    else the platform default ("spawn" on Windows and macOS).
+    else the ``multiprocessing`` module, which dispatches to whichever start
+    method is current when a process is created ("spawn" by default on
+    Windows and macOS).
     """
     if sys.platform != "darwin" and "fork" in multiprocessing.get_all_start_methods():
         return multiprocessing.get_context("fork")
-    return multiprocessing.get_context()
+    return multiprocessing
