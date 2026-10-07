@@ -132,6 +132,7 @@ general/roadmap
 general/software
 general/citations
 general/credits
+general/community
 ```
 
 ```{toctree}
