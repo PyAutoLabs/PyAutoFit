@@ -66,6 +66,7 @@ Homepage = "https://github.com/PyAutoLabs/PyAutoFit"
 include-package-data = true
 
 [tool.setuptools.packages.find]
+include = ["autofit*"]
 exclude = ["docs", "test_autofit", "test_autofit*"]
 
 [tool.setuptools_scm]
