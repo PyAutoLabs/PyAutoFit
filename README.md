@@ -109,13 +109,12 @@ as I go.
 The assistant will answer questions about concepts, equations, code and results as you study, and help with
 notebook errors. Share the lecture link and section or the cell you are working on; you choose when to move on.
 
-## Community & Support
+## Community & Contributing
 
-Questions, help with your code or your analysis, and ideas: the
-[PyAutoLabs Discussions](https://github.com/orgs/PyAutoLabs/discussions).
-Bug reports with a reproducer (a snippet, the traceback, your versions):
-an issue on the library's tracker. The Slack is for collaborators, by
-invitation.
+**PyAutoFit** is built in the open by its users: everyone is welcome to ask questions,
+share what they have made with it, and contribute.
 
-Collaborators receive the latest **PyAutoFit** updates in the [Slack channel](https://pyautoFit.slack.com/).
-Contact [James Nightingale](https://github.com/Jammy2211) about collaborator access.
+Questions, ideas and bug reports: the [PyAutoLabs Discussions](https://github.com/orgs/PyAutoLabs/discussions).
+Chat with us on [Slack](https://join.slack.com/t/pyautolens/shared_invite/zt-2cufp4eyf-fXfgMxRGuvg~bMrI3uOAxg).
+
+Community-built tools and tutorials, and how to contribute: the [**PyAutoFit** community page](https://pyautofit.readthedocs.io/en/latest/general/community.html).
