@@ -43,6 +43,56 @@ def test_fork_context_valid_everywhere():
     assert fork_context().get_start_method() in multiprocessing.get_all_start_methods()
 
 
+@pytest.mark.parametrize("platform", ["darwin", "win32"])
+def test_fork_context_non_fork_platform_returns_module(monkeypatch, platform):
+    """
+    On macOS (and on platforms without "fork") ``fork_context()`` returns the
+    ``multiprocessing`` module itself, which exposes the same Process / Queue /
+    Pool API and defers the start-method choice until a process starts.
+    """
+    monkeypatch.setattr(sys, "platform", platform)
+    if platform == "win32":
+        monkeypatch.setattr(multiprocessing, "get_all_start_methods", lambda: ["spawn"])
+
+    context = fork_context()
+
+    assert context is multiprocessing
+    for name in ("Process", "Queue", "Pool"):
+        assert hasattr(context, name)
+
+
+@pytest.mark.parametrize("platform", ["darwin", "win32"])
+def test_fork_context_non_fork_platform_does_not_fix_start_method(
+    monkeypatch, platform
+):
+    """
+    Regression test for PyAutoFit#1657: ``fork_context()`` runs at import time
+    (``class Process(fork_context().Process)``), and the no-argument
+    ``multiprocessing.get_context()`` call it used to make on macOS/Windows
+    fixed the interpreter's default start method, so a later
+    ``multiprocessing.set_start_method(...)`` raised "context has already been
+    set". The non-fork branch must never call ``get_context()`` without a
+    method.
+    """
+    monkeypatch.setattr(sys, "platform", platform)
+    if platform == "win32":
+        monkeypatch.setattr(multiprocessing, "get_all_start_methods", lambda: ["spawn"])
+
+    calls = []
+    real_get_context = multiprocessing.get_context
+
+    def spy_get_context(*args, **kwargs):
+        calls.append((args, kwargs))
+        return real_get_context(*args, **kwargs)
+
+    monkeypatch.setattr(multiprocessing, "get_context", spy_get_context)
+
+    fork_context()
+
+    assert ((), {}) not in calls
+    assert ((None,), {}) not in calls
+
+
 @requires_fork
 def test_process_class_is_fork_bound():
     assert Process._start_method == "fork"
