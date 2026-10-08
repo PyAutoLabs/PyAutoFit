@@ -13,11 +13,14 @@ none of them is an identifier field and that ``test_mode_budget`` is what
 import json
 import math
 import re
+import zipfile
 from pathlib import Path
 
 import pytest
 
+import autofit as af
 from autofit.non_linear.search import capabilities as cap
+from autonerves import conf
 from autofit.non_linear.search.abstract_search import NonLinearSearch
 
 from test_autofit.non_linear.search.conformance_roster import searches_under_test
@@ -27,6 +30,8 @@ pytestmark = pytest.mark.filterwarnings("ignore::FutureWarning")
 ROSTER = searches_under_test()
 
 CITATIONS_BIB = Path(__file__).parents[3] / "files" / "citations.bib"
+
+CONFIG_PATH = Path(__file__).parents[2] / "config"
 
 
 def _params():
@@ -162,3 +167,38 @@ def test_invalid_value_spelling():
     assert cap.invalid_value_to_str(-math.inf) == "-inf"
     assert cap.invalid_value_to_str(-1.0e99) == "-1e+99"
     assert cap.invalid_value_to_str(-1.0e30) == "-1e+30"
+
+
+class _NumpyAnalysis(af.Analysis):
+    def log_likelihood_function(self, instance):
+        return -0.5 * float((instance.centre - 50.0) ** 2)
+
+
+def _read_output(search, filename):
+    zip_path = Path(search.paths._zip_path)
+    if zip_path.exists():
+        with zipfile.ZipFile(zip_path) as archive:
+            return archive.read(filename).decode()
+    return (Path(search.paths.output_path) / filename).read_text()
+
+
+def test_capabilities_surface_in_model_info_and_search_summary(tmp_path, monkeypatch):
+    monkeypatch.delenv("PYAUTO_TEST_MODE", raising=False)
+    original_configs = list(conf.instance.configs)
+    conf.instance.push(new_path=str(CONFIG_PATH), output_path=str(tmp_path))
+    try:
+        search = af.Drawer(name="capabilities_surface", total_draws=3)
+        search.fit(model=af.Model(af.ex.Gaussian), analysis=_NumpyAnalysis())
+
+        model_info = _read_output(search, "model.info")
+        summary = _read_output(search, "search.summary")
+    finally:
+        conf.instance.configs = original_configs
+
+    header = cap.capability_summary_from(search)
+
+    assert model_info.startswith(header)
+    assert summary.startswith(header)
+    assert "JAX use = none" in header
+    assert "Posterior kind = point" in header
+    assert "Total Samples" in summary

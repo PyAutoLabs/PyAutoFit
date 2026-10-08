@@ -637,11 +637,19 @@ class AbstractPaths(ABC):
             with open_(filename, "w") as f:
                 f.write(result_info)
 
+        search = getattr(self, "search", None)
+        search_capabilities = None
+        if search is not None and getattr(type(search), "objective_target", None):
+            from autofit.non_linear.search.capabilities import capability_summary_from
+
+            search_capabilities = capability_summary_from(search)
+
         text_util.search_summary_to_file(
             samples=samples,
             log_likelihood_function_time=log_likelihood_function_time,
             visualization_time=visualization_time,
             filename=self.output_path / "search.summary",
+            search_capabilities=search_capabilities,
         )
 
     @property

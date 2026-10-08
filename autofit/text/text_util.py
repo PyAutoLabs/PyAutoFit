@@ -318,8 +318,14 @@ def search_summary_to_file(
     log_likelihood_function_time,
     filename,
     visualization_time=None,
+    search_capabilities=None,
 ):
     summary = search_summary_from_samples(samples=samples)
+
+    # The search and its static capabilities open the file, one blank line above
+    # the sample counts (`capabilities.capability_summary_from`).
+    if search_capabilities:
+        summary = [search_capabilities, "\n"] + summary
     summary.append(
         f"Log Likelihood Function Evaluation Time (seconds) = {log_likelihood_function_time}\n"
     )
