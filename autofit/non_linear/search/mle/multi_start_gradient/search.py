@@ -27,6 +27,7 @@ from autofit.non_linear.scaler import AbstractScaler, ScalerNone
 from autofit.non_linear.initializer import AbstractInitializer
 from autofit.non_linear.samples.sample import Sample
 from autofit.non_linear.samples.samples import Samples
+from autofit.non_linear.search import capabilities as cap
 from autofit.non_linear.search.mle.multi_start_gradient.convergence import (
     MultiStartGradientConvergence,
 )
@@ -43,6 +44,24 @@ class AbstractMultiStartGradient(AbstractMLE):
     # on disk, not deleted). Scoped to the clipper-consuming searches only: the
     # nested samplers and MCMC searches never touch the clipper and their
     # identifiers must stay byte-identical (PyAutoFit#1493).
+    # Static capabilities (see ``autofit.non_linear.search.capabilities``); mirrored
+    # by ``search/registry.py``. Never identifier fields.
+    jax_use = cap.JaxUse.REQUIRED
+    gradient = cap.Gradient.USES
+    batched = True
+    honours_gradient_mode = True
+    posterior_kind = cap.PosteriorKind.POINT
+    produces_evidence = False
+    resumable = True
+    warm_start = cap.WarmStart.PROVIDER
+    install_extra = ""
+    upstream_url = "https://github.com/google-deepmind/optax"
+    citation_keys = ("optax",)
+    status = cap.Status.STABLE
+    test_mode_budget = {"convergence.window": 1, "convergence.min_steps": 1}
+    objective_target = cap.ObjectiveTarget(cap.ObjectiveQuantity.NEG2_LOG_POSTERIOR, cap.CoordinateSpace.PHYSICAL)
+    invalid_value = -float("inf")
+
     __identifier_fields__ = ("clipper",)
 
     # Name of the optax update rule, resolved lazily at fit time from ``optax``
@@ -2227,6 +2246,7 @@ class MultiStartADABelief(AbstractMultiStartGradient):
 
     optax_method = "adabelief"
     _default_learning_rate = 1.0e-2
+    status = cap.Status.EXPERIMENTAL
 
 
 class MultiStartLion(AbstractMultiStartGradient):
@@ -2237,6 +2257,7 @@ class MultiStartLion(AbstractMultiStartGradient):
 
     optax_method = "lion"
     _default_learning_rate = 1.0e-3
+    status = cap.Status.EXPERIMENTAL
 
 
 class MultiStartProdigy(AbstractMultiStartGradient):
@@ -2256,3 +2277,5 @@ class MultiStartProdigy(AbstractMultiStartGradient):
 
     optax_method = "prodigy"
     _default_learning_rate = None
+    upstream_url = "https://github.com/konstmish/prodigy"
+    citation_keys = ("optax", "prodigy")

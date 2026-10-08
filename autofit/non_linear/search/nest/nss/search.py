@@ -15,6 +15,7 @@ from autofit.non_linear.search.nest import abstract_nest
 from .samples import NSSamples
 from autofit.non_linear.samples.sample import Sample
 from autofit.non_linear.test_mode import is_test_mode
+from autofit.non_linear.search import capabilities as cap
 
 if TYPE_CHECKING:
     from autofit.database.sqlalchemy_ import sa
@@ -192,6 +193,24 @@ class _NSSInternal:
 
 
 class NSS(abstract_nest.AbstractNest):
+    # Static capabilities (see ``autofit.non_linear.search.capabilities``); mirrored
+    # by ``search/registry.py``. Never identifier fields.
+    jax_use = cap.JaxUse.REQUIRED
+    gradient = cap.Gradient.NONE
+    batched = True
+    honours_gradient_mode = False
+    posterior_kind = cap.PosteriorKind.WEIGHTED
+    produces_evidence = True
+    resumable = True
+    warm_start = cap.WarmStart.PROVIDER
+    install_extra = "optional"
+    upstream_url = "https://github.com/blackjax-devs/blackjax"
+    citation_keys = ("blackjax",)
+    status = cap.Status.EXPERIMENTAL
+    test_mode_budget = {"termination": -1.0}
+    objective_target = cap.ObjectiveTarget(cap.ObjectiveQuantity.LOG_LIKELIHOOD, cap.CoordinateSpace.UNIT_CUBE)
+    invalid_value = NSS_INVALID_LOG_LIKELIHOOD
+
     __identifier_fields__ = (
         "n_live",
         "num_mcmc_steps",

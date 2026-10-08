@@ -18,6 +18,7 @@ from autofit.non_linear.search.nest.abstract_nest import AbstractNest
 from autofit.non_linear.samples.sample import Sample
 from autofit.non_linear.samples.nest import SamplesNest
 from autofit.non_linear.test_mode import is_test_mode
+from autofit.non_linear.search import capabilities as cap
 
 if TYPE_CHECKING:
     from autofit.database.sqlalchemy_ import sa
@@ -68,6 +69,24 @@ def prior_transform(cube, model):
 
 
 class AbstractDynesty(AbstractNest, ABC):
+    # Static capabilities (see ``autofit.non_linear.search.capabilities``); mirrored
+    # by ``search/registry.py``. Never identifier fields.
+    jax_use = cap.JaxUse.OPTIONAL
+    gradient = cap.Gradient.NONE
+    batched = False
+    honours_gradient_mode = False
+    posterior_kind = cap.PosteriorKind.WEIGHTED
+    produces_evidence = True
+    resumable = True
+    warm_start = cap.WarmStart.PROVIDER
+    install_extra = ""
+    upstream_url = "https://github.com/joshspeagle/dynesty"
+    citation_keys = ("dynesty",)
+    status = cap.Status.STABLE
+    test_mode_budget = {"maxcall": 1}
+    objective_target = cap.ObjectiveTarget(cap.ObjectiveQuantity.LOG_LIKELIHOOD, cap.CoordinateSpace.UNIT_CUBE)
+    invalid_value = -1.0e99
+
     def __init__(
         self,
         name: Optional[str] = None,

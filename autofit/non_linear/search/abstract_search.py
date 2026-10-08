@@ -52,6 +52,7 @@ from autofit.graphical.declarative.abstract import PriorFactor
 from autofit.graphical.expectation_propagation import AbstractFactorOptimiser
 
 from autofit.non_linear.fitness import get_timeout_seconds
+from autofit.non_linear.search import capabilities as cap
 from autofit.non_linear.test_mode import (
     test_mode_level,
     test_mode_samples,
@@ -334,6 +335,26 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         self.optimisation_counter = Counter()
 
     __identifier_fields__ = tuple()
+
+    # Static capability declarations (``autofit.non_linear.search.capabilities``).
+    # These are the defaults for a search that declares nothing; every public search
+    # overrides them and the registry (``search/registry.py``) mirrors its values.
+    # None of them is ever an identifier field.
+    jax_use = cap.JaxUse.NONE
+    gradient = cap.Gradient.NONE
+    batched = False
+    honours_gradient_mode = False
+    posterior_kind = None
+    produces_evidence = False
+    resumable = False
+    warm_start = cap.WarmStart.NEUTRAL
+    install_extra = ""
+    upstream_url = ""
+    citation_keys = ()
+    status = cap.Status.EXPERIMENTAL
+    test_mode_budget = {}
+    objective_target = None
+    invalid_value = -float("inf")
 
     def optimise(
         self,

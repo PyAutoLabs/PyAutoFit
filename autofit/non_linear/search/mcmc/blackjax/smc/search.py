@@ -27,6 +27,7 @@ from autofit.non_linear.search.mcmc.blackjax.chains import (
 from autofit.non_linear.search.mcmc.blackjax.smc.samples import SamplesSMC
 from autofit.non_linear.test_mode import is_test_mode
 from autofit.non_linear.samples.sample import Sample
+from autofit.non_linear.search import capabilities as cap
 
 if TYPE_CHECKING:
     from autofit.database.sqlalchemy_ import sa
@@ -51,6 +52,24 @@ VALID_KERNELS = ("mala", "hmc")
 
 
 class SMC(AbstractMCMC):
+    # Static capabilities (see ``autofit.non_linear.search.capabilities``); mirrored
+    # by ``search/registry.py``. Never identifier fields.
+    jax_use = cap.JaxUse.REQUIRED
+    gradient = cap.Gradient.USES
+    batched = True
+    honours_gradient_mode = False
+    posterior_kind = cap.PosteriorKind.WEIGHTED
+    produces_evidence = True
+    resumable = False
+    warm_start = cap.WarmStart.PROVIDER
+    install_extra = "optional"
+    upstream_url = "https://github.com/blackjax-devs/blackjax"
+    citation_keys = ("blackjax",)
+    status = cap.Status.EXPERIMENTAL
+    test_mode_budget = {"num_particles": 16, "num_mcmc_steps": 2, "max_smc_steps": 5}
+    objective_target = cap.ObjectiveTarget(cap.ObjectiveQuantity.LOG_LIKELIHOOD, cap.CoordinateSpace.PHYSICAL)
+    invalid_value = -1.0e99
+
     __identifier_fields__ = (
         "num_particles",
         "kernel",

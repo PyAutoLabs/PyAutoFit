@@ -20,6 +20,7 @@ from autofit.non_linear.search.mcmc.auto_correlations import AutoCorrelations
 from autofit.non_linear.test_mode import is_test_mode
 from autofit.non_linear.samples.sample import Sample
 from autofit.non_linear.samples.mcmc import SamplesMCMC
+from autofit.non_linear.search import capabilities as cap
 
 if TYPE_CHECKING:
     from autofit.database.sqlalchemy_ import sa
@@ -28,6 +29,24 @@ logger = logging.getLogger(__name__)
 
 
 class Emcee(AbstractMCMC):
+    # Static capabilities (see ``autofit.non_linear.search.capabilities``); mirrored
+    # by ``search/registry.py``. Never identifier fields.
+    jax_use = cap.JaxUse.NONE
+    gradient = cap.Gradient.NONE
+    batched = False
+    honours_gradient_mode = False
+    posterior_kind = cap.PosteriorKind.CHAIN
+    produces_evidence = False
+    resumable = False
+    warm_start = cap.WarmStart.CONSUMER
+    install_extra = ""
+    upstream_url = "https://github.com/dfm/emcee"
+    citation_keys = ("emcee",)
+    status = cap.Status.STABLE
+    test_mode_budget = {"nwalkers": 20, "nsteps": 10}
+    objective_target = cap.ObjectiveTarget(cap.ObjectiveQuantity.LOG_POSTERIOR, cap.CoordinateSpace.PHYSICAL)
+    invalid_value = -float("inf")
+
     __identifier_fields__ = ("nwalkers",)
 
     def __init__(
