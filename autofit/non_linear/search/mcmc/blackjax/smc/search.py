@@ -26,7 +26,7 @@ from autofit.non_linear.search.mcmc.blackjax.chains import (
 )
 from autofit.non_linear.search.mcmc.blackjax.smc.samples import SamplesSMC
 from autofit.non_linear.test_mode import is_test_mode
-from autofit.non_linear.samples.sample import Sample
+from autofit.non_linear.samples.adapter import RawSamples
 from autofit.non_linear.search import capabilities as cap
 
 if TYPE_CHECKING:
@@ -52,6 +52,8 @@ VALID_KERNELS = ("mala", "hmc")
 
 
 class SMC(AbstractMCMC):
+    samples_cls = SamplesSMC
+
     # Static capabilities (see ``autofit.non_linear.search.capabilities``); mirrored
     # by ``search/registry.py``. Never identifier fields.
     jax_use = cap.JaxUse.REQUIRED
@@ -753,23 +755,22 @@ class SMC(AbstractMCMC):
             "time": self.timer.time if self.timer else None,
         }
 
-    def samples_via_internal_from(self, model, search_internal=None):
+    def load_search_internal(self):
+        return self.backend
+
+    def raw_samples_from(self, model, search_internal):
         """
-        Convert the particle cloud pickled under ``search_internal/`` into a `SamplesSMC`.
+        The particle cloud pickled under ``search_internal/`` as raw samples.
 
         SMC particles are **weighted** samples: each carries the normalised importance weight blackjax
         assigns it at the current temperature, so the weights (not a uniform 1.0) are what the PDF, medians
-        and errors are computed from.
+        and errors are computed from. They are normalised here, by the search, as they always were; the
+        samples adapter never renormalises.
         """
-        search_internal = (
-            search_internal if search_internal is not None else self.backend
-        )
-
         parameter_lists = np.asarray(search_internal["particles"]).tolist()
         log_likelihood_list = [
             float(x) for x in np.asarray(search_internal["log_likelihood_list"])
         ]
-        log_prior_list = model.log_prior_list_from(parameter_lists=parameter_lists)
 
         weights = np.asarray(search_internal["weights"], dtype=float)
         weight_sum = weights.sum()
@@ -778,18 +779,12 @@ class SMC(AbstractMCMC):
         else:
             weights = weights / weight_sum
 
-        sample_list = Sample.from_lists(
-            model=model,
-            parameter_lists=parameter_lists,
-            log_likelihood_list=log_likelihood_list,
-            log_prior_list=log_prior_list,
-            weight_list=weights.tolist(),
-        )
-
-        return SamplesSMC(
-            model=model,
-            sample_list=sample_list,
-            samples_info=self.samples_info_from(search_internal=search_internal),
+        return RawSamples(
+            parameters=parameter_lists,
+            log_likelihood=log_likelihood_list,
+            weights=weights.tolist(),
+            info=self.samples_info_from(search_internal=search_internal),
+            label="SMC",
         )
 
 

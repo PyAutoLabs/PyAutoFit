@@ -25,8 +25,7 @@ from autofit.non_linear.search.mcmc.blackjax.chains import (
     stack_initial_positions,
 )
 from autofit.non_linear.test_mode import is_test_mode
-from autofit.non_linear.samples.mcmc import SamplesMCMC
-from autofit.non_linear.samples.sample import Sample
+from autofit.non_linear.samples.adapter import RawSamples
 from autofit.non_linear.search import capabilities as cap
 
 if TYPE_CHECKING:
@@ -630,14 +629,14 @@ class BlackJAXNUTS(AbstractMCMC):
             "time": self.timer.time if self.timer else None,
         }
 
-    def samples_via_internal_from(self, model, search_internal=None):
-        """
-        Convert the BlackJAX chain pickled under ``search_internal/`` into a
-        standard ``SamplesMCMC``. NUTS samples are unweighted draws from the
-        posterior, so weights are 1.0.
-        """
-        search_internal = search_internal if search_internal is not None else self.backend
+    def load_search_internal(self):
+        return self.backend
 
+    def raw_samples_from(self, model, search_internal):
+        """
+        The BlackJAX chains pickled under ``search_internal/`` as raw samples. NUTS
+        samples are unweighted draws from the posterior, so every weight is 1.
+        """
         positions = search_internal["positions"]  # (n_samples, n_chains, n_dim)
         log_likelihood_array = search_internal["log_likelihood_history"]  # (n_samples, n_chains)
 
@@ -651,27 +650,17 @@ class BlackJAXNUTS(AbstractMCMC):
             n_chains * n_samples
         )
 
-        parameter_lists = positions_chain_major.tolist()
-        log_likelihood_list = [float(x) for x in log_likelihood_chain_major]
-        log_prior_list = model.log_prior_list_from(parameter_lists=parameter_lists)
-        weight_list = [1.0] * len(parameter_lists)
-
-        sample_list = Sample.from_lists(
-            model=model,
-            parameter_lists=parameter_lists,
-            log_likelihood_list=log_likelihood_list,
-            log_prior_list=log_prior_list,
-            weight_list=weight_list,
-        )
-
-        return SamplesMCMC(
-            model=model,
-            sample_list=sample_list,
-            samples_info=self.samples_info_from(search_internal=search_internal),
-            auto_correlation_settings=self.auto_correlation_settings,
-            auto_correlations=self.auto_correlations_from(
-                search_internal=search_internal
+        return RawSamples(
+            parameters=positions_chain_major,
+            log_likelihood=[float(x) for x in log_likelihood_chain_major],
+            info=self.samples_info_from(search_internal=search_internal),
+            samples_kwargs=dict(
+                auto_correlation_settings=self.auto_correlation_settings,
+                auto_correlations=self.auto_correlations_from(
+                    search_internal=search_internal
+                ),
             ),
+            label="BlackJAXNUTS",
         )
 
     def auto_correlations_from(self, search_internal=None):

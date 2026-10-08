@@ -8,7 +8,7 @@ from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.fitness import Fitness
 from autofit.non_linear.search.mle.abstract_mle import AbstractMLE
 from autofit.non_linear.initializer import AbstractInitializer
-from autofit.non_linear.samples import Samples, Sample
+from autofit.non_linear.samples.adapter import RawSamples
 from autofit.non_linear.search import capabilities as cap
 
 if TYPE_CHECKING:
@@ -174,11 +174,13 @@ class Drawer(AbstractMLE):
 
         return search_internal, fitness
 
-    def samples_via_internal_from(self, model, search_internal=None):
+    def raw_samples_from(self, model, search_internal):
         """
-        Returns a `Samples` object from the Drawer internal results.
+        The Drawer's draws as raw samples: the parameter lists and log posteriors
+        ``_fit`` stores, each with weight 1. The stored dictionary (including the run
+        ``time`` recorded by ``_fit``) is the ``samples_info``.
 
-        The `search_internal` dictionary returned by `_fit` is used when passed, so a fit with `NullPaths`
+        The ``search_internal`` dictionary returned by `_fit` is used when passed, so a fit with `NullPaths`
         (which writes nothing to disk) can still build its samples; otherwise it is loaded from the output folder.
 
         Parameters
@@ -188,35 +190,9 @@ class Drawer(AbstractMLE):
         search_internal
             The dictionary of parameter lists, log posteriors and run time that `_fit` returns.
         """
-        search_internal_dict = (
-            search_internal
-            if search_internal is not None
-            else self.paths.load_search_internal()
-        )
-
-        parameter_lists = search_internal_dict["parameter_lists"]
-        log_posterior_list = search_internal_dict["log_posterior_list"]
-
-        log_prior_list = [
-            sum(model.log_prior_list_from_vector(vector=vector))
-            for vector in parameter_lists
-        ]
-        log_likelihood_list = [
-            lp - prior for lp, prior in zip(log_posterior_list, log_prior_list)
-        ]
-
-        weight_list = len(log_likelihood_list) * [1.0]
-
-        sample_list = Sample.from_lists(
-            model=model,
-            parameter_lists=parameter_lists,
-            log_likelihood_list=log_likelihood_list,
-            log_prior_list=log_prior_list,
-            weight_list=weight_list,
-        )
-
-        return Samples(
-            model=model,
-            sample_list=sample_list,
-            samples_info=search_internal_dict,
+        return RawSamples(
+            parameters=search_internal["parameter_lists"],
+            log_posterior=search_internal["log_posterior_list"],
+            info=search_internal,
+            label="Drawer",
         )

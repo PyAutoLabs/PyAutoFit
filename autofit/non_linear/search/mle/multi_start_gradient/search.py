@@ -25,8 +25,7 @@ from autofit.non_linear.clipper import (
 )
 from autofit.non_linear.scaler import AbstractScaler, ScalerNone
 from autofit.non_linear.initializer import AbstractInitializer
-from autofit.non_linear.samples.sample import Sample
-from autofit.non_linear.samples.samples import Samples
+from autofit.non_linear.samples.adapter import RawSamples
 from autofit.non_linear.search import capabilities as cap
 from autofit.non_linear.search.mle.multi_start_gradient.convergence import (
     MultiStartGradientConvergence,
@@ -2016,19 +2015,14 @@ class AbstractMultiStartGradient(AbstractMLE):
 
         return jnp.stack(starts)
 
-    def samples_via_internal_from(
-        self, model: AbstractPriorModel, search_internal=None
-    ):
+    def raw_samples_from(self, model: AbstractPriorModel, search_internal):
         """
-        Returns a `Samples` object from the MultiStartGradient internal results.
+        The MultiStartGradient internal results as raw samples.
 
-        The best-basin (maximum-log-posterior) start is the first sample; every
-        start's final point is retained as a diagnostic sample so per-start basin
-        spread can be inspected downstream.
+        The best-basin (maximum-log-posterior) start is the first sample (weight 1);
+        every start's final point is retained as a diagnostic sample (weight 0, log
+        likelihood NaN) so per-start basin spread can be inspected downstream.
         """
-        if search_internal is None:
-            search_internal = self.paths.load_search_internal()
-
         best_params = np.asarray(search_internal["best_params"])
         per_start_params = np.asarray(search_internal["params"])
         total_steps = int(search_internal["total_steps"])
@@ -2048,14 +2042,6 @@ class AbstractMultiStartGradient(AbstractMLE):
         log_likelihood_list += [np.nan for _ in range(len(parameter_lists) - 1)]
 
         weight_list = [1.0] + [0.0] * (len(parameter_lists) - 1)
-
-        sample_list = Sample.from_lists(
-            model=model,
-            parameter_lists=parameter_lists,
-            log_likelihood_list=log_likelihood_list,
-            log_prior_list=log_prior_list,
-            weight_list=weight_list,
-        )
 
         samples_info = {
             "n_starts": self.n_starts,
@@ -2147,10 +2133,13 @@ class AbstractMultiStartGradient(AbstractMLE):
             "time": self.timer.time if self.timer else None,
         }
 
-        return Samples(
-            model=model,
-            sample_list=sample_list,
-            samples_info=samples_info,
+        return RawSamples(
+            parameters=parameter_lists,
+            log_likelihood=log_likelihood_list,
+            log_prior=log_prior_list,
+            weights=weight_list,
+            info=samples_info,
+            label=type(self).__name__,
         )
 
 

@@ -17,8 +17,7 @@ from autofit.non_linear.fitness import Fitness
 from autofit.non_linear.parallel import fork_context
 from autofit.non_linear.paths.null import NullPaths
 from autofit.non_linear.search.nest import abstract_nest
-from autofit.non_linear.samples.sample import Sample
-from autofit.non_linear.samples.nest import SamplesNest
+from autofit.non_linear.samples.adapter import RawSamples
 from autofit.non_linear.test_mode import is_test_mode
 from autofit.non_linear.search import capabilities as cap
 
@@ -743,50 +742,26 @@ class Nautilus(abstract_nest.AbstractNest):
             "number_live_points": int(search_internal.n_live),
         }
 
-    def samples_via_internal_from(
-        self, model: AbstractPriorModel, search_internal=None
-    ):
+    def raw_samples_from(self, model, search_internal):
         """
-        Returns a `Samples` object from the nautilus internal results.
-
-        The samples contain all information on the parameter space sampling (e.g. the parameters,
-        log likelihoods, etc.).
-
-        The internal search results are converted from the native format used by the search to lists of values
-        (e.g. `parameter_lists`, `log_likelihood_list`).
+        The nautilus posterior (``Sampler.posterior()``: points, log weights, log
+        likelihoods) as raw samples, with weights ``exp(log_w)``.
 
         Parameters
         ----------
         model
             Maps input vectors of unit parameter values to physical values and model instances via priors.
+        search_internal
+            The nautilus sampler.
         """
-
-        if search_internal is None:
-            search_internal = self.paths.load_search_internal()
-
         parameters, log_weights, log_likelihoods = search_internal.posterior()
 
-        parameter_lists = parameters.tolist()
-        log_likelihood_list = log_likelihoods.tolist()
-        weight_list = np.exp(log_weights).tolist()
-
-        log_prior_list = [
-            sum(model.log_prior_list_from_vector(vector=vector))
-            for vector in parameter_lists
-        ]
-
-        sample_list = Sample.from_lists(
-            model=model,
-            parameter_lists=parameter_lists,
-            log_likelihood_list=log_likelihood_list,
-            log_prior_list=log_prior_list,
-            weight_list=weight_list,
-        )
-
-        return SamplesNest(
-            model=model,
-            sample_list=sample_list,
-            samples_info=self.samples_info_from(search_internal=search_internal),
+        return RawSamples(
+            parameters=parameters,
+            log_likelihood=log_likelihoods,
+            weights=np.exp(log_weights),
+            info=self.samples_info_from(search_internal=search_internal),
+            label="Nautilus",
         )
 
     @property

@@ -14,9 +14,8 @@ from autofit.non_linear.initializer import Initializer
 from autofit.non_linear.search.mcmc.abstract_mcmc import AbstractMCMC
 from autofit.non_linear.search.mcmc.auto_correlations import AutoCorrelationsSettings
 from autofit.non_linear.search.mcmc.auto_correlations import AutoCorrelations
-from autofit.non_linear.samples.sample import Sample
 from autofit.non_linear.test_mode import is_test_mode
-from autofit.non_linear.samples.mcmc import SamplesMCMC
+from autofit.non_linear.samples.adapter import RawSamples
 from autofit.non_linear.search import capabilities as cap
 
 if TYPE_CHECKING:
@@ -315,10 +314,13 @@ class Zeus(AbstractMCMC):
 
         return search_internal, fitness
 
-    def samples_info_from(self, search_internal=None):
+    def samples_info_from(self, search_internal=None, auto_correlations=None):
         search_internal = search_internal or self.paths.load_search_internal()
 
-        auto_correlations = self.auto_correlations_from(search_internal=search_internal)
+        if auto_correlations is None:
+            auto_correlations = self.auto_correlations_from(
+                search_internal=search_internal
+            )
 
         return {
             "check_size": auto_correlations.check_size,
@@ -329,36 +331,35 @@ class Zeus(AbstractMCMC):
             "time": self.timer.time if self.timer else None,
         }
 
-    def samples_via_internal_from(self, model, search_internal=None):
+    def raw_samples_from(self, model, search_internal):
         """
-        Returns a `Samples` object from the zeus internal results.
+        The zeus chain after burn-in and thinning, as raw samples.
 
-        The samples contain all information on the parameter space sampling (e.g. the parameters,
-        log likelihoods, etc.).
-
-        The internal search results are converted from the native format used by the search to lists of values
-        (e.g. `parameter_lists`, `log_likelihood_list`).
+        The parameters and log posteriors come out of zeus under the *same*
+        ``discard`` / ``thin`` (PyAutoFit#1628); the log likelihood is the log
+        posterior minus the log prior (``samples_from_raw``), and every draw has
+        weight 1.
 
         Parameters
         ----------
         model
             Maps input vectors of unit parameter values to physical values and model instances via priors.
+        search_internal
+            The ``zeus.EnsembleSampler``.
         """
-
-        search_internal = search_internal or self.paths.load_search_internal()
+        # Computed once per conversion and shared by the burn-in, `samples_info` and
+        # `SamplesMCMC`.
+        auto_correlations = self.auto_correlations_from(
+            search_internal=search_internal
+        )
 
         test_mode = is_test_mode()
 
         if test_mode:
-
             discard = 5
             thin = 5
 
         else:
-            auto_correlations = self.auto_correlations_from(
-                search_internal=search_internal
-            )
-
             discard = int(3.0 * np.max(auto_correlations.times))
             thin = int(np.max(auto_correlations.times) / 2.0)
 
@@ -386,51 +387,24 @@ class Zeus(AbstractMCMC):
 
             samples_after_burn_in = search_internal.get_chain(flat=True)
 
-        parameter_lists = samples_after_burn_in.tolist()
-
         # The log posteriors must be requested with the *same* `discard` and `thin`
-        # as whichever branch above produced the chain, otherwise sample `i`'s
-        # parameters are paired with a different sample's log posterior, and the
-        # `zip` below silently truncates to the shorter list (PyAutoFit#1628).
-        log_posterior_list = search_internal.get_log_prob(
+        # as whichever branch above produced the chain (PyAutoFit#1628).
+        log_posterior = search_internal.get_log_prob(
             discard=discard, thin=thin, flat=True
-        ).tolist()
-
-        if len(parameter_lists) != len(log_posterior_list):
-            raise exc.SamplesException(
-                "The number of Zeus parameter samples does not match the number of log "
-                "posterior values returned by the sampler: "
-                f"{len(parameter_lists)} parameter samples versus "
-                f"{len(log_posterior_list)} log posterior values. "
-                "The parameters and log posteriors are therefore not in correspondence "
-                "and the samples cannot be built."
-            )
-
-        log_prior_list = model.log_prior_list_from(parameter_lists=parameter_lists)
-
-        log_likelihood_list = [
-            log_posterior - log_prior
-            for log_posterior, log_prior in zip(log_posterior_list, log_prior_list)
-        ]
-
-        weight_list = len(log_likelihood_list) * [1.0]
-
-        sample_list = Sample.from_lists(
-            model=model,
-            parameter_lists=parameter_lists,
-            log_likelihood_list=log_likelihood_list,
-            log_prior_list=log_prior_list,
-            weight_list=weight_list,
         )
 
-        return SamplesMCMC(
-            model=model,
-            sample_list=sample_list,
-            samples_info=self.samples_info_from(search_internal=search_internal),
-            auto_correlation_settings=self.auto_correlation_settings,
-            auto_correlations=self.auto_correlations_from(
-                search_internal=search_internal
+        return RawSamples(
+            parameters=samples_after_burn_in,
+            log_posterior=log_posterior,
+            info=self.samples_info_from(
+                search_internal=search_internal,
+                auto_correlations=auto_correlations,
             ),
+            samples_kwargs=dict(
+                auto_correlation_settings=self.auto_correlation_settings,
+                auto_correlations=auto_correlations,
+            ),
+            label="Zeus",
         )
 
     def auto_correlations_from(self, search_internal=None):

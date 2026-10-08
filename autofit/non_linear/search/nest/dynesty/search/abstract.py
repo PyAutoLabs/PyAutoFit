@@ -15,8 +15,7 @@ from autofit.non_linear.fitness import Fitness
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.paths.null import NullPaths
 from autofit.non_linear.search.nest.abstract_nest import AbstractNest
-from autofit.non_linear.samples.sample import Sample
-from autofit.non_linear.samples.nest import SamplesNest
+from autofit.non_linear.samples.adapter import RawSamples
 from autofit.non_linear.test_mode import is_test_mode
 from autofit.non_linear.search import capabilities as cap
 
@@ -346,46 +345,32 @@ class AbstractDynesty(AbstractNest, ABC):
             "number_live_points": self.number_live_points,
         }
 
-    def samples_via_internal_from(self, model, search_internal=None):
+    def load_search_internal(self):
+        return self.search_internal
+
+    def raw_samples_from(self, model, search_internal):
         """
-        Returns a `Samples` object from the dynesty internal results.
-
-        The samples contain all information on the parameter space sampling (e.g. the parameters,
-        log likelihoods, etc.).
-
-        The internal search results are converted from the native format used by the search to lists of values
-        (e.g. `parameter_lists`, `log_likelihood_list`).
+        The dynesty run's samples, log likelihoods and nested-sampling weights
+        (``exp(logwt - logz[-1])``) as raw samples.
 
         Parameters
         ----------
         model
             Maps input vectors of unit parameter values to physical values and model instances via priors.
+        search_internal
+            The dynesty sampler.
         """
-        search_internal = search_internal or self.search_internal
-
-        parameter_lists = search_internal.results.samples.tolist()
-        log_prior_list = model.log_prior_list_from(parameter_lists=parameter_lists)
-        log_likelihood_list = list(search_internal.results.logl)
-
-        weight_list = list(
-            np.exp(
-                np.asarray(search_internal.results.logwt)
-                - search_internal.results.logz[-1]
-            )
-        )
-
-        sample_list = Sample.from_lists(
-            model=model,
-            parameter_lists=parameter_lists,
-            log_likelihood_list=log_likelihood_list,
-            log_prior_list=log_prior_list,
-            weight_list=weight_list,
-        )
-
-        return SamplesNest(
-            model=model,
-            sample_list=sample_list,
-            samples_info=self.samples_info_from(search_internal=search_internal),
+        return RawSamples(
+            parameters=search_internal.results.samples.tolist(),
+            log_likelihood=list(search_internal.results.logl),
+            weights=list(
+                np.exp(
+                    np.asarray(search_internal.results.logwt)
+                    - search_internal.results.logz[-1]
+                )
+            ),
+            info=self.samples_info_from(search_internal=search_internal),
+            label="Dynesty",
         )
 
     @property

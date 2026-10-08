@@ -1639,6 +1639,19 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             plot_search=False,
         )
 
+    # --- samples conversion (search-extensibility phase A3) -------------------------
+    #
+    # A search maps its backend's internal state onto a ``RawSamples`` in
+    # ``raw_samples_from``; ``samples_via_internal_from`` below is implemented once,
+    # here, on top of it (``autofit.non_linear.samples.adapter``).
+
+    samples_cls = Samples
+    """
+    The ``Samples`` class ``samples_via_internal_from`` builds (``SamplesMCMC`` and
+    ``SamplesNest`` on the family bases, ``SamplesSMC`` / ``NSSamples`` on those
+    searches).
+    """
+
     def samples_from(self, model: AbstractPriorModel, search_internal=None) -> Samples:
         """
         Loads the samples of a non-linear search from its output files.
@@ -1670,8 +1683,53 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
 
     def samples_via_internal_from(
         self, model: AbstractPriorModel, search_internal=None
-    ):
+    ) -> Samples:
+        """
+        The samples of the search, converted from its internal state.
+
+        ``search_internal`` is the backend's in-memory state when given; otherwise
+        it is loaded from the output folder (``load_search_internal``). The search's
+        ``raw_samples_from`` maps it onto a ``RawSamples`` and ``samples_from_raw``
+        builds the ``samples_cls`` object (log priors, the log likelihood from a log
+        posterior, length checks, ``time`` / ``class_path``), the same way for every
+        search.
+
+        Raises
+        ------
+        NotImplementedError
+            When the search does not implement ``raw_samples_from``.
+        FileNotFoundError
+            When no internal state is stored.
+        """
+        from autofit.non_linear.samples.adapter import samples_from_raw
+
+        if search_internal is None:
+            search_internal = self.load_search_internal()
+
+        raw = self.raw_samples_from(model, search_internal)
+
+        return samples_from_raw(
+            model=model,
+            raw=raw,
+            samples_cls=self.samples_cls,
+            time=self.timer.time if self.timer else None,
+        )
+
+    def raw_samples_from(self, model: AbstractPriorModel, search_internal):
+        """
+        Map the backend's internal state onto a
+        ``autofit.non_linear.samples.adapter.RawSamples``: its parameter vectors,
+        log likelihoods (or log posteriors), weights and ``samples_info`` entries,
+        exactly as the backend stores them. Every concrete search implements it.
+        """
         raise NotImplementedError
+
+    def load_search_internal(self):
+        """
+        The search's internal state as stored in its output folder, or ``None`` when
+        its paths store nothing (``NullPaths``, ``DatabasePaths``).
+        """
+        return self.paths.load_search_internal()
 
     @check_cores
     def make_pool(self):

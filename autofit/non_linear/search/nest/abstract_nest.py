@@ -12,12 +12,15 @@ from autofit.non_linear.initializer import (
     InitializerParamBounds,
 )
 from autofit.non_linear.plot import corner_anesthetic
+from autofit.non_linear.samples.nest import SamplesNest
 
 if TYPE_CHECKING:
     from autofit.database.sqlalchemy_ import sa
 
 
 class AbstractNest(NonLinearSearch, ABC):
+    samples_cls = SamplesNest
+
     def __init__(
         self,
         name: Optional[str] = None,
