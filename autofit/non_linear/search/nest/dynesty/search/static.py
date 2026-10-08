@@ -7,12 +7,27 @@ from typing import Dict, Optional, Union, TYPE_CHECKING
 
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 
-from .abstract import AbstractDynesty, prior_transform
+from autofit.non_linear.checkpoint import NativeFileCheckpointer
+
+from .abstract import DYNESTY_FILENAME, AbstractDynesty, prior_transform
 
 if TYPE_CHECKING:
     from autofit.database.sqlalchemy_ import sa
 
+def _restore_static(path):
+    """
+    Restore a dynesty sampler from its ``savestate.save`` resume state.
+    """
+    from dynesty import NestedSampler as Sampler
+
+    return Sampler.restore(str(path))
+
+
 class DynestyStatic(AbstractDynesty):
+    # dynesty's own checkpoint, deleted once the fit completes (the archive is
+    # ``search_internal.dill``).
+    resume_state = NativeFileCheckpointer(DYNESTY_FILENAME, loader=_restore_static)
+
     __identifier_fields__ = (
         "nlive",
         "bound",
@@ -104,11 +119,6 @@ class DynestyStatic(AbstractDynesty):
             "maxiter": self.maxiter,
             "logl_max": self.logl_max,
         }
-
-    @property
-    def search_internal(self):
-        from dynesty import NestedSampler as StaticSampler
-        return StaticSampler.restore(self.checkpoint_file)
 
     def search_internal_from(
         self,

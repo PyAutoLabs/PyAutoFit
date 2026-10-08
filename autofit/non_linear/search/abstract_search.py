@@ -45,6 +45,7 @@ from autofit.non_linear.paths.directory import DirectoryPaths
 from autofit.non_linear.paths.sub_directory_paths import SubDirectoryPaths
 from autofit.non_linear.samples.samples import Samples
 from autofit.non_linear.samples.summary import SamplesSummary
+from autofit.non_linear.checkpoint import Checkpointer, DillCheckpointer
 from autofit.non_linear.timer import Timer
 from autofit.non_linear.analysis import Analysis
 from autofit.non_linear.paths.null import NullPaths
@@ -1166,7 +1167,7 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         search_internal
             The internal search.
         """
-        if not conf.instance["output"]["search_internal"]:
+        if not self.retains_search_internal:
             self.logger.info("Removing search internal folder.")
             self.paths.remove_search_internal()
         elif search_internal is not None:
@@ -1426,10 +1427,54 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         """
         pass
 
-    def output_search_internal(self, search_internal):
-        self.paths.save_search_internal(
-            obj=search_internal,
+    # --- internal state: archive and resume state (search-extensibility A3, D5) ----
+    #
+    # See ``autofit.non_linear.checkpoint`` and ``docs/design/checkpointing.md``.
+
+    checkpointer: Checkpointer = DillCheckpointer()
+    """
+    The archive strategy: where the backend's final state is stored when a fit
+    completes, for ``Result.search_internal`` and ``samples_via_internal_from``.
+    """
+
+    resume_state: Optional[Checkpointer] = None
+    """
+    The file an interrupted run resumes from, for searches that genuinely resume
+    (``None`` otherwise). Deleted when the fit completes unless it is the archive's
+    own file or declares ``retain_after_completion``.
+    """
+
+    @property
+    def retains_search_internal(self) -> bool:
+        """
+        Whether ``search_internal/`` survives the end of a fit: always when the
+        archive declares ``retain_after_completion`` (its results cannot be rebuilt
+        without it), otherwise when the ``output.search_internal`` config is on.
+        Constructing or running a search never changes that config.
+        """
+        return bool(
+            self.checkpointer.retain_after_completion
+            or conf.instance["output"]["search_internal"]
         )
+
+    def output_search_internal(self, search_internal):
+        """
+        Archive ``search_internal`` through the search's ``checkpointer`` and, once a
+        fit has completed, discard its resume state (there is nothing left to
+        resume).
+
+        ``_fit`` of the searches that archive mid-run (BlackJAX NUTS, SMC) also
+        calls this after every chunk; their resume state is ``None``.
+        """
+        self.checkpointer.finalize(self.paths, search_internal)
+
+        resume_state = self.resume_state
+        if (
+            resume_state is not None
+            and not resume_state.retain_after_completion
+            and resume_state.filename != self.checkpointer.filename
+        ):
+            resume_state.discard(self.paths)
 
     def _steps_until_full_update(self, iterations_remaining: int) -> int:
         """

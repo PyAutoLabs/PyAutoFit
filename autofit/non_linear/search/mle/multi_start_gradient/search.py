@@ -25,6 +25,7 @@ from autofit.non_linear.clipper import (
 )
 from autofit.non_linear.scaler import AbstractScaler, ScalerNone
 from autofit.non_linear.initializer import AbstractInitializer
+from autofit.non_linear.checkpoint import DillCheckpointer
 from autofit.non_linear.samples.adapter import RawSamples
 from autofit.non_linear.search import capabilities as cap
 from autofit.non_linear.search.mle.multi_start_gradient.convergence import (
@@ -65,6 +66,9 @@ class AbstractMultiStartGradient(AbstractMLE):
     # ``FitException`` early return (numpy) and a failed traced assertion still return
     # ``-inf``. Normalising it is the A3 objective adapter's job, not A1's.
     invalid_value = float("inf")
+    # The dill written after every step is both the archive and the resume state.
+    checkpointer = DillCheckpointer()
+    resume_state = checkpointer
 
     __identifier_fields__ = ("clipper",)
 

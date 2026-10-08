@@ -9,6 +9,7 @@ from typing import Optional, TYPE_CHECKING
 import numpy as np
 
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
+from autofit.non_linear.checkpoint import NativeFileCheckpointer
 from autofit.non_linear.fitness import Fitness, get_log_likelihood_ceiling
 from autofit.non_linear.paths.null import NullPaths
 from autofit.non_linear.search.nest import abstract_nest
@@ -215,6 +216,9 @@ class NSS(abstract_nest.AbstractNest):
     # physical-space prior density.
     objective_target = cap.ObjectiveTarget(cap.ObjectiveQuantity.LOG_LIKELIHOOD, cap.CoordinateSpace.PHYSICAL)
     invalid_value = NSS_INVALID_LOG_LIKELIHOOD
+    # The resume state is NSS's own atomic ``nss_checkpoint.pkl`` (``_fit`` writes,
+    # reads and deletes it); the archive is the default ``search_internal.dill``.
+    resume_state = NativeFileCheckpointer(_CHECKPOINT_FILENAME, loader=_load_checkpoint)
 
     __identifier_fields__ = (
         "n_live",

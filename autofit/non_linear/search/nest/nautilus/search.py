@@ -13,6 +13,7 @@ from typing import Dict, Optional, Tuple, TYPE_CHECKING
 from autofit import exc
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.mapper.prior.vectorized import PriorVectorized
+from autofit.non_linear.checkpoint import DillCheckpointer, NativeFileCheckpointer
 from autofit.non_linear.fitness import Fitness
 from autofit.non_linear.parallel import fork_context
 from autofit.non_linear.paths.null import NullPaths
@@ -26,6 +27,23 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+NAUTILUS_FILENAME = "checkpoint.hdf5"
+"""
+nautilus's checkpoint file, the search's resume state.
+"""
+
+
+def _resumed_by_nautilus(path):
+    """
+    A nautilus checkpoint cannot be opened on its own: nautilus reopens it inside a
+    ``Sampler`` built with the run's prior and likelihood, which ``_fit`` does.
+    """
+    raise NotImplementedError(
+        f"The nautilus checkpoint {path} is resumed by nautilus.Sampler(filepath=...) "
+        "inside the search's _fit; it holds no samples until the fit completes."
+    )
+
 
 
 # How often `_LikelihoodWorkerPool.map` wakes up to check that the pool's
@@ -172,6 +190,14 @@ class Nautilus(abstract_nest.AbstractNest):
     test_mode_budget = {"n_like_max": 1}
     objective_target = cap.ObjectiveTarget(cap.ObjectiveQuantity.LOG_LIKELIHOOD, cap.CoordinateSpace.UNIT_CUBE)
     invalid_value = -1.0e99
+    # The archive is the sampler dill-dumped without its multiprocessing pools (which
+    # cannot be pickled); the resume state is nautilus's own ``checkpoint.hdf5``,
+    # which nautilus itself reopens (``Sampler(filepath=...)``) and which is deleted
+    # once the fit completes.
+    checkpointer = DillCheckpointer(strip_attributes=("pool_l", "pool_s"))
+    resume_state = NativeFileCheckpointer(
+        NAUTILUS_FILENAME, loader=_resumed_by_nautilus
+    )
 
     __identifier_fields__ = (
         "n_live",
@@ -413,7 +439,7 @@ class Nautilus(abstract_nest.AbstractNest):
         If autofit is not outputting results to hard-disk (e.g. paths is `NullPaths`), this function is bypassed.
         """
         try:
-            return self.paths.search_internal_path / "checkpoint.hdf5"
+            return self.paths.search_internal_path / NAUTILUS_FILENAME
         except TypeError:
             pass
 
@@ -701,37 +727,6 @@ class Nautilus(abstract_nest.AbstractNest):
                 iterations = int(self.n_like_max)
 
         return iterations, total_iterations
-
-    def output_search_internal(self, search_internal):
-        """
-        Output the sampler results to hard-disk in their internal format.
-
-        The multiprocessing `Pool` object cannot be pickled and thus the sampler cannot be saved to hard-disk. This
-        function therefore extracts the necessary information from the sampler and saves it to hard-disk.
-
-        Parameters
-        ----------
-        sampler
-            The nautilus sampler object containing the results of the model-fit.
-        """
-
-        pool_l = search_internal.pool_l
-        pool_s = search_internal.pool_s
-
-        search_internal.pool_l = None
-        search_internal.pool_s = None
-
-        self.paths.save_search_internal(
-            obj=search_internal,
-        )
-
-        search_internal.pool_l = pool_l
-        search_internal.pool_s = pool_s
-
-        try:
-            os.remove(self.checkpoint_file)
-        except (TypeError, FileNotFoundError):
-            pass
 
     def samples_info_from(self, search_internal=None):
         return {

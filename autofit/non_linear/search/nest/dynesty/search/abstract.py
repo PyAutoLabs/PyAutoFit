@@ -56,6 +56,12 @@ def _fork_pool_cls():
     return ForkPool
 
 
+DYNESTY_FILENAME = "savestate.save"
+"""
+dynesty's checkpoint file, the search's resume state.
+"""
+
+
 def prior_transform(cube, model):
     phys_cube = model.vector_from_unit_vector(
         unit_vector=cube,
@@ -346,7 +352,15 @@ class AbstractDynesty(AbstractNest, ABC):
         }
 
     def load_search_internal(self):
-        return self.search_internal
+        """
+        The archive (``search_internal.dill``, written when the fit completed) or,
+        for a run that has not completed, the sampler restored from its resume state
+        (``savestate.save``).
+        """
+        try:
+            return super().load_search_internal()
+        except FileNotFoundError:
+            return self.search_internal
 
     def raw_samples_from(self, model, search_internal):
         """
@@ -375,7 +389,11 @@ class AbstractDynesty(AbstractNest, ABC):
 
     @property
     def search_internal(self):
-        raise NotImplementedError
+        """
+        The sampler restored from the resume state (``savestate.save``) of a run that
+        has not completed.
+        """
+        return self.resume_state.load(self.paths)
 
     def iterations_from(
         self, search_internal: "Union[NestedSampler, DynamicNestedSampler]"
@@ -520,7 +538,7 @@ class AbstractDynesty(AbstractNest, ABC):
         If autofit is not outputting results to hard-disk (e.g. paths is `NullPaths`), this function is bypassed.
         """
         try:
-            return str(self.paths.search_internal_path / "savestate.save")
+            return str(self.paths.search_internal_path / DYNESTY_FILENAME)
         except TypeError:
             pass
 
@@ -592,17 +610,6 @@ class AbstractDynesty(AbstractNest, ABC):
         queue_size: Optional[int],
     ):
         raise NotImplementedError()
-
-    def output_search_internal(self, search_internal):
-
-        self.paths.save_search_internal(
-            obj=search_internal,
-        )
-
-        try:
-            os.remove(self.checkpoint_file)
-        except (TypeError, FileNotFoundError):
-            pass
 
     def check_pool(self, uses_pool: bool, pool):
         if (uses_pool and pool is None) or (not uses_pool and pool is not None):

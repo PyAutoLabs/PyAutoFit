@@ -12,6 +12,7 @@ import numpy as np
 from autonerves import conf
 
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
+from autofit.non_linear.checkpoint import PICKLE_FILENAME, PickleCheckpointer
 from autofit.non_linear.fitness import Fitness
 from autofit.non_linear.initializer import Initializer, InitializerPrior
 from autofit.non_linear.search.mcmc.abstract_mcmc import AbstractMCMC
@@ -71,6 +72,10 @@ class SMC(AbstractMCMC):
     test_mode_budget = {"num_particles": 16, "num_mcmc_steps": 2, "max_smc_steps": 5}
     objective_target = cap.ObjectiveTarget(cap.ObjectiveQuantity.LOG_LIKELIHOOD, cap.CoordinateSpace.PHYSICAL)
     invalid_value = -1.0e99
+    # The chain dict is plain NumPy, pickled (atomically) after every chunk and kept
+    # after completion: the samples cannot be rebuilt without it. Not a resume state:
+    # every ``_fit`` starts afresh (``resumable = False``).
+    checkpointer = PickleCheckpointer()
 
     __identifier_fields__ = (
         "num_particles",
@@ -670,7 +675,7 @@ class SMC(AbstractMCMC):
 
     @property
     def backend_filename(self):
-        return self.paths.search_internal_path / "search_internal.pickle"
+        return self.paths.search_internal_path / PICKLE_FILENAME
 
     @property
     def backend(self) -> dict:
@@ -681,24 +686,6 @@ class SMC(AbstractMCMC):
             )
         with open(self.backend_filename, "rb") as f:
             return pickle.load(f)
-
-    def output_search_internal(self, search_internal):
-        """
-        Pickle the search-internal dict.
-
-        BlackJAX has no native on-disk format (cf. emcee's HDFBackend), so we round-trip the particle cloud +
-        tempering diagnostics via pickle, bypassing ``self.paths.save_search_internal`` for the same reason
-        `BlackJAXNUTS` does: the autofit dill path chokes on a few numpy/jax-backed members, and a direct pickle
-        of already-numpy data is robust.
-
-        ``NullPaths`` (no ``name``/``path_prefix``) sets ``search_internal_path`` to ``None`` to suppress disk
-        output -- skip silently in that case.
-        """
-        if self.paths.search_internal_path is None:
-            return
-        os.makedirs(self.paths.search_internal_path, exist_ok=True)
-        with open(self.backend_filename, "wb") as f:
-            pickle.dump(search_internal, f)
 
     def _test_mode_samples_info(self) -> dict:
         return {

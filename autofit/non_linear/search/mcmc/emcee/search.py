@@ -13,6 +13,11 @@ from autofit import exc
 from autofit.mapper.model_mapper import ModelMapper
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.fitness import Fitness
+from autofit.non_linear.checkpoint import (
+    EMCEE_FILENAME,
+    NativeFileCheckpointer,
+    load_emcee_backend,
+)
 from autofit.non_linear.initializer import Initializer
 from autofit.non_linear.search.mcmc.abstract_mcmc import AbstractMCMC
 from autofit.non_linear.search.mcmc.auto_correlations import AutoCorrelationsSettings
@@ -49,6 +54,12 @@ class Emcee(AbstractMCMC):
     test_mode_budget = {"nwalkers": 20, "nsteps": 10}
     objective_target = cap.ObjectiveTarget(cap.ObjectiveQuantity.LOG_POSTERIOR, cap.CoordinateSpace.PHYSICAL)
     invalid_value = -float("inf")
+    # emcee's own HDF backend is both the archive and the resume state; it is kept
+    # after completion because the samples cannot be rebuilt without it.
+    checkpointer = NativeFileCheckpointer(
+        EMCEE_FILENAME, loader=load_emcee_backend, retain_after_completion=True
+    )
+    resume_state = checkpointer
 
     __identifier_fields__ = ("nwalkers",)
 
@@ -269,20 +280,6 @@ class Emcee(AbstractMCMC):
 
         return search_internal, fitness
 
-    def output_search_internal(self, search_internal):
-        """
-        Output the sampler results to hard-disk in their internal format.
-
-        Emcee uses a backend to store and load results, therefore the outputting of the search internal to a
-        dill file is disabled.
-
-        Parameters
-        ----------
-        sampler
-            The nautilus sampler object containing the results of the model-fit.
-        """
-        pass
-
     def samples_info_from(self, search_internal=None, auto_correlations=None):
         search_internal = search_internal or self.backend
 
@@ -373,7 +370,7 @@ class Emcee(AbstractMCMC):
 
     @property
     def backend_filename(self):
-        return self.paths.search_internal_path / "search_internal.hdf"
+        return self.paths.search_internal_path / EMCEE_FILENAME
 
     @property
     def backend(self) -> "emcee.backends.HDFBackend":
