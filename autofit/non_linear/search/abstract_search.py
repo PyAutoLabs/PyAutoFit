@@ -13,7 +13,6 @@ from functools import wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional, Union, Tuple, List, Dict
 
-import psutil
 
 if TYPE_CHECKING:
     from autofit.database.sqlalchemy_ import sa
@@ -38,7 +37,8 @@ from autofit.non_linear.fitness import Fitness
 # `ITERATIONS_NEVER` is defined in `fitness.py` (so `Fitness.manage_quick_update` can
 # use it) and re-exported here for existing importers, e.g. `multi_start_gradient`.
 from autofit.non_linear.fitness import ITERATIONS_NEVER  # noqa: F401
-from autofit.non_linear.parallel import SneakyPool, SneakierPool, fork_context
+from autofit.non_linear.parallel import SneakyPool, fork_context
+from autofit.non_linear.search.updater import log_process_state
 from autofit.non_linear.paths.abstract import AbstractPaths
 from autofit.non_linear.paths.database import DatabasePaths
 from autofit.non_linear.paths.directory import DirectoryPaths
@@ -258,8 +258,6 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             self.iterations_per_full_update = float(conf.instance["general"]["hpc"][
                 "iterations_per_full_update"
             ])
-
-        self.iterations = 0
 
         self.silence = silence
 
@@ -655,7 +653,7 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         else:
             logger.info(f"Starting non-linear search with {self.number_of_cores} cores.")
         logger.info(self.quick_update_message)
-        self._log_process_state()
+        log_process_state()
 
         model = analysis.modify_model(model)
         self.paths.model = model
@@ -711,28 +709,6 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         self.logger.info("Search complete, returning result")
 
         return result
-
-    @staticmethod
-    def _log_process_state():
-        total_files = 0
-
-        for process in psutil.process_iter(attrs=["pid"]):
-            try:
-                proc_info = process.as_dict(attrs=["pid"])
-                logger.debug(
-                    f"Process ID: {proc_info['pid']} has the following open files:"
-                )
-
-                open_files = process.open_files()
-                for file in open_files:
-                    logger.debug(file)
-                    total_files += 1
-
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
-
-        if conf.instance["logging"]["total_files_open"]:
-            logger.info(f"Total Files Open: {total_files}")
 
     def pre_fit_output(
         self, analysis: Analysis, model: AbstractPriorModel, info: Optional[Dict] = None
@@ -1668,21 +1644,6 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         return SneakyPool(
             processes=self.number_of_cores, paths=self.paths, fitness=fitness
         )
-
-    def make_sneakier_pool(self, fitness_function: Fitness, **kwargs) -> SneakierPool:
-
-        self.logger.info(f"number of cores == {self.number_of_cores}")
-
-        if self.number_of_cores > 1:
-            self.logger.info("Creating SneakierPool...")
-        else:
-            self.logger.info("Creating multiprocessing Pool of size 1...")
-
-        pool = SneakierPool(
-            processes=self.number_of_cores, fitness=fitness_function, **kwargs
-        )
-
-        return pool
 
     def __eq__(self, other):
         return isinstance(other, NonLinearSearch) and self.__dict__ == other.__dict__

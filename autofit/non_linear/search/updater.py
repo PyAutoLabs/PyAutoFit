@@ -27,6 +27,35 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def log_process_state():
+    """
+    Log the number of files open across all running processes.
+
+    Each process's open files are logged at DEBUG; the total is logged at INFO when
+    ``logging.total_files_open`` is enabled in the config. Called at the start of a
+    fit and after every full update, to help diagnose file-handle leaks.
+    """
+    total_files = 0
+
+    for process in psutil.process_iter(attrs=["pid"]):
+        try:
+            proc_info = process.as_dict(attrs=["pid"])
+            logger.debug(
+                f"Process ID: {proc_info['pid']} has the following open files:"
+            )
+
+            open_files = process.open_files()
+            for file in open_files:
+                logger.debug(file)
+                total_files += 1
+
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+    if conf.instance["logging"]["total_files_open"]:
+        logger.info(f"Total Files Open: {total_files}")
+
+
 class SearchUpdater:
     """
     Handles periodic output updates during a non-linear search.
@@ -124,7 +153,7 @@ class SearchUpdater:
             visualization_time=visualization_time,
         )
 
-        self._log_process_state()
+        log_process_state()
 
         return samples
 
@@ -334,25 +363,3 @@ class SearchUpdater:
             )
         except exc.FitException:
             pass
-
-    @staticmethod
-    def _log_process_state():
-        total_files = 0
-
-        for process in psutil.process_iter(attrs=["pid"]):
-            try:
-                proc_info = process.as_dict(attrs=["pid"])
-                logger.debug(
-                    f"Process ID: {proc_info['pid']} has the following open files:"
-                )
-
-                open_files = process.open_files()
-                for file in open_files:
-                    logger.debug(file)
-                    total_files += 1
-
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
-
-        if conf.instance["logging"]["total_files_open"]:
-            logger.info(f"Total Files Open: {total_files}")
