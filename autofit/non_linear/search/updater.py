@@ -166,12 +166,15 @@ class SearchUpdater:
         instance: Optional[ModelInstance] = None,
         paths_override: Optional[AbstractPaths] = None,
         search_internal=None,
+        plot_search: bool = True,
     ):
         """
         Perform visualization of the non-linear search's model-fitting results.
 
         Delegates to the analysis object for model-specific plots and to the
-        search's ``plot_results`` for search-specific plots.
+        search's ``plot_results`` for search-specific plots. ``plot_search=False``
+        outputs only the analysis visuals (used for the starting point, before the
+        search has samples).
 
         Returns immediately when ``visualization_enabled`` is False.
         """
@@ -207,7 +210,9 @@ class SearchUpdater:
                 during_analysis=during_analysis,
             )
 
-        if analysis.should_visualize(paths=paths, during_analysis=during_analysis):
+        if plot_search and analysis.should_visualize(
+            paths=paths, during_analysis=during_analysis
+        ):
             if not isinstance(paths, NullPaths):
                 try:
                     samples = self._samples_from(

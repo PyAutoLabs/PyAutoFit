@@ -144,6 +144,13 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
     _visualize_fit = True
     _visualize_before_fit = True
 
+    # Keyword arguments the base class expects in ``**kwargs``: ``save_all_samples`` is
+    # read by ``__init__``, and ``initial_values`` / ``inplace`` are the
+    # ``AbstractFactorOptimiser`` arguments ``search.json`` records, so a search loaded
+    # from it passes them back. Any other key reaching the base class is logged as
+    # unknown (a warning, never an error).
+    _known_kwargs = ("save_all_samples", "initial_values", "inplace")
+
     def __init__(
         self,
         name: Optional[str] = None,
@@ -265,6 +272,14 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             self.silence = True
 
         self.kwargs = kwargs
+
+        for key in kwargs:
+            if key not in self._known_kwargs:
+                logger.warning(
+                    f"{type(self).__name__} received the unknown keyword argument "
+                    f"{key!r}, which is ignored. Check its spelling against the "
+                    f"search's constructor."
+                )
 
         self.number_of_cores = number_of_cores
 
@@ -1513,6 +1528,7 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         instance: Optional[ModelInstance] = None,
         paths_override: Optional[AbstractPaths] = None,
         search_internal=None,
+        plot_search: bool = True,
     ):
         """
         Perform visualization of the non-linear search's model-fitting results.
@@ -1527,6 +1543,7 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             instance=instance,
             paths_override=paths_override,
             search_internal=search_internal,
+            plot_search=plot_search,
         )
 
     @property
@@ -1567,12 +1584,15 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         paths = copy.copy(self.paths)
         paths.image_path_suffix = "_start"
 
+        # The search has no samples before it starts, so only the analysis visuals
+        # of the starting point are output, not the search's own plots.
         self.perform_visualization(
             model=model,
             analysis=analysis,
             instance=instance,
             during_analysis=False,
             paths_override=paths,
+            plot_search=False,
         )
 
     def samples_from(self, model: AbstractPriorModel, search_internal=None) -> Samples:
@@ -1596,7 +1616,12 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             return self.samples_via_internal_from(
                 model=model, search_internal=search_internal
             )
-        except (FileNotFoundError, NotImplementedError, AttributeError):
+        except (FileNotFoundError, NotImplementedError) as e:
+            logger.warning(
+                f"The samples of {type(self).__name__} could not be loaded from its "
+                f"internal results ({type(e).__name__}: {e}), so they are loaded from "
+                f"the samples.csv in the output folder instead."
+            )
             return self.paths.samples
 
     def samples_via_internal_from(
