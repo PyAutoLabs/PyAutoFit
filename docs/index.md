@@ -98,6 +98,16 @@ cookbooks/multi_level_model
 ```
 
 ```{toctree}
+:caption: 'Searches:'
+:hidden: true
+:maxdepth: 1
+
+searches/index
+searches/citations
+design/run_ctx
+```
+
+```{toctree}
 :caption: 'Features:'
 :hidden: true
 :maxdepth: 1

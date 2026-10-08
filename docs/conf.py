@@ -100,6 +100,29 @@ autodoc_default_options = {
     "show-inheritance": True,
 }
 autodoc_class_signature = "separated"
+
+# Optional sampler backends are mocked when they are not installed, so the API pages
+# (autosummary of every search, including NSS / SMC / Zeus / Nautilus, whose modules
+# import their backend) build in the minimal `pip install autofit[docs]` environment
+# that ReadTheDocs uses. In the full-extras environment nothing is mocked. The list
+# mirrors the `requires` of autofit/non_linear/search/registry.py.
+import importlib.util
+
+_OPTIONAL_BACKENDS = [
+    "jax",
+    "jaxlib",
+    "blackjax",
+    "optax",
+    "prodigyopt",
+    "nautilus",
+    "dynesty",
+    "emcee",
+    "zeus",
+    "getdist",
+]
+autodoc_mock_imports = [
+    module for module in _OPTIONAL_BACKENDS if importlib.util.find_spec(module) is None
+]
 autoclass_content = "init"
 
 numpydoc_show_class_members = False
