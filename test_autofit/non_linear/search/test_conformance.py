@@ -35,17 +35,6 @@ pytestmark = pytest.mark.filterwarnings("ignore::FutureWarning")
 
 ROSTER = searches_under_test()
 
-ROUND_TRIP_XFAIL = {
-    "BlackJAXNUTS": (
-        "The serialised inverse_mass_matrix is a kind string ('none') the "
-        "constructor rejects; repaired in search-extensibility phase A0b."
-    ),
-    "SMC": (
-        "The serialised inverse_mass_matrix is a kind string SMC's constructor "
-        "rejects; repaired in search-extensibility phase A0b."
-    ),
-}
-
 CONFIG_MUTATION_XFAIL = {
     name: (
         "__init__ sets conf.instance['output']['search_internal'] = True; "
@@ -144,7 +133,7 @@ def test_constructor_argument_set(entry):
     assert arguments == GOLDEN[entry.name].constructor_arguments
 
 
-@pytest.mark.parametrize("entry", _params(ROUND_TRIP_XFAIL, raises=ValueError))
+@pytest.mark.parametrize("entry", _params())
 def test_search_json_round_trip(entry):
     """
     A default-constructed search serialises with ``NullPaths``, so the dictionary

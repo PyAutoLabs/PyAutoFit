@@ -19,6 +19,7 @@ from autofit.non_linear.search.mcmc.auto_correlations import AutoCorrelationsSet
 from autofit.non_linear.search.mcmc.blackjax.chains import (
     InverseMassMatrixSpec,
     inverse_mass_matrix_kind_from,
+    inverse_mass_matrix_spec_from,
     resolve_inverse_mass_matrix,
     split_chain_diagnostics,
     stack_initial_positions,
@@ -163,6 +164,12 @@ class BlackJAXNUTS(AbstractMCMC):
               ``samples.covariance_matrix``. Raises ``ValueError`` if that
               covariance looks MLE-only (too few samples, or non-finite /
               identity) -- pass an explicit array in that case.
+
+            ``search.json`` records only the kind (``"none"``, ``"diagonal"``,
+            ``"dense"``, ``"array"`` or ``"result"``), so a search loaded from
+            it receives that string: ``"none"`` behaves as ``None``, while
+            ``"array"`` / ``"result"`` raise at fit time because the seed was
+            not saved.
         mass_matrix_shrinkage
             Forwarded to ``blackjax.window_adaptation``'s
             ``imm_shrinkage_to_previous``: shrinkage of each warmup window's
@@ -222,8 +229,12 @@ class BlackJAXNUTS(AbstractMCMC):
         # persisted onto `search_internal` / `samples_info`. Validated eagerly
         # here (`inverse_mass_matrix_kind_from` raises on an unrecognised
         # spec) so a bad value fails at construction, not mid-fit.
-        self._inverse_mass_matrix_spec = inverse_mass_matrix
-        self.inverse_mass_matrix = inverse_mass_matrix_kind_from(inverse_mass_matrix)
+        self._inverse_mass_matrix_spec = inverse_mass_matrix_spec_from(
+            inverse_mass_matrix
+        )
+        self.inverse_mass_matrix = inverse_mass_matrix_kind_from(
+            self._inverse_mass_matrix_spec
+        )
         self.mass_matrix_shrinkage = mass_matrix_shrinkage
         self.share_adaptation = share_adaptation
 
