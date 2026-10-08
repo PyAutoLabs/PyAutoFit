@@ -25,7 +25,11 @@ construction without blackjax (>= 1.6), so its construction-dependent cases skip
 a module in ``requires`` cannot be found.
 
 Layer (ii), backend execution and ``samples_info`` key sets (only obtainable from live
-sampler objects), comes later in the search-extensibility epic.
+sampler objects), is ``test_conformance_backend.py``. It skips a search only by the
+capability the roster declares for it: ``jax_use`` is ``"none"`` (the search never
+touches JAX), ``"optional"`` (the search runs on a numpy likelihood and has a JAX path)
+or ``"required"`` (the backend is JAX-native), and ``jax_modules`` names the modules a
+``"required"`` backend cannot run without.
 
 Golden table
 ------------
@@ -88,12 +92,22 @@ class SearchEntry:
         One of ``mcmc``, ``nest`` or ``mle``.
     requires
         Top-level module names whose absence makes default construction impossible.
+    jax_use
+        The declared JAX capability of the backend: ``"none"``, ``"optional"`` or
+        ``"required"``. Layer (ii) fits ``"required"`` searches with a JAX likelihood
+        and all others with a numpy likelihood.
+    jax_modules
+        For a ``"required"`` search, the top-level modules its backend needs. Layer (ii)
+        skips the search only when one of these is missing, which happens on the
+        ``unittest-nojax`` leg alone.
     """
 
     name: str
     class_path: str
     family: str
     requires: List[str] = field(default_factory=list)
+    jax_use: str = "none"
+    jax_modules: Tuple[str, ...] = ()
 
     def missing_requirements(self) -> List[str]:
         """
@@ -116,6 +130,11 @@ _SEARCH = "autofit.non_linear.search"
 _MULTI_START = f"{_SEARCH}.mle.multi_start_gradient.search"
 
 
+_BLACKJAX = dict(jax_use="required", jax_modules=("jax", "blackjax"))
+_OPTAX = dict(jax_use="required", jax_modules=("jax", "optax"))
+_OPTIONAL = dict(jax_use="optional")
+
+
 def searches_under_test() -> List[SearchEntry]:
     """
     The 15 public searches of PyAutoFit, in a fixed order.
@@ -127,31 +146,51 @@ def searches_under_test() -> List[SearchEntry]:
             "BlackJAXNUTS",
             f"{_SEARCH}.mcmc.blackjax.nuts.search.BlackJAXNUTS",
             "mcmc",
+            **_BLACKJAX,
         ),
-        SearchEntry("SMC", f"{_SEARCH}.mcmc.blackjax.smc.search.SMC", "mcmc"),
+        SearchEntry(
+            "SMC", f"{_SEARCH}.mcmc.blackjax.smc.search.SMC", "mcmc", **_BLACKJAX
+        ),
         SearchEntry(
             "DynestyStatic",
             f"{_SEARCH}.nest.dynesty.search.static.DynestyStatic",
             "nest",
+            **_OPTIONAL,
         ),
         SearchEntry(
             "DynestyDynamic",
             f"{_SEARCH}.nest.dynesty.search.dynamic.DynestyDynamic",
             "nest",
+            **_OPTIONAL,
         ),
-        SearchEntry("Nautilus", f"{_SEARCH}.nest.nautilus.search.Nautilus", "nest"),
         SearchEntry(
-            "NSS", f"{_SEARCH}.nest.nss.search.NSS", "nest", requires=["blackjax"]
+            "Nautilus", f"{_SEARCH}.nest.nautilus.search.Nautilus", "nest", **_OPTIONAL
+        ),
+        SearchEntry(
+            "NSS",
+            f"{_SEARCH}.nest.nss.search.NSS",
+            "nest",
+            requires=["blackjax"],
+            **_BLACKJAX,
         ),
         SearchEntry("Drawer", f"{_SEARCH}.mle.drawer.search.Drawer", "mle"),
-        SearchEntry("BFGS", f"{_SEARCH}.mle.bfgs.search.BFGS", "mle"),
-        SearchEntry("LBFGS", f"{_SEARCH}.mle.bfgs.search.LBFGS", "mle"),
-        SearchEntry("MultiStartAdam", f"{_MULTI_START}.MultiStartAdam", "mle"),
+        SearchEntry("BFGS", f"{_SEARCH}.mle.bfgs.search.BFGS", "mle", **_OPTIONAL),
+        SearchEntry("LBFGS", f"{_SEARCH}.mle.bfgs.search.LBFGS", "mle", **_OPTIONAL),
         SearchEntry(
-            "MultiStartADABelief", f"{_MULTI_START}.MultiStartADABelief", "mle"
+            "MultiStartAdam", f"{_MULTI_START}.MultiStartAdam", "mle", **_OPTAX
         ),
-        SearchEntry("MultiStartLion", f"{_MULTI_START}.MultiStartLion", "mle"),
-        SearchEntry("MultiStartProdigy", f"{_MULTI_START}.MultiStartProdigy", "mle"),
+        SearchEntry(
+            "MultiStartADABelief",
+            f"{_MULTI_START}.MultiStartADABelief",
+            "mle",
+            **_OPTAX,
+        ),
+        SearchEntry(
+            "MultiStartLion", f"{_MULTI_START}.MultiStartLion", "mle", **_OPTAX
+        ),
+        SearchEntry(
+            "MultiStartProdigy", f"{_MULTI_START}.MultiStartProdigy", "mle", **_OPTAX
+        ),
     ]
 
 
