@@ -33,7 +33,7 @@ afresh, so they are not resumable and have no resume state.
 | BlackJAX NUTS, SMC | `PickleCheckpointer()` (`search_internal.pickle`, retained) | none |
 | DynestyStatic, DynestyDynamic | `DillCheckpointer()` | `NativeFileCheckpointer("savestate.save", <Sampler>.restore)` |
 | Nautilus | `DillCheckpointer(strip_attributes=("pool_l", "pool_s"))` | `NativeFileCheckpointer("checkpoint.hdf5", ...)`; only nautilus can reopen it (inside a `Sampler` built with the run's prior and likelihood), so its loader raises `NotImplementedError` |
-| NSS | `DillCheckpointer()` | `NativeFileCheckpointer("nss_checkpoint.pkl", _load_checkpoint)` (written, read and deleted by NSS's own `_fit`) |
+| NSS | `DillCheckpointer()` | `NativeFileCheckpointer("nss_checkpoint.pkl", _load_checkpoint)` (written, read and deleted by NSS's `run(ctx)`) |
 | MultiStart* | `DillCheckpointer()` | the same file |
 
 Every existing filename is kept, so output folders written before A3 still load.

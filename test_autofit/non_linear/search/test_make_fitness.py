@@ -7,7 +7,7 @@ under the search tree for a forwarded `iterations_per_quick_update`: a search th
 forgot it silently never fired quick updates (PyAutoFit#1434). With every search
 building its `Fitness` through `make_fitness`, which always forwards the cadence, that
 scan has nothing left to guard; what remains is that `make_fitness` forwards it, and that
-no search builds a `Fitness` any other way (NSS keeps its own path until phase A3b).
+no search builds a `Fitness` any other way (NSS, the last exception, moved onto it in A3b).
 """
 import ast
 from pathlib import Path
@@ -89,8 +89,9 @@ def _fitness_constructions():
                 yield path.relative_to(SEARCH_ROOT).as_posix()
 
 
-def test_only_make_fitness_and_nss_construct_a_fitness():
-    assert sorted(_fitness_constructions()) == [
-        "abstract_search.py",
-        "nest/nss/search.py",
-    ]
+def test_only_make_fitness_constructs_a_fitness():
+    """
+    NSS, the last search that built its own ``Fitness``, moved onto ``run(ctx)`` in
+    search-extensibility A3b; ``make_fitness`` is now the only construction site.
+    """
+    assert sorted(_fitness_constructions()) == ["abstract_search.py"]

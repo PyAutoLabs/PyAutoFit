@@ -1458,6 +1458,10 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC, metaclass=_SearchMeta):
 
         from autofit.non_linear.search.fit_context import FitContext
 
+        # The REQUIRED gate, repeated for callers that reach `_fit` without `fit`, before
+        # any `Fitness` or backend state exists (`fit` has already run it).
+        cap.check_jax_required(self, analysis)
+
         fitness = self.make_fitness(
             analysis=analysis, model=model, **self.fitness_overrides(analysis)
         )
