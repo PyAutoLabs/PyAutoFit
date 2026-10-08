@@ -48,7 +48,12 @@ class AbstractBFGS(AbstractMLE):
     status = cap.Status.STABLE
     test_mode_budget = {}
     objective_target = cap.ObjectiveTarget(cap.ObjectiveQuantity.NEG2_LOG_POSTERIOR, cap.CoordinateSpace.PHYSICAL)
-    invalid_value = -float("inf")
+    # The value a NaN or infinite likelihood reaches the backend as: ``Fitness``
+    # replaces it with ``resample_figure_of_merit=-inf`` and the chi-squared
+    # conversion (x -2) turns that into ``+inf``. The sentinel is conditional: a
+    # ``FitException`` early return (numpy) and a failed traced assertion still return
+    # ``-inf``. Normalising it is the A3 objective adapter's job, not A1's.
+    invalid_value = float("inf")
 
     __identifier_fields__ = ("clipper",)
 

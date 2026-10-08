@@ -169,6 +169,46 @@ def test_invalid_value_spelling():
     assert cap.invalid_value_to_str(-1.0e30) == "-1e+30"
 
 
+class _NaNAnalysis(af.Analysis):
+    def log_likelihood_function(self, instance):
+        return float("nan")
+
+
+class _FitExceptionAnalysis(af.Analysis):
+    def log_likelihood_function(self, instance):
+        raise af.exc.FitException()
+
+
+@pytest.mark.parametrize("name", ["BFGS", "LBFGS", "MultiStartAdam"])
+def test_minimizer_invalid_value_is_what_the_backend_sees(name):
+    """
+    Pins the observed, not yet normalised, sentinel of the ``neg2_log_posterior``
+    minimizers, built with the ``Fitness`` settings their ``_fit`` uses: a NaN
+    likelihood reaches the backend as ``+inf`` (the declared value) and a
+    ``FitException`` as ``-inf``. A3's objective adapter normalises this and flips the
+    test deliberately.
+    """
+    import numpy as np
+    from autofit.non_linear.fitness import Fitness
+
+    cls = getattr(af, name)
+    model = af.Model(af.ex.Gaussian)
+    vector = model.physical_values_from_prior_medians
+
+    def fom(analysis):
+        return Fitness(
+            model=model,
+            analysis=analysis,
+            fom_is_log_likelihood=False,
+            resample_figure_of_merit=-np.inf,
+            convert_to_chi_squared=True,
+        )(vector)
+
+    assert cls.invalid_value == math.inf
+    assert fom(_NaNAnalysis()) == cls.invalid_value
+    assert fom(_FitExceptionAnalysis()) == -math.inf
+
+
 class _NumpyAnalysis(af.Analysis):
     def log_likelihood_function(self, instance):
         return -0.5 * float((instance.centre - 50.0) ** 2)

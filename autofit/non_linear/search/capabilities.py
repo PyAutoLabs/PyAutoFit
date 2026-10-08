@@ -31,6 +31,12 @@ Attribute                 Meaning
 ``invalid_value``         The sentinel the objective returns for an invalid model.
 ========================  ==============================================================
 
+``invalid_value`` records what the backend actually sees and is not yet normalised. For
+the ``neg2_log_posterior`` minimizers (``BFGS``, ``LBFGS`` and the ``MultiStart*``
+family) it is conditional: a NaN or infinite likelihood is replaced by ``-inf`` and then
+multiplied by -2 into ``+inf`` (the declared value), while a ``FitException`` early
+return and a failed traced assertion return ``-inf``.
+
 These are **static** capabilities, a property of the class. The capability a given run
 actually has can be narrower: ``SMC`` estimates the evidence only when it starts from a
 prior-sampling initializer (a warm start skips the tempering from the prior). Effective

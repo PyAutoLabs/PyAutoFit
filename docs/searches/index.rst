@@ -279,33 +279,35 @@ What each search's objective returns, the coordinates its backend proposes point
    * - :class:`~autofit.BFGS`
      - ``neg2_log_posterior``
      - ``physical``
-     - ``-inf``
+     - ``inf``
      - --
    * - :class:`~autofit.LBFGS`
      - ``neg2_log_posterior``
      - ``physical``
-     - ``-inf``
+     - ``inf``
      - --
    * - :class:`~autofit.MultiStartAdam`
      - ``neg2_log_posterior``
      - ``physical``
-     - ``-inf``
+     - ``inf``
      - ``convergence.window=1``, ``convergence.min_steps=1``
    * - :class:`~autofit.MultiStartADABelief`
      - ``neg2_log_posterior``
      - ``physical``
-     - ``-inf``
+     - ``inf``
      - ``convergence.window=1``, ``convergence.min_steps=1``
    * - :class:`~autofit.MultiStartLion`
      - ``neg2_log_posterior``
      - ``physical``
-     - ``-inf``
+     - ``inf``
      - ``convergence.window=1``, ``convergence.min_steps=1``
    * - :class:`~autofit.MultiStartProdigy`
      - ``neg2_log_posterior``
      - ``physical``
-     - ``-inf``
+     - ``inf``
      - ``convergence.window=1``, ``convergence.min_steps=1``
+
+The invalid value is what the backend actually sees, not yet normalised. For the ``neg2_log_posterior`` minimizers it is conditional: a NaN or infinite likelihood is replaced by ``-inf`` and then multiplied by -2 into ``inf`` (the value listed), while a model rejected by a ``FitException`` or a failed assertion returns ``-inf``.
 
 Column meanings
 ---------------

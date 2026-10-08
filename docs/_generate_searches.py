@@ -261,6 +261,13 @@ def searches_index_rst(manifest: dict) -> str:
     ]
     lines += _list_table(header, rows, "16 18 12 12 42")
     lines += [
+        "The invalid value is what the backend actually sees, not yet normalised. For "
+        "the ``neg2_log_posterior`` minimizers it is conditional: a NaN or infinite "
+        "likelihood is replaced by ``-inf`` and then multiplied by -2 into ``inf`` "
+        "(the value listed), while a model rejected by a ``FitException`` or a failed "
+        "assertion returns ``-inf``.\n\n",
+    ]
+    lines += [
         "Column meanings\n",
         "---------------\n\n",
         "- **JAX**: ``none`` (the backend never needs JAX), ``optional`` (a jitted or "
