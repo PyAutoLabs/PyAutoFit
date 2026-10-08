@@ -272,7 +272,7 @@ class Fitness:
         self.use_jax_jit = use_jax_jit
         self.gradient_mode = validate_gradient_mode(gradient_mode)
 
-        if getattr(self.analysis, "_use_jax", False):
+        if self.analysis.is_jax:
             from autofit.jax.pytrees import enable_pytrees, register_model
 
             enable_pytrees()
@@ -299,7 +299,7 @@ class Fitness:
             from autofit.non_linear.quick_update import BackgroundQuickUpdate
 
             convert_jax = (
-                getattr(self.analysis, "_use_jax", False)
+                self.analysis.is_jax
                 and not getattr(self.analysis, "supports_jax_visualization", False)
             )
 

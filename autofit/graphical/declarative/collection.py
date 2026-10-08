@@ -1,4 +1,4 @@
-from typing import Union, Optional
+from typing import List, Union, Optional
 
 from autofit.graphical.declarative.factor.hierarchical import HierarchicalFactor
 
@@ -19,7 +19,7 @@ class FactorGraphModel(AbstractDeclarativeFactor):
         *model_factors: Union[AbstractDeclarativeFactor, HierarchicalFactor],
         name=None,
         include_prior_factors=True,
-        use_jax : bool = False
+        use_jax: Optional[bool] = None,
     ):
         """
         A collection of factors that describe models, which can be
@@ -31,6 +31,15 @@ class FactorGraphModel(AbstractDeclarativeFactor):
         ----------
         model_factors
             Factors which are hierarchical or associated with a specific analysis
+        use_jax
+            Whether the whole graph is evaluated on JAX when it is fitted as one
+            analysis (``search.fit(model=graph.global_prior_model, analysis=graph)``).
+            ``None`` (the default) derives it from the factors: the graph is JAX when
+            every factor is. An explicit bool is honoured, but whole-graph fitting
+            requires every factor to agree with it and raises ``SearchException``
+            naming the factors that do not (``check_backend_agreement``). Per-factor
+            expectation propagation (``graph.optimise``) fits each factor with its own
+            analysis, so mixed numpy/JAX factors are allowed there.
         """
         super().__init__(
             include_prior_factors=include_prior_factors,
@@ -42,7 +51,7 @@ class FactorGraphModel(AbstractDeclarativeFactor):
     def tree_flatten(self):
         return (
             (self._model_factors,),
-            (self._name, self._include_prior_factors),
+            (self._name, self._include_prior_factors, self._explicit_use_jax),
         )
 
     @classmethod
@@ -51,7 +60,102 @@ class FactorGraphModel(AbstractDeclarativeFactor):
             *children[0],
             name=aux_data[0],
             include_prior_factors=aux_data[1],
+            use_jax=aux_data[2],
         )
+
+    def __setstate__(self, state):
+        """
+        Restore a pickled graph, migrating pickles written before ``use_jax`` could be
+        derived from the factors.
+
+        Those stored the graph's backend as a plain ``_use_jax`` attribute, which the
+        ``_use_jax`` property below now shadows; it is moved to ``_explicit_use_jax``
+        so the graph keeps the backend it was built with (then always an explicit
+        bool, ``False`` by default) and ``tree_flatten`` finds the attribute.
+        """
+        state = dict(state)
+        if "_explicit_use_jax" not in state:
+            state["_explicit_use_jax"] = state.pop("_use_jax", None)
+        self.__dict__.update(state)
+
+    @property
+    def _use_jax(self) -> bool:
+        """
+        The graph's backend: the explicit ``use_jax`` when one was given, otherwise
+        ``True`` exactly when every factor is JAX (``is_jax`` reads this).
+
+        The factors are the flattened ones (a ``HierarchicalFactor`` contributes the
+        factors it generates), the same set ``check_backend_agreement`` reads, so a
+        derived backend always agrees with its own factors.
+        """
+        explicit = self.__dict__.get("_explicit_use_jax")
+        if explicit is not None:
+            return bool(explicit)
+        flags = [factor.is_jax for factor in self._flat_factors()]
+        return bool(flags) and all(flags)
+
+    @_use_jax.setter
+    def _use_jax(self, value: Optional[bool]):
+        # Set by `Analysis.__init__`: `None` means "derive from the factors".
+        self._explicit_use_jax = value
+
+    def _flat_factors(self):
+        model_factors = list()
+        for model_factor in self.__dict__.get("_model_factors", []):
+            if isinstance(model_factor, HierarchicalFactor):
+                model_factors.extend(model_factor.factors)
+            else:
+                model_factors.append(model_factor)
+        return model_factors
+
+    def factors_disagreeing_on_backend(self) -> List[str]:
+        """
+        The names of the factors whose ``is_jax`` differs from the graph's.
+        """
+        is_jax = self.is_jax
+        return [
+            factor.name for factor in self._flat_factors() if factor.is_jax != is_jax
+        ]
+
+    def check_backend_agreement(self):
+        """
+        Raise ``SearchException`` unless every factor agrees with the graph's backend.
+
+        Whole-graph fitting evaluates every factor inside one objective, so a JAX graph
+        traces numpy factors (which fail on tracers) and a numpy graph never compiles a
+        JAX factor. ``NonLinearSearch`` calls this before fitting a graph as one
+        analysis; per-factor expectation propagation never does.
+        """
+        disagreeing = self.factors_disagreeing_on_backend()
+        if disagreeing:
+            from autofit import exc
+
+            raise exc.SearchException(
+                f"The FactorGraphModel {self.name} is fitted as one analysis with "
+                f"is_jax={self.is_jax}, but these factors have "
+                f"is_jax={not self.is_jax}: {', '.join(disagreeing)}. Whole-graph "
+                f"fitting requires every factor to use the same backend: build every "
+                f"factor's analysis with the same use_jax (and HierarchicalFactor with "
+                f"the same use_jax), or omit FactorGraphModel(use_jax=...) so the graph "
+                f"derives it from its factors. Per-factor expectation propagation "
+                f"(graph.optimise) allows mixed factors."
+            )
+
+    @property
+    def gradient_mode(self) -> str:
+        """
+        The factors' common ``gradient_mode``; ``"reverse"`` (the ``Analysis`` default)
+        when the factors declare different modes. Both modes compute the same gradient,
+        so a mixed graph falls back to the mode whose memory does not scale with the
+        number of free parameters.
+        """
+        modes = {
+            getattr(factor, "gradient_mode", "reverse")
+            for factor in self._flat_factors()
+        }
+        if len(modes) == 1:
+            return modes.pop()
+        return "reverse"
 
     @property
     def prior_model(self):
@@ -144,13 +248,7 @@ class FactorGraphModel(AbstractDeclarativeFactor):
 
     @property
     def model_factors(self):
-        model_factors = list()
-        for model_factor in self._model_factors:
-            if isinstance(model_factor, HierarchicalFactor):
-                model_factors.extend(model_factor.factors)
-            else:
-                model_factors.append(model_factor)
-        return model_factors
+        return self._flat_factors()
 
     def make_result(
         self,

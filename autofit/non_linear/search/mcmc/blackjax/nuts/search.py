@@ -27,6 +27,7 @@ from autofit.non_linear.search.mcmc.blackjax.chains import (
 from autofit.non_linear.test_mode import is_test_mode
 from autofit.non_linear.samples.mcmc import SamplesMCMC
 from autofit.non_linear.samples.sample import Sample
+from autofit.non_linear.search import capabilities as cap
 
 if TYPE_CHECKING:
     from autofit.database.sqlalchemy_ import sa
@@ -35,6 +36,24 @@ logger = logging.getLogger(__name__)
 
 
 class BlackJAXNUTS(AbstractMCMC):
+    # Static capabilities (see ``autofit.non_linear.search.capabilities``); mirrored
+    # by ``search/registry.py``. Never identifier fields.
+    jax_use = cap.JaxUse.REQUIRED
+    gradient = cap.Gradient.USES
+    batched = True
+    honours_gradient_mode = False
+    posterior_kind = cap.PosteriorKind.CHAIN
+    produces_evidence = False
+    resumable = False
+    warm_start = cap.WarmStart.CONSUMER
+    install_extra = "optional"
+    upstream_url = "https://github.com/blackjax-devs/blackjax"
+    citation_keys = ("blackjax",)
+    status = cap.Status.STABLE
+    test_mode_budget = {"num_warmup": 20, "num_samples": 20, "num_chains": 2}
+    objective_target = cap.ObjectiveTarget(cap.ObjectiveQuantity.LOG_POSTERIOR, cap.CoordinateSpace.PHYSICAL)
+    invalid_value = -float("inf")
+
     __identifier_fields__ = (
         "num_warmup",
         "num_samples",
@@ -270,18 +289,9 @@ class BlackJAXNUTS(AbstractMCMC):
         import jax.numpy as jnp
         import blackjax
 
-        # JAX is mandatory: NUTS needs gradients of the log-density. Refuse
-        # cleanly if the analysis was built without ``use_jax=True``.
-        xp = getattr(analysis, "_xp", None)
-        if xp is None or not xp.__name__.startswith("jax"):
-            raise ValueError(
-                "BlackJAXNUTS requires an Analysis built with use_jax=True. "
-                "NUTS is a gradient-based sampler and the log-likelihood must "
-                "flow through jax.grad. Construct Analysis(..., use_jax=True) "
-                "and call enable_pytrees() / register_model(model) before fit. "
-                "See autofit_workspace_test/scripts/searches/BlackJAXNUTS.py "
-                "for a worked example."
-            )
+        # JAX is mandatory (jax_use='required'): NUTS needs gradients of the
+        # log-density. `fit` already ran this gate; repeated for direct callers.
+        cap.check_jax_required(self, analysis)
 
         fitness = Fitness(
             model=model,

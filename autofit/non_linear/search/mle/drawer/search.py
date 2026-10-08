@@ -9,12 +9,31 @@ from autofit.non_linear.fitness import Fitness
 from autofit.non_linear.search.mle.abstract_mle import AbstractMLE
 from autofit.non_linear.initializer import AbstractInitializer
 from autofit.non_linear.samples import Samples, Sample
+from autofit.non_linear.search import capabilities as cap
 
 if TYPE_CHECKING:
     from autofit.database.sqlalchemy_ import sa
 
 
 class Drawer(AbstractMLE):
+    # Static capabilities (see ``autofit.non_linear.search.capabilities``); mirrored
+    # by ``search/registry.py``. Never identifier fields.
+    jax_use = cap.JaxUse.NONE
+    gradient = cap.Gradient.NONE
+    batched = False
+    honours_gradient_mode = False
+    posterior_kind = cap.PosteriorKind.POINT
+    produces_evidence = False
+    resumable = False
+    warm_start = cap.WarmStart.NEUTRAL
+    install_extra = ""
+    upstream_url = "https://github.com/PyAutoLabs/PyAutoFit"
+    citation_keys = ()
+    status = cap.Status.STABLE
+    test_mode_budget = {}
+    objective_target = cap.ObjectiveTarget(cap.ObjectiveQuantity.LOG_POSTERIOR, cap.CoordinateSpace.PHYSICAL)
+    invalid_value = -float("inf")
+
     __identifier_fields__ = ("total_draws",)
 
     def __init__(

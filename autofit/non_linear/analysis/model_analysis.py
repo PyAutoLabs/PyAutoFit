@@ -6,19 +6,41 @@ from ... import SamplesSummary, AbstractPaths, SamplesPDF
 
 
 class ModelAnalysis(Analysis):
-    def __init__(self, analysis: Analysis, model: AbstractPriorModel, use_jax : bool = False):
+    def __init__(
+        self,
+        analysis: Analysis,
+        model: AbstractPriorModel,
+        use_jax: Optional[bool] = None,
+    ):
         """
         Comprises a model and an analysis that can be applied to instances of that model.
 
         Parameters
         ----------
         analysis
+            The wrapped analysis.
         model
+            The model whose instances the wrapped analysis is evaluated on.
+        use_jax
+            ``None`` (the default) forwards the wrapped analysis's ``is_jax``, so the
+            wrapper and the analysis it wraps can never disagree about the backend. An
+            explicit bool is honoured as before.
         """
+        if use_jax is None:
+            use_jax = analysis.is_jax
+
         super().__init__(use_jax=use_jax)
 
         self.analysis = analysis
         self.model = model
+
+    @property
+    def gradient_mode(self) -> str:
+        """
+        The wrapped analysis's declared gradient mode (``Analysis.gradient_mode``), so a
+        gradient search fitting the wrapper differentiates the way the analysis asked.
+        """
+        return self.analysis.gradient_mode
 
     def __getattr__(self, item):
         if item in ("__getstate__", "__setstate__"):

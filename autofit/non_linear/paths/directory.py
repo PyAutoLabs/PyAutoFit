@@ -497,6 +497,15 @@ class DirectoryPaths(AbstractPaths):
         """
         info = model.info
 
+        # Header: the search and its static capabilities (jax_use, gradient,
+        # posterior kind, ...), so the file says what produced the fit. Guarded
+        # for paths without a search (or a search double with no declarations).
+        search = getattr(self, "search", None)
+        if search is not None and getattr(type(search), "objective_target", None):
+            from autofit.non_linear.search.capabilities import capability_summary_from
+
+            info = f"{capability_summary_from(search)}\n{info}"
+
         try:
             scaler_info = self.search.scaler.info_from_model(model=model)
         except (NotImplementedError, AttributeError):

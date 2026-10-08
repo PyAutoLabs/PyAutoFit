@@ -156,7 +156,7 @@ def latent_samples_from(
             if failures["first_traceback"] is None:
                 failures["first_traceback"] = traceback.format_exc()
 
-        if analysis._use_jax:
+        if analysis.is_jax:
             import jax
             import jax.numpy as jnp
             if batch_mode == "vmap":
@@ -248,7 +248,7 @@ def latent_samples_from(
             # batched JAX call on this chunk
             latent_values_batch = batched_compute_latent(batch)
 
-            if analysis._use_jax:
+            if analysis.is_jax:
                 import jax.numpy as jnp
                 latent_values_batch = jnp.stack(latent_values_batch, axis=-1)  # (batch, n_latents)
 

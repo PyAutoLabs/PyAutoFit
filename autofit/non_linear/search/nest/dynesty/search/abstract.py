@@ -18,6 +18,7 @@ from autofit.non_linear.search.nest.abstract_nest import AbstractNest
 from autofit.non_linear.samples.sample import Sample
 from autofit.non_linear.samples.nest import SamplesNest
 from autofit.non_linear.test_mode import is_test_mode
+from autofit.non_linear.search import capabilities as cap
 
 if TYPE_CHECKING:
     from autofit.database.sqlalchemy_ import sa
@@ -68,6 +69,24 @@ def prior_transform(cube, model):
 
 
 class AbstractDynesty(AbstractNest, ABC):
+    # Static capabilities (see ``autofit.non_linear.search.capabilities``); mirrored
+    # by ``search/registry.py``. Never identifier fields.
+    jax_use = cap.JaxUse.OPTIONAL
+    gradient = cap.Gradient.NONE
+    batched = False
+    honours_gradient_mode = False
+    posterior_kind = cap.PosteriorKind.WEIGHTED
+    produces_evidence = True
+    resumable = True
+    warm_start = cap.WarmStart.PROVIDER
+    install_extra = ""
+    upstream_url = "https://github.com/joshspeagle/dynesty"
+    citation_keys = ("dynesty",)
+    status = cap.Status.STABLE
+    test_mode_budget = {"maxcall": 1}
+    objective_target = cap.ObjectiveTarget(cap.ObjectiveQuantity.LOG_LIKELIHOOD, cap.CoordinateSpace.UNIT_CUBE)
+    invalid_value = -1.0e99
+
     def __init__(
         self,
         name: Optional[str] = None,
@@ -225,7 +244,7 @@ class AbstractDynesty(AbstractNest, ABC):
             iterations_per_quick_update=self.iterations_per_quick_update,
             background_quick_update=self.quick_update_background,
             live_visual_update=self.live_visual_update,
-            use_jax_jit=getattr(analysis, "_use_jax", False) and self.use_jax_jit,
+            use_jax_jit=analysis.is_jax and self.use_jax_jit,
         )
 
         if not isinstance(self.paths, NullPaths):
@@ -246,7 +265,7 @@ class AbstractDynesty(AbstractNest, ABC):
 
         while not finished:
             try:
-                if self.number_of_cores <= 1 or self.force_x1_cpu or analysis._use_jax:
+                if self.number_of_cores <= 1 or self.force_x1_cpu or analysis.is_jax:
                     raise RuntimeError
 
                 Pool = _fork_pool_cls()
@@ -272,7 +291,7 @@ class AbstractDynesty(AbstractNest, ABC):
 
             except RuntimeError as e:
                 if not checkpoint_exists:
-                    if getattr(analysis, "_use_jax", False):
+                    if analysis.is_jax:
                         self.logger.info(
                             "Running Dynesty with JAX-jitted likelihood (single CPU, no pool)."
                         )

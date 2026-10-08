@@ -20,6 +20,7 @@ from autofit.non_linear.search.nest import abstract_nest
 from autofit.non_linear.samples.sample import Sample
 from autofit.non_linear.samples.nest import SamplesNest
 from autofit.non_linear.test_mode import is_test_mode
+from autofit.non_linear.search import capabilities as cap
 
 if TYPE_CHECKING:
     from autofit.database.sqlalchemy_ import sa
@@ -155,6 +156,24 @@ class _LikelihoodWorkerPool:
 
 
 class Nautilus(abstract_nest.AbstractNest):
+    # Static capabilities (see ``autofit.non_linear.search.capabilities``); mirrored
+    # by ``search/registry.py``. Never identifier fields.
+    jax_use = cap.JaxUse.OPTIONAL
+    gradient = cap.Gradient.NONE
+    batched = True
+    honours_gradient_mode = False
+    posterior_kind = cap.PosteriorKind.WEIGHTED
+    produces_evidence = True
+    resumable = True
+    warm_start = cap.WarmStart.PROVIDER
+    install_extra = "optional"
+    upstream_url = "https://github.com/johannesulf/nautilus"
+    citation_keys = ("nautilus",)
+    status = cap.Status.STABLE
+    test_mode_budget = {"n_like_max": 1}
+    objective_target = cap.ObjectiveTarget(cap.ObjectiveQuantity.LOG_LIKELIHOOD, cap.CoordinateSpace.UNIT_CUBE)
+    invalid_value = -1.0e99
+
     __identifier_fields__ = (
         "n_live",
         "n_update",
@@ -327,7 +346,7 @@ class Nautilus(abstract_nest.AbstractNest):
                 "Starting new Nautilus non-linear search (no previous samples found)."
             )
 
-        if self.force_x1_cpu or analysis._use_jax:
+        if self.force_x1_cpu or analysis.is_jax:
 
             fitness = Fitness(
                 model=model,
@@ -338,7 +357,9 @@ class Nautilus(abstract_nest.AbstractNest):
                 iterations_per_quick_update=self.iterations_per_quick_update,
                 background_quick_update=self.quick_update_background,
                 live_visual_update=self.live_visual_update,
-                use_jax_vmap=self.use_jax_vmap,
+                # The vectorised (jax.vmap) likelihood needs a JAX analysis;
+                # `force_x1_cpu` with a numpy analysis evaluates point by point.
+                use_jax_vmap=self.use_jax_vmap and analysis.is_jax,
                 batch_size=self.n_batch,
             )
 
@@ -416,7 +437,7 @@ class Nautilus(abstract_nest.AbstractNest):
             the log likelihood the search maximizes.
         """
 
-        if analysis._use_jax:
+        if analysis.is_jax:
             self.logger.info(
                 "Running search with JAX vectorization (parallelization handled by JAX)."
             )

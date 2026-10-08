@@ -52,6 +52,7 @@ from autofit.graphical.declarative.abstract import PriorFactor
 from autofit.graphical.expectation_propagation import AbstractFactorOptimiser
 
 from autofit.non_linear.fitness import get_timeout_seconds
+from autofit.non_linear.search import capabilities as cap
 from autofit.non_linear.test_mode import (
     test_mode_level,
     test_mode_samples,
@@ -335,6 +336,26 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
 
     __identifier_fields__ = tuple()
 
+    # Static capability declarations (``autofit.non_linear.search.capabilities``).
+    # These are the defaults for a search that declares nothing; every public search
+    # overrides them and the registry (``search/registry.py``) mirrors its values.
+    # None of them is ever an identifier field.
+    jax_use = cap.JaxUse.NONE
+    gradient = cap.Gradient.NONE
+    batched = False
+    honours_gradient_mode = False
+    posterior_kind = None
+    produces_evidence = False
+    resumable = False
+    warm_start = cap.WarmStart.NEUTRAL
+    install_extra = ""
+    upstream_url = ""
+    citation_keys = ()
+    status = cap.Status.EXPERIMENTAL
+    test_mode_budget = {}
+    objective_target = None
+    invalid_value = -float("inf")
+
     def optimise(
         self,
         factor_approx: FactorApproximation,
@@ -426,7 +447,7 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
 
         analysis = factor.analysis
 
-        uses_jax = getattr(analysis, "_use_jax", False)
+        uses_jax = analysis.is_jax
 
         self.logger.info(
             f"EP factor step [{factor.name}]: running the factor search "
@@ -653,7 +674,7 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         """
         self.check_model(model=model)
 
-        if getattr(analysis, "_use_jax", False):
+        if analysis.is_jax:
             try:
                 import jax
                 devices = jax.devices()
@@ -834,6 +855,28 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
                 analysis=analysis,
                 call_likelihood=(mode == 2),
             )
+
+        # Runtime gates, after the test-mode bypass return so `PYAUTO_TEST_MODE>=2`
+        # (which never runs a backend) is not affected by them.
+        from autofit.graphical.declarative.collection import FactorGraphModel
+        from autofit.graphical.declarative.factor.analysis import AnalysisFactor
+        from autofit.non_linear.analysis.model_analysis import ModelAnalysis
+
+        # Unwrap the analysis wrappers that forward their wrapped analysis's
+        # likelihood, so a graph wrapped in `ModelAnalysis` (or an `AnalysisFactor`)
+        # is still checked as one whole graph.
+        inner = analysis
+        while isinstance(inner, (ModelAnalysis, AnalysisFactor)) and not isinstance(
+            inner, FactorGraphModel
+        ):
+            inner = inner.__dict__.get("analysis")
+        if isinstance(inner, FactorGraphModel):
+            inner.check_backend_agreement()
+
+        # Fail fast: a jax_use='required' search given a numpy analysis raises the one
+        # shared SearchException before any backend state exists. `PYAUTO_DISABLE_JAX=1`
+        # smoke runs use `PYAUTO_TEST_MODE>=2`, which returned above.
+        cap.check_jax_required(self, analysis)
 
         model.freeze()
         search_internal, fitness = self._fit(

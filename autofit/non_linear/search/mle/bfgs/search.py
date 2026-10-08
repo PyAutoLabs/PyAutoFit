@@ -16,6 +16,7 @@ from autofit.non_linear.clipper import (
 from autofit.non_linear.initializer import AbstractInitializer
 from autofit.non_linear.samples.sample import Sample
 from autofit.non_linear.samples.samples import Samples
+from autofit.non_linear.search import capabilities as cap
 
 import numpy as np
 
@@ -31,6 +32,29 @@ class AbstractBFGS(AbstractMLE):
     # ``Drawer`` deliberately does NOT declare this: it inherits the attribute
     # from ``AbstractMLE`` but never consumes it, and a setting that cannot
     # affect the result must not re-key stored results.
+    # Static capabilities (see ``autofit.non_linear.search.capabilities``); mirrored
+    # by ``search/registry.py``. Never identifier fields.
+    jax_use = cap.JaxUse.OPTIONAL
+    gradient = cap.Gradient.NONE
+    batched = False
+    honours_gradient_mode = False
+    posterior_kind = cap.PosteriorKind.POINT
+    produces_evidence = False
+    resumable = False
+    warm_start = cap.WarmStart.PROVIDER
+    install_extra = ""
+    upstream_url = "https://github.com/scipy/scipy"
+    citation_keys = ("scipy",)
+    status = cap.Status.STABLE
+    test_mode_budget = {}
+    objective_target = cap.ObjectiveTarget(cap.ObjectiveQuantity.NEG2_LOG_POSTERIOR, cap.CoordinateSpace.PHYSICAL)
+    # The value a NaN or infinite likelihood reaches the backend as: ``Fitness``
+    # replaces it with ``resample_figure_of_merit=-inf`` and the chi-squared
+    # conversion (x -2) turns that into ``+inf``. The sentinel is conditional: a
+    # ``FitException`` early return (numpy) and a failed traced assertion still return
+    # ``-inf``. Normalising it is the A3 objective adapter's job, not A1's.
+    invalid_value = float("inf")
+
     __identifier_fields__ = ("clipper",)
 
     method = None
@@ -295,7 +319,7 @@ class AbstractBFGS(AbstractMLE):
                 # box makes the objective non-finite on either branch. Bounds are
                 # passed on both — they are correct on both, and having them
                 # diverge by branch would be a trap of its own.
-                if analysis._use_jax:
+                if analysis.is_jax:
 
                     search_internal = optimize.minimize(
                         fun=fitness._jit,

@@ -29,3 +29,18 @@ jobs:
     with:
       package: autofit
     secrets: inherit
+
+  # The search pages (docs/api/searches.rst, docs/searches/index.rst and
+  # docs/searches/citations.rst) are generated from the search manifest
+  # (python -m autofit search-manifest --json); fail when they are stale.
+  generated-search-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install autofit
+        run: pip install -e .
+      - name: Check the generated search docs
+        run: python docs/_generate_searches.py --check

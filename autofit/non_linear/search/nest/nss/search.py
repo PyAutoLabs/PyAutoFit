@@ -15,6 +15,7 @@ from autofit.non_linear.search.nest import abstract_nest
 from .samples import NSSamples
 from autofit.non_linear.samples.sample import Sample
 from autofit.non_linear.test_mode import is_test_mode
+from autofit.non_linear.search import capabilities as cap
 
 if TYPE_CHECKING:
     from autofit.database.sqlalchemy_ import sa
@@ -192,6 +193,27 @@ class _NSSInternal:
 
 
 class NSS(abstract_nest.AbstractNest):
+    # Static capabilities (see ``autofit.non_linear.search.capabilities``); mirrored
+    # by ``search/registry.py``. Never identifier fields.
+    jax_use = cap.JaxUse.REQUIRED
+    gradient = cap.Gradient.NONE
+    batched = True
+    honours_gradient_mode = False
+    posterior_kind = cap.PosteriorKind.WEIGHTED
+    produces_evidence = True
+    resumable = True
+    warm_start = cap.WarmStart.PROVIDER
+    install_extra = "optional"
+    upstream_url = "https://github.com/blackjax-devs/blackjax"
+    citation_keys = ("blackjax",)
+    status = cap.Status.EXPERIMENTAL
+    test_mode_budget = {"termination": -1.0}
+    # Physical: the unit-cube initial draws are transformed before ``algo.init``, and
+    # the sampler then proposes physical vectors (``instance_from_vector``) against a
+    # physical-space prior density.
+    objective_target = cap.ObjectiveTarget(cap.ObjectiveQuantity.LOG_LIKELIHOOD, cap.CoordinateSpace.PHYSICAL)
+    invalid_value = NSS_INVALID_LOG_LIKELIHOOD
+
     __identifier_fields__ = (
         "n_live",
         "num_mcmc_steps",
@@ -396,6 +418,10 @@ class NSS(abstract_nest.AbstractNest):
             required by ``AbstractNest.perform_update`` for post-fit work
             like latent-sample generation, which calls ``fitness.batch_size``.
         """
+
+        # jax_use='required': NSS traces its likelihood inside blackjax and has no numpy
+        # path. `fit` already ran this gate; repeated for direct callers.
+        cap.check_jax_required(self, analysis)
 
         import jax
         import jax.numpy as jnp

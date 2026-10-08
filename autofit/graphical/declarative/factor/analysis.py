@@ -86,6 +86,27 @@ class AnalysisFactor(AbstractModelFactor):
             name=name,
         )
 
+    @property
+    def is_jax(self) -> bool:
+        """
+        Whether this factor's analysis is JAX (``Analysis.is_jax`` of the wrapped
+        analysis). Per-factor expectation propagation fits each factor with its own
+        analysis, so mixed numpy/JAX factors are allowed there; whole-graph fitting of a
+        ``FactorGraphModel`` requires every factor to agree.
+        """
+        return self.analysis.is_jax
+
+    @property
+    def _use_jax(self) -> bool:
+        return self.analysis.is_jax
+
+    @property
+    def gradient_mode(self) -> str:
+        """
+        The wrapped analysis's declared gradient mode.
+        """
+        return self.analysis.gradient_mode
+
     def tree_flatten(self):
         return (
             (self.prior_model,),

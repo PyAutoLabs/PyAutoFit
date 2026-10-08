@@ -190,6 +190,7 @@ def test__load_checkpoint_called_when_file_exists(tmp_path):
     )
     mock_analysis = SimpleNamespace(
         log_likelihood_function=lambda instance: 0.0,
+        is_jax=True,
     )
 
     search = af.NSS(n_live=4, num_mcmc_steps=1, num_delete=1, termination=-3.0)

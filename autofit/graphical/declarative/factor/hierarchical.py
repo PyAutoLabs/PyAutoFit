@@ -78,6 +78,14 @@ class HierarchicalFactor(Model):
         self._name = name or namer(self.__class__.__name__)
         self._factors = list()
         self.optimiser = optimiser
+
+        # The same switch `Analysis.__init__` honours, so a hierarchical factor in a
+        # graph agrees with its analysis factors when JAX is disabled for a smoke run.
+        import os
+
+        if os.environ.get("PYAUTO_DISABLE_JAX") == "1":
+            use_jax = False
+
         self._use_jax = use_jax
 
     @property
