@@ -647,9 +647,14 @@ class AbstractPaths(ABC):
         search = getattr(self, "search", None)
         search_capabilities = None
         if search is not None and getattr(type(search), "objective_target", None):
-            from autofit.non_linear.search.capabilities import capability_summary_from
+            from autofit.non_linear.search.capabilities import (
+                capability_summary_from,
+                run_summary_from,
+            )
 
-            search_capabilities = capability_summary_from(search)
+            search_capabilities = capability_summary_from(search) + run_summary_from(
+                search
+            )
 
         text_util.search_summary_to_file(
             samples=samples,

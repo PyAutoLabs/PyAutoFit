@@ -5,7 +5,6 @@ from typing import Optional, TYPE_CHECKING
 
 
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
-from autofit.non_linear.fitness import Fitness
 from autofit.non_linear.search.mle.abstract_mle import AbstractMLE
 from autofit.non_linear.initializer import AbstractInitializer
 from autofit.non_linear.samples.adapter import RawSamples
@@ -33,6 +32,9 @@ class Drawer(AbstractMLE):
     test_mode_budget = {}
     objective_target = cap.ObjectiveTarget(cap.ObjectiveQuantity.LOG_POSTERIOR, cap.CoordinateSpace.PHYSICAL)
     invalid_value = -float("inf")
+
+    # The draws are the result, not a starting point: nothing to plot.
+    _plots_start_point = False
 
     __identifier_fields__ = ("total_draws",)
 
@@ -111,76 +113,50 @@ class Drawer(AbstractMLE):
 
         self.logger.debug("Creating Drawer Search")
 
-    def _fit(self, model: AbstractPriorModel, analysis):
+    def run(self, ctx):
         """
-        Fit a model using Drawer and the Analysis class which contains the data and returns the log likelihood from
-        instances of the model, which the `NonLinearSearch` seeks to maximize.
+        Draw ``total_draws`` points from the initializer and return them (the ``run(ctx)``
+        hook; see ``docs/design/run_ctx.md``).
+
+        Every log likelihood evaluation happens in the initializer, through the fit's
+        objective (lazily jitted on a JAX analysis).
 
         Parameters
         ----------
-        model : ModelMapper
-            The model which generates instances for different points in parameter space.
-        analysis : Analysis
-            Contains the data and the log likelihood function which fits an instance of the model to the data, returning
-            the log likelihood the `NonLinearSearch` maximizes.
+        ctx
+            The fit's ``FitContext``.
 
         Returns
         -------
-        A result object comprising the Samples object that inclues the maximum log likelihood instance and full
-        chains used by the fit.
+        The internal state: the drawn parameter lists, their log posteriors and the run time.
         """
-
-        fitness = Fitness(
-            model=model,
-            analysis=analysis,
-            paths=self.paths,
-            fom_is_log_likelihood=False,
-            resample_figure_of_merit=-np.inf,
-            convert_to_chi_squared=False,
-            iterations_per_quick_update=self.iterations_per_quick_update,
-            background_quick_update=self.quick_update_background,
-            live_visual_update=self.live_visual_update,
-        )
-
-        total_draws = self.total_draws
-
         self.logger.info(
-            f"Performing DrawerSearch for a total of {total_draws} points."
+            f"Performing DrawerSearch for a total of {self.total_draws} points."
         )
 
-        (
-            unit_parameter_lists,
-            parameter_lists,
-            log_posterior_list,
-        ) = self.initializer.samples_from_model(
-            total_points=self.total_draws,
-            model=model,
-            fitness=fitness,
-            paths=self.paths,
-            n_cores=self.number_of_cores,
-        )
+        parameters, log_posteriors = ctx.start_points(self.total_draws)
 
         search_internal = {
-            "parameter_lists": parameter_lists,
-            "log_posterior_list": log_posterior_list,
+            "parameter_lists": parameters.tolist(),
+            "log_posterior_list": log_posteriors.tolist(),
             "time": self.timer.time if self.timer else None,
         }
 
-        self.paths.save_search_internal(
+        ctx.paths.save_search_internal(
             obj=search_internal,
         )
 
         self.logger.info("Drawer complete")
 
-        return search_internal, fitness
+        return search_internal
 
     def raw_samples_from(self, model, search_internal):
         """
         The Drawer's draws as raw samples: the parameter lists and log posteriors
-        ``_fit`` stores, each with weight 1. The stored dictionary (including the run
-        ``time`` recorded by ``_fit``) is the ``samples_info``.
+        ``run`` stores, each with weight 1. The stored dictionary (including the run
+        ``time`` recorded by ``run``) is the ``samples_info``.
 
-        The ``search_internal`` dictionary returned by `_fit` is used when passed, so a fit with `NullPaths`
+        The ``search_internal`` dictionary returned by `run` is used when passed, so a fit with `NullPaths`
         (which writes nothing to disk) can still build its samples; otherwise it is loaded from the output folder.
 
         Parameters
@@ -188,11 +164,18 @@ class Drawer(AbstractMLE):
         model
             Maps input vectors of unit parameter values to physical values and model instances via priors.
         search_internal
-            The dictionary of parameter lists, log posteriors and run time that `_fit` returns.
+            The dictionary of parameter lists, log posteriors and run time that `run` returns.
         """
         return RawSamples(
             parameters=search_internal["parameter_lists"],
             log_posterior=search_internal["log_posterior_list"],
-            info=search_internal,
+            info=self.info_from(search_internal),
             label="Drawer",
         )
+
+    def info_from(self, internal):
+        """
+        The stored dictionary itself (including the run ``time`` recorded by ``run``)
+        is the ``samples_info``.
+        """
+        return internal

@@ -7,7 +7,6 @@ from autofit import exc
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.search.mle.abstract_mle import AbstractMLE
 from autofit.non_linear.analysis import Analysis
-from autofit.non_linear.fitness import Fitness
 from autofit.non_linear.clipper import (
     AbstractClipper,
     ClipperNone,
@@ -244,17 +243,10 @@ class AbstractBFGS(AbstractMLE):
         # immediately rather than after the first chunk of iterations.
         bounds = self._bounds_from(model=model)
 
-        fitness = Fitness(
-            model=model,
+        fitness = self.make_fitness(
             analysis=analysis,
-            paths=self.paths,
-            fom_is_log_likelihood=False,
-            resample_figure_of_merit=-np.inf,
-            convert_to_chi_squared=True,
+            model=model,
             store_history=self.should_plot_start_point,
-            iterations_per_quick_update=self.iterations_per_quick_update,
-            background_quick_update=self.quick_update_background,
-            live_visual_update=self.live_visual_update,
         )
 
         try:
@@ -273,12 +265,10 @@ class AbstractBFGS(AbstractMLE):
                 unit_parameter_lists,
                 parameter_lists,
                 log_posterior_list,
-            ) = self.initializer.samples_from_model(
-                total_points=1,
+            ) = self.start_points(
                 model=model,
                 fitness=fitness,
-                paths=self.paths,
-                n_cores=self.number_of_cores,
+                n=1,
             )
 
             x0 = np.asarray(parameter_lists[0])
@@ -287,12 +277,6 @@ class AbstractBFGS(AbstractMLE):
 
             self.logger.info(
                f"Starting new {self.method} non-linear search (no previous samples found)."
-            )
-
-            self.plot_start_point(
-                parameter_vector=x0,
-                model=model,
-                analysis=analysis,
             )
 
         while total_iterations < self.maxiter:
@@ -320,8 +304,13 @@ class AbstractBFGS(AbstractMLE):
                 # diverge by branch would be a trap of its own.
                 if analysis.is_jax:
 
+                    # The exact gradient from the "value_and_grad" objective, one jitted
+                    # call per step: no finite differences (which cost n_params + 1
+                    # likelihood calls per gradient). The host-side wrapper books every
+                    # call as `call_wrap` does, so history and quick updates still fire.
                     search_internal = optimize.minimize(
-                        fun=fitness._jit,
+                        fun=fitness.call_wrap_value_and_grad,
+                        jac=True,
                         x0=x0,
                         method=self.method,
                         options=options,

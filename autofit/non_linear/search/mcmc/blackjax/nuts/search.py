@@ -292,33 +292,16 @@ class BlackJAXNUTS(AbstractMCMC):
         # log-density. `fit` already ran this gate; repeated for direct callers.
         cap.check_jax_required(self, analysis)
 
-        fitness = Fitness(
-            model=model,
-            analysis=analysis,
-            paths=self.paths,
-            fom_is_log_likelihood=False,  # log-posterior target for NUTS
-            resample_figure_of_merit=-jnp.inf,
-            iterations_per_quick_update=self.iterations_per_quick_update,
-            background_quick_update=self.quick_update_background,
-            live_visual_update=self.live_visual_update,
-        )
+        fitness = self.make_fitness(analysis=analysis, model=model)
 
         # Initial position(s): borrow the standard initializer machinery so
         # users can substitute their own (InitializerBall by default for
         # MCMC; InitializerParamStartPoints.from_result(...) to warm-start).
         # One starting point per chain.
-        unit_lists, parameter_lists, _ = self.initializer.samples_from_model(
-            total_points=self.num_chains,
+        unit_lists, parameter_lists, _ = self.start_points(
             model=model,
             fitness=fitness,
-            paths=self.paths,
-            n_cores=self.number_of_cores,
-        )
-
-        self.plot_start_point(
-            parameter_vector=parameter_lists[0],
-            model=model,
-            analysis=analysis,
+            n=self.num_chains,
         )
 
         n_dim = model.prior_count
@@ -326,14 +309,14 @@ class BlackJAXNUTS(AbstractMCMC):
         # (num_chains, n_dim)
         initial_positions = jnp.asarray(stack_initial_positions(parameter_lists))
 
-        # Build the JIT'd log-density target. ``fitness.call`` is the pure
-        # JAX-traceable path (it routes through model.instance_from_vector and
-        # analysis.log_likelihood_function with xp=jnp) — distinct from
-        # ``call_wrap``/``__call__``, which add Python-side history tracking
-        # and a ``float()`` conversion that would break NUTS gradients.
-        @jax.jit
-        def log_density(params):
-            return fitness.call(params)
+        # The JIT'd log-density target: the shared "scalar" objective, the
+        # lazily jitted ``fitness.call`` (the pure JAX-traceable path through
+        # model.instance_from_vector and analysis.log_likelihood_function with
+        # xp=jnp) — distinct from ``call_wrap``/``__call__``, which add
+        # Python-side history tracking and a ``float()`` conversion that would
+        # break NUTS gradients. blackjax builds its own ``value_and_grad`` of
+        # it; honouring ``gradient_mode`` here is a separate spike.
+        log_density = fitness.objective("scalar")
 
         # One-shot trace + compile so warmup timing is honest.
         _ = float(log_density(initial_positions[0]))

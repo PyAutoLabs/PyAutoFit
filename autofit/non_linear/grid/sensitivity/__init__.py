@@ -13,7 +13,11 @@ from autofit.non_linear.grid.grid_search import make_lists, Sequential
 from autofit.non_linear.grid.sensitivity.job import Job, MaskedJobResult
 from autofit.non_linear.grid.sensitivity.job import JobResult
 from autofit.non_linear.grid.sensitivity.result import SensitivityResult
-from autofit.non_linear.parallel import Process
+from autofit.non_linear.parallel import (
+    Process,
+    effective_number_of_cores,
+    jax_backend_initialized,
+)
 from autofit.text.formatter import write_table
 
 
@@ -147,7 +151,16 @@ class Sensitivity:
         ]
         physical_values = list(self._physical_values)
 
-        process_class = Process if self.number_of_cores > 1 else Sequential
+        # The one JAX fork rule (`autofit.non_linear.parallel.pool`). The jobs build
+        # their analyses after the fork, so the signal is whether this process has
+        # already initialised JAX, which is what makes forking it unsafe.
+        number_of_cores = effective_number_of_cores(
+            requested=self.number_of_cores,
+            is_jax=jax_backend_initialized(),
+            where="Sensitivity",
+        )
+
+        process_class = Process if number_of_cores > 1 else Sequential
 
         results = []
         jobs = []

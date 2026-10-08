@@ -115,3 +115,31 @@ test-mode bypass and the fail-fast gates have run.
   MultiStart last (its `_fit` is split internally first).
 - External subclasses that override `_fit` (the developer-tier `nss`, `ultranest` and
   `pyswarms` searches) keep working for at least one release after A5.
+
+## Revision 1 (phase A2, 2026-10-08): what the bridge shipped
+
+The signature `run(self, ctx) -> Any` and the member list above are unchanged. A2
+pins the following details the table left open; each is flagged for review in the A2 PR.
+
+- **`ctx.schedule`** takes the backend's total budget, which is a search setting the
+  context cannot know: `next_budget(done, total)` and `chunks(total)`.
+- **`ctx.start_points(n)`** returns `(parameters, figures_of_merit)` as `(n, n_dim)` and
+  `(n,)` arrays. A search with no starting point to plot (`Drawer`) sets the class
+  attribute `_plots_start_point = False`.
+- **`ctx.update(internal)`** is synchronous: the backend is paused while it runs, so the
+  internal state is read as it stands (no copy). The snapshot hand-off arrives with A3's
+  samples adapter, which converts the samples once.
+- **`ctx.resume`, `ctx.checkpointer`** are `None` until A3 fills them; **`ctx.rng`** is a
+  `SeedSequence` of the search's `seed` attribute, if any, until A4's search-level seed.
+- **`ctx.close(failed)`** is the cleanup the lifecycle rules require; on failure it closes
+  the pools the context built, shuts the quick-update threads down and releases the
+  compiled objectives.
+- **The bridge is `NonLinearSearch._fit`**: when a search defines `run`, the base `_fit`
+  builds the `Fitness` and the context (after the gates `start_resume_fit` runs) and calls
+  `run(ctx)`, so every caller of `_fit` (and the conformance suite's call counter) sees a
+  migrated search exactly as before.
+- **Search-side hooks** (not context members): `fitness_overrides(analysis)` lets a search
+  add `Fitness` arguments (`Nautilus`: `batched`, `batch_size`), and `samples_cls` names the
+  `Samples` class `raw_samples_from`'s result is converted into. `RawSamples` and
+  `samples_from_raw` live provisionally in `autofit/non_linear/search/fit_context.py` until
+  A3's `samples/adapter.py` replaces them.

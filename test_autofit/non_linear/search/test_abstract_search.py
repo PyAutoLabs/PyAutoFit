@@ -912,10 +912,29 @@ def test_settings_search_dict_for_filters_use_jax_vmap(caplog):
     settings_search = af.SettingsSearch(path_prefix="settings_search_test")
 
     assert "use_jax_vmap" in settings_search.search_dict
-    assert settings_search.search_dict_for(af.Nautilus)["use_jax_vmap"] is True
+    # The deprecated knob keeps its key (search_dict keeps its shape); its default is
+    # None, which a search reads as "batched when the analysis is JAX" and never warns.
+    assert settings_search.search_dict_for(af.Nautilus)["use_jax_vmap"] is None
     assert "use_jax_vmap" not in settings_search.search_dict_for(af.DynestyStatic)
 
     with caplog.at_level(logging.WARNING):
         af.DynestyStatic(**settings_search.search_dict_for(af.DynestyStatic))
 
     assert _unknown_kwarg_messages(caplog) == []
+
+
+def test_deprecated_jax_knobs_warn_only_when_passed():
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", FutureWarning)
+        af.SettingsSearch(path_prefix="settings_search_test")
+        af.Nautilus()
+        af.DynestyStatic()
+
+    with pytest.warns(FutureWarning, match="SettingsSearch\\(use_jax_vmap"):
+        af.SettingsSearch(path_prefix="settings_search_test", use_jax_vmap=True)
+    with pytest.warns(FutureWarning, match="Nautilus\\(use_jax_vmap"):
+        af.Nautilus(use_jax_vmap=False)
+    with pytest.warns(FutureWarning, match="DynestyStatic\\(use_jax_jit"):
+        af.DynestyStatic(use_jax_jit=True)
