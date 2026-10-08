@@ -242,6 +242,8 @@ def test_retention_precedence(search_internal_off):
     assert not af.DynestyStatic().retains_search_internal
     assert not af.Drawer().retains_search_internal
     assert af.Emcee().retains_search_internal
+    # Retained by declaration, not by mutating the configuration.
+    assert conf.instance["output"]["search_internal"] is False
 
 
 def test_output_search_internal_discards_the_resume_state(paths):
@@ -266,3 +268,42 @@ def test_output_search_internal_keeps_a_resume_state_that_is_the_archive(paths):
     search.output_search_internal({"params": [1.0]})
 
     assert DillCheckpointer().load(paths) == {"params": [1.0]}
+
+
+def _archived(search):
+    import zipfile
+
+    with zipfile.ZipFile(search.paths._zip_path) as archive:
+        return set(archive.namelist())
+
+
+def test_a_retained_archive_survives_with_search_internal_off(
+    search_internal_off, monkeypatch
+):
+    """
+    With ``output.search_internal: false`` a completed Emcee fit still keeps its HDF
+    archive (``retain_after_completion``), while a Drawer fit loses its dill, and
+    the Emcee fit leaves the configuration untouched for the Drawer fit after it.
+    """
+    import numpy as np
+
+    monkeypatch.setenv("PYAUTO_TEST_MODE", "1")
+    model = af.Model(af.ex.Gaussian)
+    analysis = af.ex.Analysis(data=np.full(10, 5.0), noise_map=np.ones(10))
+
+    emcee = af.Emcee(
+        name="retention_emcee",
+        unique_tag="checkpoint_retention",
+        auto_correlation_settings=af.AutoCorrelationsSettings(
+            check_for_convergence=False, check_size=5, required_length=2
+        ),
+    )
+    emcee.fit(model=model, analysis=analysis)
+
+    drawer = af.Drawer(
+        name="retention_drawer", unique_tag="checkpoint_retention", total_draws=5
+    )
+    drawer.fit(model=af.Model(af.ex.Gaussian), analysis=analysis)
+
+    assert "files/search_internal/search_internal.hdf" in _archived(emcee)
+    assert not any("search_internal/" in name for name in _archived(drawer))

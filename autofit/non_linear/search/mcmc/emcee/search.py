@@ -7,8 +7,6 @@ from typing import Dict, Optional, TYPE_CHECKING
 
 import numpy as np
 
-from autonerves import conf
-
 from autofit import exc
 from autofit.mapper.model_mapper import ModelMapper
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
@@ -137,8 +135,6 @@ class Emcee(AbstractMCMC):
             self.apply_test_mode()
 
         self.logger.debug("Creating Emcee Search")
-
-        conf.instance["output"]["search_internal"] = True
 
     def apply_test_mode(self):
         logger.warning(

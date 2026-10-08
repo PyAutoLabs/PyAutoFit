@@ -8,8 +8,6 @@ from typing import Optional, TYPE_CHECKING
 
 import numpy as np
 
-from autonerves import conf
-
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.checkpoint import PICKLE_FILENAME, PickleCheckpointer
 from autofit.non_linear.fitness import Fitness
@@ -265,8 +263,6 @@ class BlackJAXNUTS(AbstractMCMC):
             self.apply_test_mode()
 
         self.logger.debug("Creating BlackJAXNUTS Search")
-
-        conf.instance["output"]["search_internal"] = True
 
     def apply_test_mode(self):
         logger.warning(

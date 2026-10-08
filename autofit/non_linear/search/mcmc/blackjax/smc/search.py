@@ -9,8 +9,6 @@ from typing import List, Optional, Tuple, TYPE_CHECKING
 
 import numpy as np
 
-from autonerves import conf
-
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.checkpoint import PICKLE_FILENAME, PickleCheckpointer
 from autofit.non_linear.fitness import Fitness
@@ -318,8 +316,6 @@ class SMC(AbstractMCMC):
             self.apply_test_mode()
 
         self.logger.debug("Creating SMC Search")
-
-        conf.instance["output"]["search_internal"] = True
 
     def apply_test_mode(self):
         logger.warning(
