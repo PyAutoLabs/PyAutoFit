@@ -579,12 +579,11 @@ class AbstractDynesty(AbstractNest, ABC):
             unit_parameters,
             parameters,
             log_likelihood_list,
-        ) = self.initializer.samples_from_model(
-            total_points=self.number_live_points,
+        ) = self.start_points(
             model=model,
             fitness=fitness,
-            paths=self.paths,
-            n_cores=self._pools().number_of_cores,
+            n=self.number_live_points,
+            plot=False,
         )
 
         init_unit_parameters = np.zeros(

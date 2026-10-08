@@ -1705,6 +1705,61 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             plot_search=False,
         )
 
+    def start_points(
+        self,
+        model: AbstractPriorModel,
+        fitness: Fitness,
+        n: int,
+        plot: bool = True,
+        **initializer_kwargs,
+    ):
+        """
+        The search's ``n`` initial points, drawn by its initializer, with the start-point
+        plot made once, here, from the first of them.
+
+        The one place the searches draw start points: the initializer is evaluated through
+        ``fitness`` (so a JAX analysis runs its lazily jitted scalar objective) with the
+        fit's effective core count (the JAX fork rule of ``PoolFactory``).
+
+        Parameters
+        ----------
+        model
+            The model being fitted.
+        fitness
+            The fit's ``Fitness``; its analysis visualizes the start point.
+        n
+            The number of points.
+        plot
+            ``False`` skips the start-point plot, for searches whose initial points are
+            not a starting point (``Drawer`` draws its whole result this way, Dynesty its
+            initial live points).
+        initializer_kwargs
+            Passed to ``initializer.samples_from_model`` (e.g. ``test_mode_samples``).
+
+        Returns
+        -------
+        The initializer's ``(unit_parameter_lists, parameter_lists, figure_of_merit_list)``.
+        """
+        unit_parameter_lists, parameter_lists, figure_of_merit_list = (
+            self.initializer.samples_from_model(
+                total_points=n,
+                model=model,
+                fitness=fitness,
+                paths=self.paths,
+                n_cores=self._pools().number_of_cores,
+                **initializer_kwargs,
+            )
+        )
+
+        if plot:
+            self.plot_start_point(
+                parameter_vector=parameter_lists[0],
+                model=model,
+                analysis=fitness.analysis,
+            )
+
+        return unit_parameter_lists, parameter_lists, figure_of_merit_list
+
     def samples_from(self, model: AbstractPriorModel, search_internal=None) -> Samples:
         """
         Loads the samples of a non-linear search from its output files.

@@ -225,19 +225,11 @@ class Zeus(AbstractMCMC):
                 unit_parameter_lists,
                 parameter_lists,
                 log_posterior_list,
-            ) = self.initializer.samples_from_model(
-                total_points=search_internal.nwalkers,
+            ) = self.start_points(
                 model=model,
                 fitness=fitness,
+                n=search_internal.nwalkers,
                 test_mode_samples=False,
-                paths=self.paths,
-                n_cores=self._pools().number_of_cores,
-            )
-
-            self.plot_start_point(
-                parameter_vector=parameter_lists[0],
-                model=model,
-                analysis=analysis,
             )
 
             state = np.zeros(shape=(search_internal.nwalkers, model.prior_count))

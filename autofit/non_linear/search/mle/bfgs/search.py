@@ -266,12 +266,10 @@ class AbstractBFGS(AbstractMLE):
                 unit_parameter_lists,
                 parameter_lists,
                 log_posterior_list,
-            ) = self.initializer.samples_from_model(
-                total_points=1,
+            ) = self.start_points(
                 model=model,
                 fitness=fitness,
-                paths=self.paths,
-                n_cores=self._pools().number_of_cores,
+                n=1,
             )
 
             x0 = np.asarray(parameter_lists[0])
@@ -280,12 +278,6 @@ class AbstractBFGS(AbstractMLE):
 
             self.logger.info(
                f"Starting new {self.method} non-linear search (no previous samples found)."
-            )
-
-            self.plot_start_point(
-                parameter_vector=x0,
-                model=model,
-                analysis=analysis,
             )
 
         while total_iterations < self.maxiter:

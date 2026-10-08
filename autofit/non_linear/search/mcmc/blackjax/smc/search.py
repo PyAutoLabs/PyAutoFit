@@ -395,18 +395,10 @@ class SMC(AbstractMCMC):
                 "Pass initializer=result.start_point_from() alongside inverse_mass_matrix=result."
             )
 
-        _, parameter_lists, _ = self.initializer.samples_from_model(
-            total_points=n_start_points,
+        _, parameter_lists, _ = self.start_points(
             model=model,
             fitness=fitness,
-            paths=self.paths,
-            n_cores=self._pools().number_of_cores,
-        )
-
-        self.plot_start_point(
-            parameter_vector=parameter_lists[0],
-            model=model,
-            analysis=analysis,
+            n=n_start_points,
         )
 
         start_points = stack_initial_positions(parameter_lists)

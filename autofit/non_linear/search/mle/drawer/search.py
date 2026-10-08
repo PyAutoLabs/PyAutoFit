@@ -141,12 +141,11 @@ class Drawer(AbstractMLE):
             unit_parameter_lists,
             parameter_lists,
             log_posterior_list,
-        ) = self.initializer.samples_from_model(
-            total_points=self.total_draws,
+        ) = self.start_points(
             model=model,
             fitness=fitness,
-            paths=self.paths,
-            n_cores=self._pools().number_of_cores,
+            n=self.total_draws,
+            plot=False,
         )
 
         search_internal = {

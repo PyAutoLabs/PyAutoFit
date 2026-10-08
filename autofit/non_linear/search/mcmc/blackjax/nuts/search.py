@@ -299,18 +299,10 @@ class BlackJAXNUTS(AbstractMCMC):
         # users can substitute their own (InitializerBall by default for
         # MCMC; InitializerParamStartPoints.from_result(...) to warm-start).
         # One starting point per chain.
-        unit_lists, parameter_lists, _ = self.initializer.samples_from_model(
-            total_points=self.num_chains,
+        unit_lists, parameter_lists, _ = self.start_points(
             model=model,
             fitness=fitness,
-            paths=self.paths,
-            n_cores=self._pools().number_of_cores,
-        )
-
-        self.plot_start_point(
-            parameter_vector=parameter_lists[0],
-            model=model,
-            analysis=analysis,
+            n=self.num_chains,
         )
 
         n_dim = model.prior_count
