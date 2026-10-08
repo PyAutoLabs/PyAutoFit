@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import os
-import pickle
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
@@ -518,14 +517,12 @@ class BlackJAXNUTS(AbstractMCMC):
 
     @property
     def backend(self) -> dict:
-        """Load the pickled search-internal dict written by ``_fit``."""
-        if not Path(self.backend_filename).is_file():
+        """The search-internal dict archived by ``_fit`` (``search_internal.pickle``)."""
+        if not self.checkpointer.exists(self.paths):
             raise FileNotFoundError(
-                f"search_internal.pickle does not exist at "
-                f"{self.paths.search_internal_path}"
+                f"{PICKLE_FILENAME} does not exist at {self.paths.search_internal_path}"
             )
-        with open(self.backend_filename, "rb") as f:
-            return pickle.load(f)
+        return self.checkpointer.load(self.paths)
 
     def _test_mode_samples_info(self) -> dict:
         return {
@@ -609,9 +606,6 @@ class BlackJAXNUTS(AbstractMCMC):
             ),
             "time": self.timer.time if self.timer else None,
         }
-
-    def load_search_internal(self):
-        return self.backend
 
     def raw_samples_from(self, model, search_internal):
         """
