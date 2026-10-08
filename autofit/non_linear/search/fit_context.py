@@ -7,79 +7,24 @@ of ``_fit`` is driven through a ``FitContext`` by ``NonLinearSearch._fit``, the 
 a search that overrides ``_fit`` keeps working unchanged. ``Drawer`` and ``Nautilus`` are
 the first two searches on the bridge.
 
-Members filled by later phases are present with their A2 value:
+Members filled by later phases:
 
-- ``ctx.resume`` is ``None`` and ``ctx.checkpointer`` is ``None`` (phase A3 fills both;
-  until then a backend resumes from its own native checkpoint, as ``Nautilus`` does);
+- ``ctx.checkpointer`` is the search's archive strategy (``NonLinearSearch.checkpointer``)
+  and ``ctx.resume`` its resume state (``NonLinearSearch.resume_state``) when the
+  interrupted run's file exists, else ``None`` (phase A3, ``autofit.non_linear.checkpoint``);
+  ``ctx.resume`` is the ``Checkpointer`` handle, not the loaded state, because some
+  backends reopen their own native file (``Nautilus``);
 - ``ctx.rng`` is a ``numpy.random.SeedSequence`` from the search's ``seed`` attribute
   when it has one (phase A4 adds one search-level seed and feeds the initializer).
 
-``RawSamples`` and ``samples_from_raw`` are a provisional, minimal stand-in for phase
-A3's samples adapter (``autofit/non_linear/samples/adapter.py``), so a ``run(ctx)`` search
-has the right shape now; A3's adapter replaces them.
+``RawSamples`` and ``samples_from_raw`` are phase A3's samples adapter
+(``autofit/non_linear/samples/adapter.py``), re-exported here for ``run(ctx)`` searches.
 """
-from typing import Any, Iterator, List, NamedTuple, Optional
+from typing import Any, Iterator
 
 import numpy as np
 
-
-class RawSamples(NamedTuple):
-    """
-    A backend's samples, before conversion to ``Samples``: parameter vectors, their log
-    likelihoods **or** log posteriors, their weights and the ``samples_info`` entries.
-
-    Provisional: phase A3's ``samples/adapter.py`` owns the final type.
-    """
-
-    parameters: List[List[float]]
-    log_likelihood: Optional[List[float]] = None
-    log_posterior: Optional[List[float]] = None
-    weights: Optional[List[float]] = None
-    info: Optional[dict] = None
-
-
-def samples_from_raw(model, raw: RawSamples, samples_cls):
-    """
-    Convert ``raw`` into a ``samples_cls`` instance: the log prior of every vector, the log
-    likelihood from the log posterior when only that was given, and unit weights when none
-    were. Weights are never renormalised.
-
-    Provisional: phase A3's adapter replaces it.
-    """
-    from autofit.non_linear.samples.sample import Sample
-
-    parameter_lists = raw.parameters
-
-    log_prior_list = [
-        sum(model.log_prior_list_from_vector(vector=vector))
-        for vector in parameter_lists
-    ]
-
-    if raw.log_likelihood is not None:
-        log_likelihood_list = raw.log_likelihood
-    else:
-        log_likelihood_list = [
-            log_posterior - log_prior
-            for log_posterior, log_prior in zip(raw.log_posterior, log_prior_list)
-        ]
-
-    weight_list = (
-        raw.weights if raw.weights is not None else len(log_likelihood_list) * [1.0]
-    )
-
-    sample_list = Sample.from_lists(
-        model=model,
-        parameter_lists=parameter_lists,
-        log_likelihood_list=log_likelihood_list,
-        log_prior_list=log_prior_list,
-        weight_list=weight_list,
-    )
-
-    return samples_cls(
-        model=model,
-        sample_list=sample_list,
-        samples_info=raw.info,
-    )
+from autofit.non_linear.samples.adapter import RawSamples, samples_from_raw
 
 
 class UpdateSchedule:
@@ -136,8 +81,13 @@ class FitContext:
         self.test_mode_level = test_mode_level
         self.pool = pool
         self.rng = np.random.SeedSequence(getattr(search, "seed", None))
-        self.resume = None
-        self.checkpointer = None
+        self.checkpointer = search.checkpointer
+        resume_state = search.resume_state
+        self.resume = (
+            resume_state
+            if resume_state is not None and resume_state.exists(search.paths)
+            else None
+        )
         self.schedule = UpdateSchedule(search)
 
     def objective(self, kind: str):

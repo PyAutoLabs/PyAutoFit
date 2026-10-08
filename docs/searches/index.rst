@@ -220,94 +220,112 @@ Capabilities
 Objectives
 ----------
 
-What each search's objective returns, the coordinates its backend proposes points in (``unit_cube`` backends map through the prior transform; the likelihood always receives physical parameters), the value it returns for an invalid model, and the reduced budget ``PYAUTO_TEST_MODE=1`` applies.
+What each search's objective returns, the coordinates its backend proposes points in (``unit_cube`` backends map through the prior transform; the likelihood always receives physical parameters), the value it returns for an invalid model, where it archives its internal state when a fit completes, and the reduced budget ``PYAUTO_TEST_MODE=1`` applies.
 
 .. list-table::
    :header-rows: 1
-   :widths: 16 18 12 12 42
+   :widths: 14 16 11 11 16 32
 
    * - Search
      - Objective
      - Coordinates
      - Invalid value
+     - Archive
      - Test-mode budget
    * - :class:`~autofit.Emcee`
      - ``log_posterior``
      - ``physical``
      - ``-inf``
+     - ``native:search_internal.hdf``
      - ``nwalkers=20``, ``nsteps=10``
    * - :class:`~autofit.Zeus`
      - ``log_posterior``
      - ``physical``
      - ``-inf``
+     - ``dill``
      - ``nwalkers=20``, ``nsteps=10``
    * - :class:`~autofit.BlackJAXNUTS`
      - ``log_posterior``
      - ``physical``
      - ``-inf``
+     - ``pickle``
      - ``num_warmup=20``, ``num_samples=20``, ``num_chains=2``
    * - :class:`~autofit.SMC`
      - ``log_likelihood``
      - ``physical``
      - ``-1e+99``
+     - ``pickle``
      - ``num_particles=16``, ``num_mcmc_steps=2``, ``max_smc_steps=5``
    * - :class:`~autofit.DynestyStatic`
      - ``log_likelihood``
      - ``unit_cube``
      - ``-1e+99``
+     - ``dill``
      - ``maxcall=1``
    * - :class:`~autofit.DynestyDynamic`
      - ``log_likelihood``
      - ``unit_cube``
      - ``-1e+99``
+     - ``dill``
      - ``maxcall=1``
    * - :class:`~autofit.Nautilus`
      - ``log_likelihood``
      - ``unit_cube``
      - ``-1e+99``
+     - ``dill``
      - ``n_like_max=1``
    * - :class:`~autofit.NSS`
      - ``log_likelihood``
      - ``physical``
      - ``-1e+30``
+     - ``dill``
      - ``termination=-1.0``
    * - :class:`~autofit.Drawer`
      - ``log_posterior``
      - ``physical``
      - ``-inf``
+     - ``dill``
      - --
    * - :class:`~autofit.BFGS`
      - ``neg2_log_posterior``
      - ``physical``
      - ``inf``
+     - ``dill``
      - --
    * - :class:`~autofit.LBFGS`
      - ``neg2_log_posterior``
      - ``physical``
      - ``inf``
+     - ``dill``
      - --
    * - :class:`~autofit.MultiStartAdam`
      - ``neg2_log_posterior``
      - ``physical``
      - ``inf``
+     - ``dill``
      - ``convergence.window=1``, ``convergence.min_steps=1``
    * - :class:`~autofit.MultiStartADABelief`
      - ``neg2_log_posterior``
      - ``physical``
      - ``inf``
+     - ``dill``
      - ``convergence.window=1``, ``convergence.min_steps=1``
    * - :class:`~autofit.MultiStartLion`
      - ``neg2_log_posterior``
      - ``physical``
      - ``inf``
+     - ``dill``
      - ``convergence.window=1``, ``convergence.min_steps=1``
    * - :class:`~autofit.MultiStartProdigy`
      - ``neg2_log_posterior``
      - ``physical``
      - ``inf``
+     - ``dill``
      - ``convergence.window=1``, ``convergence.min_steps=1``
 
 The invalid value is what the backend actually sees, not yet normalised. For the ``neg2_log_posterior`` minimizers it is conditional: a NaN or infinite likelihood is replaced by ``-inf`` and then multiplied by -2 into ``inf`` (the value listed), while a model rejected by a ``FitException`` or a failed assertion returns ``-inf``.
+
+The archive is ``dill`` (``search_internal.dill``), ``pickle`` (``search_internal.pickle``, plain NumPy data) or ``native:<file>`` (a file the backend writes itself). Emcee, BlackJAXNUTS and SMC keep their archive after a fit completes whatever the ``output.search_internal`` config says, because their samples cannot be rebuilt without it.
 
 Column meanings
 ---------------

@@ -149,6 +149,7 @@ def _capabilities(
     test_mode_budget: Dict[str, Any],
     objective_target: Tuple[str, str],
     invalid_value: str,
+    checkpointer: str = "dill",
 ) -> Dict[str, Any]:
     quantity, space = objective_target
     values = dict(
@@ -167,6 +168,7 @@ def _capabilities(
         test_mode_budget=dict(test_mode_budget),
         objective_target={"quantity": quantity, "space": space},
         invalid_value=invalid_value,
+        checkpointer=checkpointer,
     )
     return {name: values[name] for name in CAPABILITY_ATTRIBUTES}
 
@@ -299,6 +301,7 @@ SEARCHES: Tuple[RegistryEntry, ...] = (
             test_mode_budget=_EMCEE_ZEUS_BUDGET,
             objective_target=("log_posterior", "physical"),
             invalid_value="-inf",
+            checkpointer="native:search_internal.hdf",
         ),
         example=f"{_WORKSPACE}/mcmc.py#Search: Emcee",
         integration_test=f"{_WORKSPACE_TEST}/Emcee.py",
@@ -351,6 +354,7 @@ SEARCHES: Tuple[RegistryEntry, ...] = (
             test_mode_budget={"num_warmup": 20, "num_samples": 20, "num_chains": 2},
             objective_target=("log_posterior", "physical"),
             invalid_value="-inf",
+            checkpointer="pickle",
         ),
         example=f"{_WORKSPACE}/mcmc.py#Search: BlackJAXNUTS",
         integration_test=f"{_WORKSPACE_TEST}/BlackJAXNUTS.py",
@@ -381,6 +385,7 @@ SEARCHES: Tuple[RegistryEntry, ...] = (
             },
             objective_target=("log_likelihood", "physical"),
             invalid_value="-1e+99",
+            checkpointer="pickle",
         ),
         example=None,
         integration_test=f"{_WORKSPACE_TEST}/SMC.py",

@@ -7,18 +7,20 @@ from typing import Dict, Optional, TYPE_CHECKING
 
 import numpy as np
 
-from autonerves import conf
-
 from autofit import exc
 from autofit.mapper.model_mapper import ModelMapper
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
+from autofit.non_linear.checkpoint import (
+    EMCEE_FILENAME,
+    NativeFileCheckpointer,
+    load_emcee_backend,
+)
 from autofit.non_linear.initializer import Initializer
 from autofit.non_linear.search.mcmc.abstract_mcmc import AbstractMCMC
 from autofit.non_linear.search.mcmc.auto_correlations import AutoCorrelationsSettings
 from autofit.non_linear.search.mcmc.auto_correlations import AutoCorrelations
 from autofit.non_linear.test_mode import is_test_mode
-from autofit.non_linear.samples.sample import Sample
-from autofit.non_linear.samples.mcmc import SamplesMCMC
+from autofit.non_linear.samples.adapter import ChainPosterior, RawSamples
 from autofit.non_linear.search import capabilities as cap
 
 if TYPE_CHECKING:
@@ -49,6 +51,12 @@ class Emcee(AbstractMCMC):
     test_mode_budget = {"nwalkers": 20, "nsteps": 10}
     objective_target = cap.ObjectiveTarget(cap.ObjectiveQuantity.LOG_POSTERIOR, cap.CoordinateSpace.PHYSICAL)
     invalid_value = -float("inf")
+    # emcee's own HDF backend is both the archive and the resume state; it is kept
+    # after completion because the samples cannot be rebuilt without it.
+    checkpointer = NativeFileCheckpointer(
+        EMCEE_FILENAME, loader=load_emcee_backend, retain_after_completion=True
+    )
+    resume_state = checkpointer
 
     __identifier_fields__ = ("nwalkers",)
 
@@ -126,8 +134,6 @@ class Emcee(AbstractMCMC):
             self.apply_test_mode()
 
         self.logger.debug("Creating Emcee Search")
-
-        conf.instance["output"]["search_internal"] = True
 
     def apply_test_mode(self):
         logger.warning(
@@ -252,20 +258,6 @@ class Emcee(AbstractMCMC):
 
         return search_internal, fitness
 
-    def output_search_internal(self, search_internal):
-        """
-        Output the sampler results to hard-disk in their internal format.
-
-        Emcee uses a backend to store and load results, therefore the outputting of the search internal to a
-        dill file is disabled.
-
-        Parameters
-        ----------
-        sampler
-            The nautilus sampler object containing the results of the model-fit.
-        """
-        pass
-
     def samples_info_from(self, search_internal=None, auto_correlations=None):
         search_internal = search_internal or self.backend
 
@@ -283,24 +275,23 @@ class Emcee(AbstractMCMC):
             "time": self.timer.time if self.timer else None,
         }
 
-    def samples_via_internal_from(self, model, search_internal=None):
+    def raw_samples_from(self, model, search_internal):
         """
-        Returns a `Samples` object from the emcee internal results.
+        The emcee chain after burn-in and thinning, as raw samples.
 
-        The samples contain all information on the parameter space sampling (e.g. the parameters,
-        log likelihoods, etc.).
-
-        The internal search results are converted from the native format used by the search to lists of values
-        (e.g. `parameter_lists`, `log_likelihood_list`).
+        The parameters and log posteriors come out of emcee under the *same*
+        ``discard`` / ``thin`` (PyAutoFit#1628), through ``ChainPosterior.thin``,
+        which falls back to the whole chain when burn-in removal leaves no draws; the log likelihood is the log
+        posterior minus the log prior (``samples_from_raw``), and every draw has
+        weight 1.
 
         Parameters
         ----------
         model
             Maps input vectors of unit parameter values to physical values and model instances via priors.
+        search_internal
+            The ``emcee.EnsembleSampler`` or its ``HDFBackend``.
         """
-
-        search_internal = search_internal or self.backend
-
         # Computed once per conversion and shared by the burn-in, `samples_info` and
         # `SamplesMCMC`; each computation integrates the whole chain twice.
         auto_correlations = self.auto_correlations_from(
@@ -315,55 +306,22 @@ class Emcee(AbstractMCMC):
             discard = int(3.0 * np.max(auto_correlations.times))
             thin = int(np.max(auto_correlations.times) / 2.0)
 
-        samples_after_burn_in = search_internal.get_chain(
-            discard=discard, thin=thin, flat=True
-        )
+        parameters, log_posterior = ChainPosterior.from_sampler(
+            search_internal, label="Emcee"
+        ).thin(discard=discard, thin=thin)
 
-        parameter_lists = samples_after_burn_in.tolist()
-
-        log_prior_list = model.log_prior_list_from(parameter_lists=parameter_lists)
-
-        # The log posteriors must be requested with the *same* `discard` and `thin`
-        # as the chain above, otherwise sample `i`'s parameters are paired with a
-        # different sample's log posterior (PyAutoFit#1628).
-        log_posterior_list = search_internal.get_log_prob(
-            discard=discard, thin=thin, flat=True
-        ).tolist()
-
-        if len(parameter_lists) != len(log_posterior_list):
-            raise exc.SamplesException(
-                "The number of Emcee parameter samples does not match the number of log "
-                "posterior values returned by the sampler: "
-                f"{len(parameter_lists)} parameter samples versus "
-                f"{len(log_posterior_list)} log posterior values. "
-                "The parameters and log posteriors are therefore not in correspondence "
-                "and the samples cannot be built."
-            )
-
-        log_likelihood_list = [
-            log_posterior - log_prior
-            for log_posterior, log_prior in zip(log_posterior_list, log_prior_list)
-        ]
-
-        weight_list = len(log_likelihood_list) * [1.0]
-
-        sample_list = Sample.from_lists(
-            model=model,
-            parameter_lists=parameter_lists,
-            log_likelihood_list=log_likelihood_list,
-            log_prior_list=log_prior_list,
-            weight_list=weight_list,
-        )
-
-        return SamplesMCMC(
-            model=model,
-            sample_list=sample_list,
-            samples_info=self.samples_info_from(
+        return RawSamples(
+            parameters=parameters,
+            log_posterior=log_posterior,
+            info=self.samples_info_from(
                 search_internal=search_internal,
                 auto_correlations=auto_correlations,
             ),
-            auto_correlation_settings=self.auto_correlation_settings,
-            auto_correlations=auto_correlations,
+            samples_kwargs=dict(
+                auto_correlation_settings=self.auto_correlation_settings,
+                auto_correlations=auto_correlations,
+            ),
+            label="Emcee",
         )
 
     def auto_correlations_from(self, search_internal=None):
@@ -390,7 +348,7 @@ class Emcee(AbstractMCMC):
 
     @property
     def backend_filename(self):
-        return self.paths.search_internal_path / "search_internal.hdf"
+        return self.paths.search_internal_path / EMCEE_FILENAME
 
     @property
     def backend(self) -> "emcee.backends.HDFBackend":

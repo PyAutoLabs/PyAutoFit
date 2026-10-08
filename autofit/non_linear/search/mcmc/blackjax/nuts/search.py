@@ -2,15 +2,13 @@ from __future__ import annotations
 
 import logging
 import os
-import pickle
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
 import numpy as np
 
-from autonerves import conf
-
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
+from autofit.non_linear.checkpoint import PICKLE_FILENAME, PickleCheckpointer
 from autofit.non_linear.fitness import Fitness
 from autofit.non_linear.initializer import Initializer
 from autofit.non_linear.search.mcmc.abstract_mcmc import AbstractMCMC
@@ -25,8 +23,7 @@ from autofit.non_linear.search.mcmc.blackjax.chains import (
     stack_initial_positions,
 )
 from autofit.non_linear.test_mode import is_test_mode
-from autofit.non_linear.samples.mcmc import SamplesMCMC
-from autofit.non_linear.samples.sample import Sample
+from autofit.non_linear.samples.adapter import ChainPosterior, RawSamples
 from autofit.non_linear.search import capabilities as cap
 
 if TYPE_CHECKING:
@@ -53,6 +50,10 @@ class BlackJAXNUTS(AbstractMCMC):
     test_mode_budget = {"num_warmup": 20, "num_samples": 20, "num_chains": 2}
     objective_target = cap.ObjectiveTarget(cap.ObjectiveQuantity.LOG_POSTERIOR, cap.CoordinateSpace.PHYSICAL)
     invalid_value = -float("inf")
+    # The chain dict is plain NumPy, pickled (atomically) after every chunk and kept
+    # after completion: the samples cannot be rebuilt without it. Not a resume state:
+    # every ``_fit`` starts afresh (``resumable = False``).
+    checkpointer = PickleCheckpointer()
 
     __identifier_fields__ = (
         "num_warmup",
@@ -261,8 +262,6 @@ class BlackJAXNUTS(AbstractMCMC):
             self.apply_test_mode()
 
         self.logger.debug("Creating BlackJAXNUTS Search")
-
-        conf.instance["output"]["search_internal"] = True
 
     def apply_test_mode(self):
         logger.warning(
@@ -497,38 +496,16 @@ class BlackJAXNUTS(AbstractMCMC):
 
     @property
     def backend_filename(self):
-        return self.paths.search_internal_path / "search_internal.pickle"
+        return self.paths.search_internal_path / PICKLE_FILENAME
 
     @property
     def backend(self) -> dict:
-        """Load the pickled search-internal dict written by ``_fit``."""
-        if not Path(self.backend_filename).is_file():
+        """The search-internal dict archived by ``_fit`` (``search_internal.pickle``)."""
+        if not self.checkpointer.exists(self.paths):
             raise FileNotFoundError(
-                f"search_internal.pickle does not exist at "
-                f"{self.paths.search_internal_path}"
+                f"{PICKLE_FILENAME} does not exist at {self.paths.search_internal_path}"
             )
-        with open(self.backend_filename, "rb") as f:
-            return pickle.load(f)
-
-    def output_search_internal(self, search_internal):
-        """
-        Pickle the search-internal dict.
-
-        BlackJAX has no native on-disk format (cf. emcee's HDFBackend), so we
-        round-trip the chain + diagnostics via pickle. We bypass
-        ``self.paths.save_search_internal`` because the autofit dill path
-        chokes on a few numpy/jax-backed members; a direct pickle of
-        already-numpy data is robust.
-
-        ``NullPaths`` (no ``name``/``path_prefix``) sets
-        ``search_internal_path`` to ``None`` to suppress disk output —
-        skip silently in that case.
-        """
-        if self.paths.search_internal_path is None:
-            return
-        os.makedirs(self.paths.search_internal_path, exist_ok=True)
-        with open(self.backend_filename, "wb") as f:
-            pickle.dump(search_internal, f)
+        return self.checkpointer.load(self.paths)
 
     def _test_mode_samples_info(self) -> dict:
         return {
@@ -613,48 +590,32 @@ class BlackJAXNUTS(AbstractMCMC):
             "time": self.timer.time if self.timer else None,
         }
 
-    def samples_via_internal_from(self, model, search_internal=None):
+    def raw_samples_from(self, model, search_internal):
         """
-        Convert the BlackJAX chain pickled under ``search_internal/`` into a
-        standard ``SamplesMCMC``. NUTS samples are unweighted draws from the
-        posterior, so weights are 1.0.
+        The BlackJAX chains pickled under ``search_internal/`` as raw samples. NUTS
+        samples are unweighted draws from the posterior, so every weight is 1.
         """
-        search_internal = search_internal if search_internal is not None else self.backend
-
-        positions = search_internal["positions"]  # (n_samples, n_chains, n_dim)
-        log_likelihood_array = search_internal["log_likelihood_history"]  # (n_samples, n_chains)
-
         # Chain-major flatten: all of chain 0's samples (in draw order), then
-        # chain 1's, etc. -- matches `total_walkers = num_chains` below.
-        n_samples, n_chains, n_dim = positions.shape
-        positions_chain_major = np.moveaxis(positions, 0, 1).reshape(
-            n_chains * n_samples, n_dim
-        )
-        log_likelihood_chain_major = np.moveaxis(log_likelihood_array, 0, 1).reshape(
-            n_chains * n_samples
-        )
+        # chain 1's, etc. -- matches `total_walkers = num_chains` below. NUTS keeps
+        # every post-warmup draw (no burn-in removal or thinning).
+        parameters, log_likelihood = ChainPosterior.from_arrays(
+            chain=search_internal["positions"],  # (n_samples, n_chains, n_dim)
+            log_prob=search_internal["log_likelihood_history"],  # (n_samples, n_chains)
+            chain_major=True,
+            label="BlackJAXNUTS",
+        ).thin(discard=0, thin=1)
 
-        parameter_lists = positions_chain_major.tolist()
-        log_likelihood_list = [float(x) for x in log_likelihood_chain_major]
-        log_prior_list = model.log_prior_list_from(parameter_lists=parameter_lists)
-        weight_list = [1.0] * len(parameter_lists)
-
-        sample_list = Sample.from_lists(
-            model=model,
-            parameter_lists=parameter_lists,
-            log_likelihood_list=log_likelihood_list,
-            log_prior_list=log_prior_list,
-            weight_list=weight_list,
-        )
-
-        return SamplesMCMC(
-            model=model,
-            sample_list=sample_list,
-            samples_info=self.samples_info_from(search_internal=search_internal),
-            auto_correlation_settings=self.auto_correlation_settings,
-            auto_correlations=self.auto_correlations_from(
-                search_internal=search_internal
+        return RawSamples(
+            parameters=parameters,
+            log_likelihood=[float(x) for x in log_likelihood],
+            info=self.samples_info_from(search_internal=search_internal),
+            samples_kwargs=dict(
+                auto_correlation_settings=self.auto_correlation_settings,
+                auto_correlations=self.auto_correlations_from(
+                    search_internal=search_internal
+                ),
             ),
+            label="BlackJAXNUTS",
         )
 
     def auto_correlations_from(self, search_internal=None):

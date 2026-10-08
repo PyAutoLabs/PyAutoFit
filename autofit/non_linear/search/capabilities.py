@@ -29,6 +29,9 @@ Attribute                 Meaning
 ``test_mode_budget``      The reduced budget ``PYAUTO_TEST_MODE=1`` applies.
 ``objective_target``      What the backend's objective returns and in which coordinates.
 ``invalid_value``         The sentinel the objective returns for an invalid model.
+``checkpointer``          Where the search archives its internal state when a fit
+                          completes (``autofit.non_linear.checkpoint``): ``dill``,
+                          ``pickle`` or ``native:<filename>``.
 ========================  ==============================================================
 
 ``invalid_value`` records what the backend actually sees and is not yet normalised. For
@@ -172,6 +175,7 @@ CAPABILITY_ATTRIBUTES = (
     "test_mode_budget",
     "objective_target",
     "invalid_value",
+    "checkpointer",
 )
 """
 The names of the static capability attributes, in manifest order.
@@ -196,6 +200,10 @@ def capability_value(name: str, value: Any) -> Any:
         return value.to_dict() if value is not None else None
     if name == "invalid_value":
         return invalid_value_to_str(value)
+    if name == "checkpointer":
+        from autofit.non_linear.checkpoint import checkpointer_kind
+
+        return checkpointer_kind(value)
     if name == "citation_keys":
         return list(value)
     if name == "test_mode_budget":

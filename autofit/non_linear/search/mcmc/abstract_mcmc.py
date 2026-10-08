@@ -7,11 +7,14 @@ from autofit.non_linear.search.abstract_search import NonLinearSearch
 from autofit.non_linear.initializer import Initializer, InitializerBall
 from autofit.non_linear.search.mcmc.auto_correlations import AutoCorrelationsSettings
 from autofit.non_linear.plot import corner_cornerpy
+from autofit.non_linear.samples.mcmc import SamplesMCMC
 
 if TYPE_CHECKING:
     from autofit.database.sqlalchemy_ import sa
 
 class AbstractMCMC(NonLinearSearch):
+
+    samples_cls = SamplesMCMC
 
     def __init__(
             self,

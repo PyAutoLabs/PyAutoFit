@@ -7,7 +7,7 @@ from typing import Optional, TYPE_CHECKING
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.search.mle.abstract_mle import AbstractMLE
 from autofit.non_linear.initializer import AbstractInitializer
-from autofit.non_linear.samples import Samples, Sample
+from autofit.non_linear.samples.adapter import RawSamples
 from autofit.non_linear.search import capabilities as cap
 
 if TYPE_CHECKING:
@@ -150,18 +150,32 @@ class Drawer(AbstractMLE):
 
         return search_internal
 
-    def raw_samples_from(self, model, internal):
+    def raw_samples_from(self, model, search_internal):
         """
-        The drawn points as ``RawSamples``: log posteriors, unit weights, and the internal
-        dictionary itself as ``samples_info``.
-        """
-        from autofit.non_linear.search.fit_context import RawSamples
+        The Drawer's draws as raw samples: the parameter lists and log posteriors
+        ``run`` stores, each with weight 1. The stored dictionary (including the run
+        ``time`` recorded by ``run``) is the ``samples_info``.
 
+        The ``search_internal`` dictionary returned by `run` is used when passed, so a fit with `NullPaths`
+        (which writes nothing to disk) can still build its samples; otherwise it is loaded from the output folder.
+
+        Parameters
+        ----------
+        model
+            Maps input vectors of unit parameter values to physical values and model instances via priors.
+        search_internal
+            The dictionary of parameter lists, log posteriors and run time that `run` returns.
+        """
         return RawSamples(
-            parameters=internal["parameter_lists"],
-            log_posterior=internal["log_posterior_list"],
-            info=self.info_from(internal),
+            parameters=search_internal["parameter_lists"],
+            log_posterior=search_internal["log_posterior_list"],
+            info=self.info_from(search_internal),
+            label="Drawer",
         )
 
     def info_from(self, internal):
+        """
+        The stored dictionary itself (including the run ``time`` recorded by ``run``)
+        is the ``samples_info``.
+        """
         return internal

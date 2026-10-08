@@ -246,26 +246,40 @@ def searches_index_rst(manifest: dict) -> str:
         "What each search's objective returns, the coordinates its backend proposes "
         "points in (``unit_cube`` backends map through the prior transform; the "
         "likelihood always receives physical parameters), the value it returns for an "
-        "invalid model, and the reduced budget ``PYAUTO_TEST_MODE=1`` applies.\n\n",
+        "invalid model, where it archives its internal state when a fit completes, "
+        "and the reduced budget ``PYAUTO_TEST_MODE=1`` applies.\n\n",
     ]
-    header = ["Search", "Objective", "Coordinates", "Invalid value", "Test-mode budget"]
+    header = [
+        "Search",
+        "Objective",
+        "Coordinates",
+        "Invalid value",
+        "Archive",
+        "Test-mode budget",
+    ]
     rows = [
         [
             _link(search),
             f"``{search['capabilities']['objective_target']['quantity']}``",
             f"``{search['capabilities']['objective_target']['space']}``",
             f"``{search['capabilities']['invalid_value']}``",
+            f"``{search['capabilities']['checkpointer']}``",
             _budget(search["capabilities"]["test_mode_budget"]),
         ]
         for search in manifest["searches"]
     ]
-    lines += _list_table(header, rows, "16 18 12 12 42")
+    lines += _list_table(header, rows, "14 16 11 11 16 32")
     lines += [
         "The invalid value is what the backend actually sees, not yet normalised. For "
         "the ``neg2_log_posterior`` minimizers it is conditional: a NaN or infinite "
         "likelihood is replaced by ``-inf`` and then multiplied by -2 into ``inf`` "
         "(the value listed), while a model rejected by a ``FitException`` or a failed "
         "assertion returns ``-inf``.\n\n",
+        "The archive is ``dill`` (``search_internal.dill``), ``pickle`` "
+        "(``search_internal.pickle``, plain NumPy data) or ``native:<file>`` (a file "
+        "the backend writes itself). Emcee, BlackJAXNUTS and SMC keep their archive "
+        "after a fit completes whatever the ``output.search_internal`` config says, "
+        "because their samples cannot be rebuilt without it.\n\n",
     ]
     lines += [
         "Column meanings\n",

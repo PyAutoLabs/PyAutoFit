@@ -9,6 +9,8 @@ class NullPaths(AbstractPaths):
     Null version of paths object for avoiding writing of files to disk
     """
 
+    stores_search_internal = False
+
     @property
     def samples(self):
         return None

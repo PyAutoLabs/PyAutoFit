@@ -3,15 +3,13 @@ from __future__ import annotations
 import logging
 import math
 import os
-import pickle
 from pathlib import Path
 from typing import List, Optional, Tuple, TYPE_CHECKING
 
 import numpy as np
 
-from autonerves import conf
-
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
+from autofit.non_linear.checkpoint import PICKLE_FILENAME, PickleCheckpointer
 from autofit.non_linear.objective import jax_objective
 from autofit.non_linear.initializer import Initializer, InitializerPrior
 from autofit.non_linear.search.mcmc.abstract_mcmc import AbstractMCMC
@@ -26,7 +24,7 @@ from autofit.non_linear.search.mcmc.blackjax.chains import (
 )
 from autofit.non_linear.search.mcmc.blackjax.smc.samples import SamplesSMC
 from autofit.non_linear.test_mode import is_test_mode
-from autofit.non_linear.samples.sample import Sample
+from autofit.non_linear.samples.adapter import RawSamples
 from autofit.non_linear.search import capabilities as cap
 
 if TYPE_CHECKING:
@@ -52,6 +50,8 @@ VALID_KERNELS = ("mala", "hmc")
 
 
 class SMC(AbstractMCMC):
+    samples_cls = SamplesSMC
+
     # Static capabilities (see ``autofit.non_linear.search.capabilities``); mirrored
     # by ``search/registry.py``. Never identifier fields.
     jax_use = cap.JaxUse.REQUIRED
@@ -69,6 +69,10 @@ class SMC(AbstractMCMC):
     test_mode_budget = {"num_particles": 16, "num_mcmc_steps": 2, "max_smc_steps": 5}
     objective_target = cap.ObjectiveTarget(cap.ObjectiveQuantity.LOG_LIKELIHOOD, cap.CoordinateSpace.PHYSICAL)
     invalid_value = -1.0e99
+    # The chain dict is plain NumPy, pickled (atomically) after every chunk and kept
+    # after completion: the samples cannot be rebuilt without it. Not a resume state:
+    # every ``_fit`` starts afresh (``resumable = False``).
+    checkpointer = PickleCheckpointer()
 
     __identifier_fields__ = (
         "num_particles",
@@ -311,8 +315,6 @@ class SMC(AbstractMCMC):
             self.apply_test_mode()
 
         self.logger.debug("Creating SMC Search")
-
-        conf.instance["output"]["search_internal"] = True
 
     def apply_test_mode(self):
         logger.warning(
@@ -661,35 +663,16 @@ class SMC(AbstractMCMC):
 
     @property
     def backend_filename(self):
-        return self.paths.search_internal_path / "search_internal.pickle"
+        return self.paths.search_internal_path / PICKLE_FILENAME
 
     @property
     def backend(self) -> dict:
-        """Load the pickled search-internal dict written by ``_fit``."""
-        if not Path(self.backend_filename).is_file():
+        """The search-internal dict archived by ``_fit`` (``search_internal.pickle``)."""
+        if not self.checkpointer.exists(self.paths):
             raise FileNotFoundError(
-                f"search_internal.pickle does not exist at {self.paths.search_internal_path}"
+                f"{PICKLE_FILENAME} does not exist at {self.paths.search_internal_path}"
             )
-        with open(self.backend_filename, "rb") as f:
-            return pickle.load(f)
-
-    def output_search_internal(self, search_internal):
-        """
-        Pickle the search-internal dict.
-
-        BlackJAX has no native on-disk format (cf. emcee's HDFBackend), so we round-trip the particle cloud +
-        tempering diagnostics via pickle, bypassing ``self.paths.save_search_internal`` for the same reason
-        `BlackJAXNUTS` does: the autofit dill path chokes on a few numpy/jax-backed members, and a direct pickle
-        of already-numpy data is robust.
-
-        ``NullPaths`` (no ``name``/``path_prefix``) sets ``search_internal_path`` to ``None`` to suppress disk
-        output -- skip silently in that case.
-        """
-        if self.paths.search_internal_path is None:
-            return
-        os.makedirs(self.paths.search_internal_path, exist_ok=True)
-        with open(self.backend_filename, "wb") as f:
-            pickle.dump(search_internal, f)
+        return self.checkpointer.load(self.paths)
 
     def _test_mode_samples_info(self) -> dict:
         return {
@@ -746,23 +729,19 @@ class SMC(AbstractMCMC):
             "time": self.timer.time if self.timer else None,
         }
 
-    def samples_via_internal_from(self, model, search_internal=None):
+    def raw_samples_from(self, model, search_internal):
         """
-        Convert the particle cloud pickled under ``search_internal/`` into a `SamplesSMC`.
+        The particle cloud pickled under ``search_internal/`` as raw samples.
 
         SMC particles are **weighted** samples: each carries the normalised importance weight blackjax
         assigns it at the current temperature, so the weights (not a uniform 1.0) are what the PDF, medians
-        and errors are computed from.
+        and errors are computed from. They are normalised here, by the search, as they always were; the
+        samples adapter never renormalises.
         """
-        search_internal = (
-            search_internal if search_internal is not None else self.backend
-        )
-
         parameter_lists = np.asarray(search_internal["particles"]).tolist()
         log_likelihood_list = [
             float(x) for x in np.asarray(search_internal["log_likelihood_list"])
         ]
-        log_prior_list = model.log_prior_list_from(parameter_lists=parameter_lists)
 
         weights = np.asarray(search_internal["weights"], dtype=float)
         weight_sum = weights.sum()
@@ -771,18 +750,12 @@ class SMC(AbstractMCMC):
         else:
             weights = weights / weight_sum
 
-        sample_list = Sample.from_lists(
-            model=model,
-            parameter_lists=parameter_lists,
-            log_likelihood_list=log_likelihood_list,
-            log_prior_list=log_prior_list,
-            weight_list=weights.tolist(),
-        )
-
-        return SamplesSMC(
-            model=model,
-            sample_list=sample_list,
-            samples_info=self.samples_info_from(search_internal=search_internal),
+        return RawSamples(
+            parameters=parameter_lists,
+            log_likelihood=log_likelihood_list,
+            weights=weights.tolist(),
+            info=self.samples_info_from(search_internal=search_internal),
+            label="SMC",
         )
 
 

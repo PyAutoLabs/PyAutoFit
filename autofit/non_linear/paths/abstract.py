@@ -104,6 +104,13 @@ def _replace_zip_member(zip_path, arcname: str, file_path):
 
 
 class AbstractPaths(ABC):
+    stores_search_internal = True
+    """
+    Whether the search's internal state (``autofit.non_linear.checkpoint``) is
+    stored on disk under ``search_internal/``. ``NullPaths`` (no output) and
+    ``DatabasePaths`` (results live in the database) store none.
+    """
+
     def __init__(
         self,
         name: Optional[str] = None,

@@ -14,8 +14,7 @@ from autofit import exc
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.paths.null import NullPaths
 from autofit.non_linear.search.nest.abstract_nest import AbstractNest
-from autofit.non_linear.samples.sample import Sample
-from autofit.non_linear.samples.nest import SamplesNest
+from autofit.non_linear.samples.adapter import RawSamples
 from autofit.non_linear.test_mode import is_test_mode
 from autofit.non_linear.search import capabilities as cap
 
@@ -54,6 +53,12 @@ def _fork_pool_cls():
             return self
 
     return ForkPool
+
+
+DYNESTY_FILENAME = "savestate.save"
+"""
+dynesty's checkpoint file, the search's resume state.
+"""
 
 
 def prior_transform(cube, model):
@@ -358,51 +363,49 @@ class AbstractDynesty(AbstractNest, ABC):
             "number_live_points": self.number_live_points,
         }
 
-    def samples_via_internal_from(self, model, search_internal=None):
+    def load_search_internal(self):
         """
-        Returns a `Samples` object from the dynesty internal results.
+        The archive (``search_internal.dill``, written when the fit completed) or,
+        for a run that has not completed, the sampler restored from its resume state
+        (``savestate.save``).
+        """
+        try:
+            return super().load_search_internal()
+        except FileNotFoundError:
+            return self.search_internal
 
-        The samples contain all information on the parameter space sampling (e.g. the parameters,
-        log likelihoods, etc.).
-
-        The internal search results are converted from the native format used by the search to lists of values
-        (e.g. `parameter_lists`, `log_likelihood_list`).
+    def raw_samples_from(self, model, search_internal):
+        """
+        The dynesty run's samples, log likelihoods and nested-sampling weights
+        (``exp(logwt - logz[-1])``) as raw samples.
 
         Parameters
         ----------
         model
             Maps input vectors of unit parameter values to physical values and model instances via priors.
+        search_internal
+            The dynesty sampler.
         """
-        search_internal = search_internal or self.search_internal
-
-        parameter_lists = search_internal.results.samples.tolist()
-        log_prior_list = model.log_prior_list_from(parameter_lists=parameter_lists)
-        log_likelihood_list = list(search_internal.results.logl)
-
-        weight_list = list(
-            np.exp(
-                np.asarray(search_internal.results.logwt)
-                - search_internal.results.logz[-1]
-            )
-        )
-
-        sample_list = Sample.from_lists(
-            model=model,
-            parameter_lists=parameter_lists,
-            log_likelihood_list=log_likelihood_list,
-            log_prior_list=log_prior_list,
-            weight_list=weight_list,
-        )
-
-        return SamplesNest(
-            model=model,
-            sample_list=sample_list,
-            samples_info=self.samples_info_from(search_internal=search_internal),
+        return RawSamples(
+            parameters=search_internal.results.samples.tolist(),
+            log_likelihood=list(search_internal.results.logl),
+            weights=list(
+                np.exp(
+                    np.asarray(search_internal.results.logwt)
+                    - search_internal.results.logz[-1]
+                )
+            ),
+            info=self.samples_info_from(search_internal=search_internal),
+            label="Dynesty",
         )
 
     @property
     def search_internal(self):
-        raise NotImplementedError
+        """
+        The sampler restored from the resume state (``savestate.save``) of a run that
+        has not completed.
+        """
+        return self.resume_state.load(self.paths)
 
     def iterations_from(
         self, search_internal: "Union[NestedSampler, DynamicNestedSampler]"
@@ -547,7 +550,7 @@ class AbstractDynesty(AbstractNest, ABC):
         If autofit is not outputting results to hard-disk (e.g. paths is `NullPaths`), this function is bypassed.
         """
         try:
-            return str(self.paths.search_internal_path / "savestate.save")
+            return str(self.paths.search_internal_path / DYNESTY_FILENAME)
         except TypeError:
             pass
 
@@ -618,17 +621,6 @@ class AbstractDynesty(AbstractNest, ABC):
         queue_size: Optional[int],
     ):
         raise NotImplementedError()
-
-    def output_search_internal(self, search_internal):
-
-        self.paths.save_search_internal(
-            obj=search_internal,
-        )
-
-        try:
-            os.remove(self.checkpoint_file)
-        except (TypeError, FileNotFoundError):
-            pass
 
     def check_pool(self, uses_pool: bool, pool):
         if (uses_pool and pool is None) or (not uses_pool and pool is not None):

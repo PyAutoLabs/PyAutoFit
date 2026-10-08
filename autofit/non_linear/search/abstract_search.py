@@ -50,6 +50,7 @@ from autofit.non_linear.paths.directory import DirectoryPaths
 from autofit.non_linear.paths.sub_directory_paths import SubDirectoryPaths
 from autofit.non_linear.samples.samples import Samples
 from autofit.non_linear.samples.summary import SamplesSummary
+from autofit.non_linear.checkpoint import Checkpointer, DillCheckpointer
 from autofit.non_linear.timer import Timer
 from autofit.non_linear.analysis import Analysis
 from autofit.non_linear.paths.null import NullPaths
@@ -1194,7 +1195,7 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC, metaclass=_SearchMeta):
         search_internal
             The internal search.
         """
-        if not conf.instance["output"]["search_internal"]:
+        if not self.retains_search_internal:
             self.logger.info("Removing search internal folder.")
             self.paths.remove_search_internal()
         elif search_internal is not None:
@@ -1439,9 +1440,6 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC, metaclass=_SearchMeta):
     # result through the initializer, so it has no starting point to plot.
     _plots_start_point = True
 
-    # The `Samples` class `samples_from_raw` builds for a `run(ctx)` search.
-    samples_cls = Samples
-
     @abstractmethod
     def _fit(self, model: AbstractPriorModel, analysis: Analysis):
         """
@@ -1493,18 +1491,13 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC, metaclass=_SearchMeta):
 
     run._is_bridge_default = True
 
-    def raw_samples_from(self, model: AbstractPriorModel, internal):
+    def info_from(self, internal) -> dict:
         """
-        Map a ``run(ctx)`` search's internal state onto a ``RawSamples``
-        (``autofit.non_linear.search.fit_context``).
+        The ``samples_info`` entries of a ``run(ctx)`` search's internal state, the
+        ``info`` its ``raw_samples_from`` puts on the ``RawSamples``
+        (``autofit.non_linear.samples.adapter``).
         """
-        raise NotImplementedError
-
-    def info_from(self, internal) -> Optional[dict]:
-        """
-        The ``samples_info`` entries of a ``run(ctx)`` search's internal state.
-        """
-        return None
+        return {}
 
     def fitness_overrides(self, analysis: Analysis) -> dict:
         """
@@ -1589,10 +1582,54 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC, metaclass=_SearchMeta):
         """
         pass
 
-    def output_search_internal(self, search_internal):
-        self.paths.save_search_internal(
-            obj=search_internal,
+    # --- internal state: archive and resume state (search-extensibility A3, D5) ----
+    #
+    # See ``autofit.non_linear.checkpoint`` and ``docs/design/checkpointing.md``.
+
+    checkpointer: Checkpointer = DillCheckpointer()
+    """
+    The archive strategy: where the backend's final state is stored when a fit
+    completes, for ``Result.search_internal`` and ``samples_via_internal_from``.
+    """
+
+    resume_state: Optional[Checkpointer] = None
+    """
+    The file an interrupted run resumes from, for searches that genuinely resume
+    (``None`` otherwise). Deleted when the fit completes unless it is the archive's
+    own file or declares ``retain_after_completion``.
+    """
+
+    @property
+    def retains_search_internal(self) -> bool:
+        """
+        Whether ``search_internal/`` survives the end of a fit: always when the
+        archive declares ``retain_after_completion`` (its results cannot be rebuilt
+        without it), otherwise when the ``output.search_internal`` config is on.
+        Constructing or running a search never changes that config.
+        """
+        return bool(
+            self.checkpointer.retain_after_completion
+            or conf.instance["output"]["search_internal"]
         )
+
+    def output_search_internal(self, search_internal):
+        """
+        Archive ``search_internal`` through the search's ``checkpointer`` and, once a
+        fit has completed, discard its resume state (there is nothing left to
+        resume).
+
+        ``_fit`` of the searches that archive mid-run (BlackJAX NUTS, SMC) also
+        calls this after every chunk; their resume state is ``None``.
+        """
+        self.checkpointer.finalize(self.paths, search_internal)
+
+        resume_state = self.resume_state
+        if (
+            resume_state is not None
+            and not resume_state.retain_after_completion
+            and resume_state.filename != self.checkpointer.filename
+        ):
+            resume_state.discard(self.paths)
 
     def _steps_until_full_update(self, iterations_remaining: int) -> int:
         """
@@ -1857,6 +1894,19 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC, metaclass=_SearchMeta):
 
         return unit_parameter_lists, parameter_lists, figure_of_merit_list
 
+    # --- samples conversion (search-extensibility phase A3) -------------------------
+    #
+    # A search maps its backend's internal state onto a ``RawSamples`` in
+    # ``raw_samples_from``; ``samples_via_internal_from`` below is implemented once,
+    # here, on top of it (``autofit.non_linear.samples.adapter``).
+
+    samples_cls = Samples
+    """
+    The ``Samples`` class ``samples_via_internal_from`` builds (``SamplesMCMC`` and
+    ``SamplesNest`` on the family bases, ``SamplesSMC`` / ``NSSamples`` on those
+    searches).
+    """
+
     def samples_from(self, model: AbstractPriorModel, search_internal=None) -> Samples:
         """
         Loads the samples of a non-linear search from its output files.
@@ -1888,24 +1938,53 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC, metaclass=_SearchMeta):
 
     def samples_via_internal_from(
         self, model: AbstractPriorModel, search_internal=None
-    ):
+    ) -> Samples:
         """
-        The samples of the internal state. A ``run(ctx)`` search gets them from its
-        ``raw_samples_from``; any other search overrides this.
-        """
-        if type(self).raw_samples_from is NonLinearSearch.raw_samples_from:
-            raise NotImplementedError
+        The samples of the search, converted from its internal state.
 
-        from autofit.non_linear.search.fit_context import samples_from_raw
+        ``search_internal`` is the backend's in-memory state when given; otherwise
+        it is loaded from the output folder (``load_search_internal``). The search's
+        ``raw_samples_from`` maps it onto a ``RawSamples`` and ``samples_from_raw``
+        builds the ``samples_cls`` object (log priors, the log likelihood from a log
+        posterior, length checks, ``time`` / ``class_path``), the same way for every
+        search.
+
+        Raises
+        ------
+        NotImplementedError
+            When the search does not implement ``raw_samples_from``.
+        FileNotFoundError
+            When no internal state is stored.
+        """
+        from autofit.non_linear.samples.adapter import samples_from_raw
 
         if search_internal is None:
-            search_internal = self.paths.load_search_internal()
+            search_internal = self.load_search_internal()
+
+        raw = self.raw_samples_from(model, search_internal)
 
         return samples_from_raw(
             model=model,
-            raw=self.raw_samples_from(model, search_internal),
+            raw=raw,
             samples_cls=self.samples_cls,
+            time=self.timer.time if self.timer else None,
         )
+
+    def raw_samples_from(self, model: AbstractPriorModel, search_internal):
+        """
+        Map the backend's internal state onto a
+        ``autofit.non_linear.samples.adapter.RawSamples``: its parameter vectors,
+        log likelihoods (or log posteriors), weights and ``samples_info`` entries,
+        exactly as the backend stores them. Every concrete search implements it.
+        """
+        raise NotImplementedError
+
+    def load_search_internal(self):
+        """
+        The search's internal state as stored in its output folder, or ``None`` when
+        its paths store nothing (``NullPaths``, ``DatabasePaths``).
+        """
+        return self.paths.load_search_internal()
 
     def _pools(self) -> PoolFactory:
         """
@@ -1915,6 +1994,7 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC, metaclass=_SearchMeta):
         pools = self.__dict__.get("_fit_pools")
         return pools if pools is not None else PoolFactory(self)
 
+    @check_cores
     def make_pool(self):
         """Make the pool instance used to parallelize a `NonLinearSearch` alongside a set of unique ids for every
         process in the pool. If the specified number of cores is 1, a pool instance is not made and None is returned.

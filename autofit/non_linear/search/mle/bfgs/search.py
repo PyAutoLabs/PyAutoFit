@@ -13,8 +13,7 @@ from autofit.non_linear.clipper import (
     ClipperPriorBoxJoint,
 )
 from autofit.non_linear.initializer import AbstractInitializer
-from autofit.non_linear.samples.sample import Sample
-from autofit.non_linear.samples.samples import Samples
+from autofit.non_linear.samples.adapter import RawSamples
 from autofit.non_linear.search import capabilities as cap
 
 import numpy as np
@@ -361,54 +360,20 @@ class AbstractBFGS(AbstractMLE):
 
         return search_internal, fitness
 
-    def samples_via_internal_from(
-        self, model: AbstractPriorModel, search_internal=None
-    ):
+    def raw_samples_from(self, model: AbstractPriorModel, search_internal):
         """
-        Returns a `Samples` object from the LBFGS internal results.
-
-        The samples contain all information on the parameter space sampling (e.g. the parameters,
-        log likelihoods, etc.).
-
-        The internal search results are converted from the native format used by the search to lists of values
-        (e.g. `parameter_lists`, `log_likelihood_list`).
+        The LBFGS internal results as raw samples: the full history when the start
+        point is plotted, otherwise the single optimum ``x``.
 
         Parameters
         ----------
         model
             Maps input vectors of unit parameter values to physical values and model instances via priors.
+        search_internal
+            The scipy ``OptimizeResult``-like object the search stores.
         """
-
-        if search_internal is None:
-            search_internal = self.paths.load_search_internal()
-
         x0 = search_internal.x
         total_iterations = search_internal.nit
-
-        if self.should_plot_start_point:
-
-            parameter_lists = search_internal.parameters_history_list
-            log_prior_list = model.log_prior_list_from(parameter_lists=parameter_lists)
-            log_likelihood_list = search_internal.log_likelihood_history_list
-
-        else:
-
-            parameter_lists = [list(x0)]
-            log_prior_list = model.log_prior_list_from(parameter_lists=parameter_lists)
-            log_posterior_list = np.array([search_internal.log_posterior_list])
-            log_likelihood_list = [
-                lp - prior for lp, prior in zip(log_posterior_list, log_prior_list)
-            ]
-
-        weight_list = len(log_likelihood_list) * [1.0]
-
-        sample_list = Sample.from_lists(
-            model=model,
-            parameter_lists=parameter_lists,
-            log_likelihood_list=log_likelihood_list,
-            log_prior_list=log_prior_list,
-            weight_list=weight_list,
-        )
 
         samples_info = {
             "total_iterations": total_iterations,
@@ -424,10 +389,26 @@ class AbstractBFGS(AbstractMLE):
             "time": self.timer.time if self.timer else None,
         }
 
-        return Samples(
-            model=model,
-            sample_list=sample_list,
-            samples_info=samples_info,
+        if self.should_plot_start_point:
+            return RawSamples(
+                parameters=search_internal.parameters_history_list,
+                log_likelihood=search_internal.log_likelihood_history_list,
+                info=samples_info,
+                label="LBFGS",
+            )
+
+        parameter_lists = [list(x0)]
+        log_prior_list = model.log_prior_list_from(parameter_lists=parameter_lists)
+        log_posterior_list = np.array([search_internal.log_posterior_list])
+
+        return RawSamples(
+            parameters=parameter_lists,
+            log_likelihood=[
+                lp - prior for lp, prior in zip(log_posterior_list, log_prior_list)
+            ],
+            log_prior=log_prior_list,
+            info=samples_info,
+            label="LBFGS",
         )
 
 

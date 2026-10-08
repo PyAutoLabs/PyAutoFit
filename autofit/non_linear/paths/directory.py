@@ -20,6 +20,7 @@ from autofit.model_figure.config import model_figure_enabled
 from autofit.non_linear.test_mode import skip_visualization
 
 from .abstract import AbstractPaths, _test_mode_segment
+from ..checkpoint import load_legacy_search_internal
 
 from ..samples import load_from_table
 from autofit.non_linear.samples.pdf import SamplesPDF
@@ -224,31 +225,33 @@ class DirectoryPaths(AbstractPaths):
 
     def load_search_internal(self):
         """
-        Load the internal representation of a non-linear search from a pickle or dill file.
+        Load the internal representation of a non-linear search (its archive).
 
-        The results in this representation are required to use a search's in-built tools for visualization,
-        analysing samples and other tasks.
+        Loading is injected: the search that owns these paths (``self.search``)
+        loads through its ``checkpointer`` (emcee's HDF backend, the NUTS / SMC
+        pickle, or the dill of every other search), so ``paths`` knows no backend
+        format. A folder opened without its search falls back to format-aware
+        detection (``autofit.non_linear.checkpoint.load_legacy_search_internal``:
+        ``search_internal.hdf``, then ``.pickle``, then ``.dill``), which is also what
+        a checkpointer falls back to when its own file is absent, so outputs written
+        before A3 still load.
 
         Returns
         -------
         The results of the non-linear search in its internal representation.
+
+        Raises
+        ------
+        FileNotFoundError
+            If no internal state is stored (for example a summary-only output, or
+            ``output.search_internal: false``).
         """
+        checkpointer = getattr(getattr(self, "search", None), "checkpointer", None)
 
-        # This is a nasty hack to load emcee backends. It will be removed once the source code is more stable.
+        if checkpointer is not None:
+            return checkpointer.load(self)
 
-        try:
-            import emcee
-
-            backend_filename = self.search_internal_path / "search_internal.hdf"
-            if backend_filename.is_file():
-                return emcee.backends.HDFBackend(filename=str(backend_filename))
-        except ImportError:
-            pass
-
-        filename = self.search_internal_path / "search_internal.dill"
-
-        with open_(filename, "rb") as f:
-            return dill.load(f)
+        return load_legacy_search_internal(self.search_internal_path)
 
     def remove_search_internal(self):
         """

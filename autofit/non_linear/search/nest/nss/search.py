@@ -9,11 +9,12 @@ from typing import Optional, TYPE_CHECKING
 import numpy as np
 
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
+from autofit.non_linear.checkpoint import NativeFileCheckpointer
 from autofit.non_linear.fitness import Fitness, get_log_likelihood_ceiling
 from autofit.non_linear.paths.null import NullPaths
 from autofit.non_linear.search.nest import abstract_nest
 from .samples import NSSamples
-from autofit.non_linear.samples.sample import Sample
+from autofit.non_linear.samples.adapter import RawSamples
 from autofit.non_linear.test_mode import is_test_mode
 from autofit.non_linear.search import capabilities as cap
 
@@ -193,6 +194,8 @@ class _NSSInternal:
 
 
 class NSS(abstract_nest.AbstractNest):
+    samples_cls = NSSamples
+
     # Static capabilities (see ``autofit.non_linear.search.capabilities``); mirrored
     # by ``search/registry.py``. Never identifier fields.
     jax_use = cap.JaxUse.REQUIRED
@@ -213,6 +216,9 @@ class NSS(abstract_nest.AbstractNest):
     # physical-space prior density.
     objective_target = cap.ObjectiveTarget(cap.ObjectiveQuantity.LOG_LIKELIHOOD, cap.CoordinateSpace.PHYSICAL)
     invalid_value = NSS_INVALID_LOG_LIKELIHOOD
+    # The resume state is NSS's own atomic ``nss_checkpoint.pkl`` (``_fit`` writes,
+    # reads and deletes it); the archive is the default ``search_internal.dill``.
+    resume_state = NativeFileCheckpointer(_CHECKPOINT_FILENAME, loader=_load_checkpoint)
 
     __identifier_fields__ = (
         "n_live",
@@ -657,18 +663,9 @@ class NSS(abstract_nest.AbstractNest):
             "ess": int(search_internal.ess),
         }
 
-    def samples_via_internal_from(
-        self,
-        model: AbstractPriorModel,
-        search_internal: Optional[_NSSInternal] = None,
-    ):
-        """Convert the stored ``_NSSInternal`` holder into an ``NSSamples``."""
-
-        if search_internal is None:
-            search_internal = self.paths.load_search_internal()
-
-        parameter_lists = np.asarray(search_internal.positions).tolist()
-        log_likelihood_list = np.asarray(search_internal.loglikelihoods).tolist()
+    def raw_samples_from(self, model, search_internal: _NSSInternal):
+        """The stored ``_NSSInternal`` holder as raw samples, with its log weights
+        exponentiated and normalised by the search (as they always were)."""
 
         log_w = np.asarray(search_internal.log_weights)
         log_w_norm = log_w - log_w.max()
@@ -676,23 +673,11 @@ class NSS(abstract_nest.AbstractNest):
         weight_total = weights.sum()
         if weight_total > 0:
             weights = weights / weight_total
-        weight_list = weights.tolist()
 
-        log_prior_list = [
-            sum(model.log_prior_list_from_vector(vector=vector))
-            for vector in parameter_lists
-        ]
-
-        sample_list = Sample.from_lists(
-            model=model,
-            parameter_lists=parameter_lists,
-            log_likelihood_list=log_likelihood_list,
-            log_prior_list=log_prior_list,
-            weight_list=weight_list,
-        )
-
-        return NSSamples(
-            model=model,
-            sample_list=sample_list,
-            samples_info=self.samples_info_from(search_internal=search_internal),
+        return RawSamples(
+            parameters=np.asarray(search_internal.positions),
+            log_likelihood=np.asarray(search_internal.loglikelihoods),
+            weights=weights,
+            info=self.samples_info_from(search_internal=search_internal),
+            label="NSS",
         )

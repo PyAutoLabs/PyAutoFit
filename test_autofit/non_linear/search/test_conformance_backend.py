@@ -253,21 +253,6 @@ SAMPLES_CLASS = {
     "NSS": "NSSamples",
 }
 
-# Dynesty's ``samples_via_internal_from`` reads the in-run checkpoint
-# (``search_internal/savestate.save``), which ``output_search_internal`` deletes at the
-# end of a fit after dumping ``search_internal.dill``. A completed Dynesty output folder
-# therefore always falls back to ``samples.csv``. One checkpoint / internal-state path
-# per search is phase A3 (survey 01 §5.3 item 2, §9 phase 3).
-DISK_INTERNAL_XFAIL = {
-    name: (
-        "samples_via_internal_from reads the deleted savestate.save checkpoint, not the "
-        "search_internal.dill a completed fit keeps, so it falls back to samples.csv; "
-        "unified in search-extensibility phase A3."
-    )
-    for name in ("DynestyStatic", "DynestyDynamic")
-}
-
-
 # ``Emcee``, ``Zeus``, ``BlackJAXNUTS`` and ``SMC`` take ``auto_correlation_settings=
 # AutoCorrelationsSettings()`` as a default argument, built once at import time, so the
 # test-mode ``check_size = 1`` reduction applies only when ``PYAUTO_TEST_MODE`` is set
@@ -611,8 +596,14 @@ def test_samples_from_falls_back_to_paths_samples(
     assert any(_FALLBACK_MESSAGE in record.getMessage() for record in caplog.records)
 
 
-@pytest.mark.parametrize("entry", _params(DISK_INTERNAL_XFAIL, raises=AssertionError))
+@pytest.mark.parametrize("entry", _params())
 def test_restored_output_samples_from_none_loads_the_internal_state(entry, backend_run):
+    """
+    A completed, restored output folder keeps the archive ``samples_via_internal_from``
+    reads (for Dynesty ``search_internal.dill``; its ``savestate.save`` resume state is
+    deleted on completion), so the samples load from it without the ``samples.csv``
+    fallback.
+    """
     outcome = backend_run(entry).disk_samples_from
 
     assert outcome.error is None

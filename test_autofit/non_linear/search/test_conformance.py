@@ -35,15 +35,6 @@ pytestmark = pytest.mark.filterwarnings("ignore::FutureWarning")
 
 ROSTER = searches_under_test()
 
-CONFIG_MUTATION_XFAIL = {
-    name: (
-        "__init__ sets conf.instance['output']['search_internal'] = True; "
-        "removed in search-extensibility phase A3."
-    )
-    for name in ("Emcee", "BlackJAXNUTS", "SMC")
-}
-
-
 def _params(xfails=None, raises=None):
     """
     The roster as pytest params, with strict xfail marks for the named entries.
@@ -163,8 +154,13 @@ def make_search_internal_off(tmp_path):
     conf.instance.configs = original_configs
 
 
-@pytest.mark.parametrize("entry", _params(CONFIG_MUTATION_XFAIL, raises=AssertionError))
+@pytest.mark.parametrize("entry", _params())
 def test_config_unchanged_by_construction(entry, search_internal_off):
+    """
+    Constructing a search never changes the configuration. Emcee, BlackJAXNUTS and
+    SMC used to force ``output.search_internal`` on; their archives now declare
+    ``retain_after_completion`` instead (search-extensibility phase A3).
+    """
     cls = _search_class(entry)
     assert conf.instance["output"]["search_internal"] is False
 
