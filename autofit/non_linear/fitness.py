@@ -2,6 +2,7 @@ import logging
 import numpy as np
 import os
 import time
+import warnings
 
 from timeout_decorator import timeout
 from typing import Optional
@@ -17,6 +18,14 @@ from autofit.text import text_util
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.jax.gradient import validate_gradient_mode
 from autofit.non_linear.jax_compile import log_on_first_compile
+from autofit.non_linear.objective import (
+    BATCHED,
+    GRAD_KINDS,
+    SCALAR,
+    VALUE_AND_GRAD,
+    check_kind,
+    jax_objective,
+)
 from autofit.non_linear.paths.abstract import AbstractPaths
 from autofit.non_linear.analysis import Analysis
 
@@ -27,6 +36,20 @@ from autofit.non_linear.analysis import Analysis
 #: 99-digit integer. Compared against a threshold rather than ``1e99`` exactly so
 #: a hand-set ``1e100`` in a workspace config reads as "never" too.
 ITERATIONS_NEVER = 1e90
+
+
+def _warn_deprecated_fitness_kwarg(name: str, instead: str):
+    """
+    Warn, as a ``FutureWarning`` so end users see it, that a deprecated ``Fitness``
+    keyword argument was passed.
+    """
+    warnings.warn(
+        f"Fitness({name}=...) is deprecated and will be removed after one release: "
+        f"{instead}. Every search now selects its objective through "
+        f"`Fitness.objective(kind)` (search-extensibility phase A2).",
+        FutureWarning,
+        stacklevel=3,
+    )
 
 
 def get_timeout_seconds():
@@ -177,13 +200,15 @@ class Fitness:
         resample_figure_of_merit: float = None,
         convert_to_chi_squared: bool = False,
         store_history: bool = False,
-        use_jax_vmap : bool = False,
-        use_jax_jit : bool = False,
+        use_jax_vmap : Optional[bool] = None,
+        use_jax_jit : Optional[bool] = None,
         batch_size : Optional[int] = None,
         iterations_per_quick_update: Optional[int] = None,
         background_quick_update: bool = False,
         live_visual_update: bool = False,
         gradient_mode: Optional[str] = None,
+        batched: bool = False,
+        compile: bool = True,
     ):
         """
         Interfaces with any non-linear search to fit the model to the data and return a log likelihood via
@@ -246,6 +271,18 @@ class Fitness:
             How `grad` differentiates the likelihood: `"reverse"` (`jax.grad`) or `"forward"` (`jax.jacfwd`
             over the flat parameter vector). `None` (default) uses the analysis's declared
             `Analysis.gradient_mode`. See `autofit.jax.gradient`.
+        batched
+            If `True`, `__call__` / `call_wrap` evaluate a batch of parameter vectors at once (the `"batched"`
+            objective); a single vector is promoted to a batch of one. Otherwise they evaluate one vector (the
+            `"scalar"` objective).
+        compile
+            On a JAX analysis the objectives are lazily jitted (compiled on their first call). `False` is the
+            debugging escape hatch: every objective then runs eagerly, op by op. Ignored on numpy.
+        use_jax_vmap
+            Deprecated alias of `batched`.
+        use_jax_jit
+            Deprecated and without effect: a JAX analysis is always jitted unless `compile=False`. `False`
+            maps to `compile=False` for one release.
         """
 
         self.analysis = analysis
@@ -268,8 +305,23 @@ class Fitness:
         self.parameters_history_list = []
         self.log_likelihood_history_list = []
 
-        self.use_jax_vmap = use_jax_vmap
-        self.use_jax_jit = use_jax_jit
+        if use_jax_vmap is not None:
+            _warn_deprecated_fitness_kwarg(
+                "use_jax_vmap", "pass `batched=` instead (the same meaning)"
+            )
+            batched = bool(use_jax_vmap)
+
+        if use_jax_jit is not None:
+            _warn_deprecated_fitness_kwarg(
+                "use_jax_jit",
+                "a JAX analysis is always jitted lazily; pass `compile=False` only to "
+                "debug eagerly",
+            )
+            if not use_jax_jit:
+                compile = False
+
+        self.batched = bool(batched)
+        self.compile = bool(compile)
         self.gradient_mode = validate_gradient_mode(gradient_mode)
 
         if self.analysis.is_jax:
@@ -278,12 +330,8 @@ class Fitness:
             enable_pytrees()
             register_model(self.model)
 
-        self._call = self.call
-
-        if self.use_jax_vmap:
-            self._call = self._vmap
-        elif self.use_jax_jit:
-            self._call = self._jit
+        self._objectives = {}
+        self._call = self.objective(BATCHED if self.batched else SCALAR)
 
         self.batch_size = batch_size
         self.iterations_per_quick_update = iterations_per_quick_update
@@ -590,14 +638,70 @@ class Fitness:
             depending on configuration.
         """
 
-        if self.use_jax_vmap:
+        if self.batched:
             if len(np.array(parameters).shape) == 1:
                 parameters = np.array(parameters)[None, :]
 
+        if self._is_jax:
+            # One dtype and one container for every caller: a jitted objective is cached
+            # on the pytree structure and dtype of its input, so a Python list from the
+            # initializer and an ndarray from the sampler would otherwise be two compiles.
+            parameters = np.asarray(parameters, dtype=float)
+
         figure_of_merit = self._call(parameters)
 
-        if self.use_jax_jit:
+        if self._is_jax and not self.batched:
             figure_of_merit = float(figure_of_merit)
+
+        self._record(parameters=parameters, figure_of_merit=figure_of_merit)
+
+        return figure_of_merit
+
+    def call_wrap_value_and_grad(self, parameters):
+        """
+        The host-side `(figure_of_merit, gradient)` wrapper of the `"value_and_grad"` objective.
+
+        The counterpart of `call_wrap` for a gradient-based backend that drives a scalar objective
+        from Python (scipy's `minimize(jac=True)` in `BFGS` / `LBFGS`): the value and the exact
+        gradient come from one jitted call, and the value is booked exactly as `call_wrap` books it
+        (quick updates, `store_history`), so a gradient-driven run keeps its history and quick
+        updates instead of bypassing them.
+
+        Parameters
+        ----------
+        parameters
+            One parameter vector.
+
+        Returns
+        -------
+        The figure of merit as a Python float and its gradient as a float64 numpy array.
+        """
+        parameters = np.asarray(parameters, dtype=float)
+
+        figure_of_merit, gradient = self.objective(VALUE_AND_GRAD)(parameters)
+
+        figure_of_merit = float(figure_of_merit)
+        gradient = np.asarray(gradient, dtype=float)
+
+        self._record(parameters=parameters, figure_of_merit=figure_of_merit)
+
+        return figure_of_merit, gradient
+
+    def _record(self, parameters, figure_of_merit):
+        """
+        The per-evaluation bookkeeping of `call_wrap`: convert the figure of merit back to a log
+        likelihood, feed the quick update and append to the history.
+
+        Both consumers are optional, and with neither active (the default: quick updates
+        off, no history) nothing here is needed, so the conversion -- which re-evaluates
+        the log priors on the host for a log-posterior search -- is skipped. That keeps
+        `call_wrap` on a jitted objective close to the jitted call's own cost.
+        """
+        if not self.store_history and (
+            self.iterations_per_quick_update is None
+            or self.iterations_per_quick_update >= ITERATIONS_NEVER
+        ):
+            return
 
         log_likelihood = self.log_likelihood_from(
             figure_of_merit=figure_of_merit, parameters=parameters
@@ -609,8 +713,6 @@ class Fitness:
 
             self.parameters_history_list.append(np.array(parameters))
             self.log_likelihood_history_list.append(np.array(log_likelihood))
-
-        return figure_of_merit
 
     def manage_quick_update(self, parameters, log_likelihood):
         """
@@ -836,8 +938,8 @@ class Fitness:
         state = self.__dict__.copy()
         # Strip JAX-compiled callables: jax.jit / jax.vmap / jax.grad return
         # functions tied to C++ XLA state that can't roundtrip through pickle.
-        # cached_property values lazily recompile on first access after unpickle.
-        for attr in ("_call", "_jit", "_vmap", "_grad"):
+        # The objective cache and `_grad` are rebuilt lazily on first use after unpickle.
+        for attr in ("_call", "_objectives", "_jit", "_vmap", "_grad"):
             state.pop(attr, None)
         return state
 
@@ -856,71 +958,134 @@ class Fitness:
             self._set_traced_assertions()
         # `Fitness` objects pickled before the gradient-mode override existed defer to the analysis.
         self.__dict__.setdefault("gradient_mode", None)
-        self._call = self.call
-        if getattr(self, "use_jax_vmap", False):
-            self._call = self._vmap
-        elif getattr(self, "use_jax_jit", False):
-            self._call = self._jit
+        # `Fitness` objects pickled before the objective factory (search-extensibility A2)
+        # carry `use_jax_vmap` / `use_jax_jit` instead of `batched` / `compile`. Their
+        # dispatch maps onto the factory: vmap -> the batched objective; jit or not, a JAX
+        # scalar objective is now jitted lazily.
+        legacy_vmap = self.__dict__.pop("use_jax_vmap", None)
+        self.__dict__.pop("use_jax_jit", None)
+        self.__dict__.setdefault("batched", bool(legacy_vmap))
+        self.__dict__.setdefault("compile", True)
+        self._objectives = {}
+        self._call = self.objective(BATCHED if self.batched else SCALAR)
 
-    @cached_property
+    @property
+    def use_jax_vmap(self) -> bool:
+        """
+        Deprecated: whether `call_wrap` evaluates batches. Read `batched` instead.
+        """
+        return self.batched
+
+    @property
+    def use_jax_jit(self) -> bool:
+        """
+        Deprecated: whether the scalar objective `call_wrap` dispatches to is jitted.
+        """
+        return self._is_jax and self.compile and not self.batched
+
+    def objective(self, kind: str = SCALAR, compile: Optional[bool] = None):
+        """
+        The objective of `kind`, the one factory every search builds its likelihood
+        callable from.
+
+        `kind` is execution only, one of `"scalar"`, `"batched"`, `"value_and_grad"` and
+        `"batched_value_and_grad"` (see `autofit.non_linear.objective`). What it returns,
+        in which coordinates and for an invalid model is this `Fitness`'s figure-of-merit
+        convention, which `NonLinearSearch.make_fitness` derives from the search's declared
+        `objective_target` and `invalid_value`.
+
+        - **numpy**: `"scalar"` is `call` itself and `"batched"` a Python loop over it;
+          the grad kinds raise `SearchException`, since numpy cannot differentiate.
+        - **JAX**: every kind is built on the one unjitted, composable `call` and wrapped
+          in one lazy `jax.jit` (compiled on its first call, with the compile logged),
+          cached per kind (so each kind compiles once per input shape) and stripped on
+          pickle. The grad kinds honour `gradient_mode` (else the analysis's declared
+          `Analysis.gradient_mode`).
+
+        These are the raw objectives: they bypass the quick-update and history
+        bookkeeping of `call_wrap`, which a backend that evaluates from Python should
+        call instead (`__call__`, `call_wrap`, `call_wrap_value_and_grad`).
+
+        Parameters
+        ----------
+        kind
+            The objective kind.
+        compile
+            `False` returns the JAX objective unjitted and uncached (the debugging escape
+            hatch). `None` (default) uses this `Fitness`'s `compile` setting.
+        """
+        check_kind(kind)
+
+        if not self._is_jax:
+            if kind in GRAD_KINDS:
+                raise exc.SearchException(
+                    f"The {kind!r} objective differentiates the likelihood, which needs a JAX "
+                    f"analysis, but {type(self.analysis).__name__} has is_jax=False. Construct "
+                    "the analysis with use_jax=True, or use the 'scalar' or 'batched' objective."
+                )
+            if kind == SCALAR:
+                return self.call
+            return self._batched_numpy
+
+        compile = self.compile if compile is None else compile
+
+        if not compile:
+            return jax_objective(
+                self.call,
+                kind,
+                gradient_mode=self._resolved_gradient_mode(kind),
+                compile=False,
+            )
+
+        objectives = self.__dict__.setdefault("_objectives", {})
+
+        if kind not in objectives:
+            objectives[kind] = jax_objective(
+                self.call,
+                kind,
+                gradient_mode=self._resolved_gradient_mode(kind),
+            )
+
+        return objectives[kind]
+
+    def _resolved_gradient_mode(self, kind: str) -> str:
+        """
+        The gradient mode a grad kind is built with (`"reverse"` for the others, unused).
+        """
+        if kind not in GRAD_KINDS:
+            return "reverse"
+
+        from autofit.jax import gradient
+
+        return gradient.resolve_gradient_mode(self.analysis, self.gradient_mode)
+
+    def _batched_numpy(self, parameters):
+        """
+        The numpy `"batched"` objective: `call` over each row of the batch.
+        """
+        return np.array([self.call(vector) for vector in parameters])
+
+    @property
     def _vmap(self):
         """
-        Vectorized and JIT-compiled likelihood function.
+        The `"batched"` objective, `jax.jit(jax.vmap(call))` on JAX (`objective("batched")`).
 
-        This wraps the base likelihood function (`self.call`) so that it evaluates a whole batch of
-        parameter vectors at once, as `jax.jit(jax.vmap(self.call))`. The order is jit **of** vmap:
-        the conventional composition, and the one `analysis/latent.py` already uses.
-
-        That order means the batch is one XLA program. The outer jit traces `vmap(call)` once, keyed
-        on the shape of the batch it was given, and caches the compiled executable; a second call at
-        the same batch shape is a cache hit served from jit's C++ fast path, with no Python batching
-        trace in between. The previous composition, `jax.vmap(jax.jit(self.call))`, re-entered
-        Python's batching machinery on every call and dispatched the inner `pjit` eagerly underneath
-        the batching trace, which is where the `autogalaxy_workspace_test#118` hangs are parked.
-
-        The inner jit is dropped rather than kept: a jit nested inside a jit is inlined, so it adds a
-        call boundary and nothing else.
-
-        This is **not** a fix for the XLA CPU Eigen-pool FFT deadlock (`PyAutoFit#1530`). That fires
-        at execution time, and execution still happens once per call whatever the tracing order is.
-        The only measured effect of the ordering is the A/B run of 2026-08-23 on `rectangular_mge.py`
-        (control 8/10 stalls against 3/10 for jit-of-vmap, Fisher exact p=0.070), recorded there as
-        contributory rather than causal.
-
-        The compiled executable is still specialised per batch *length*, so a search that varies its
-        batch size recompiles per distinct length (see the PyAutoMind draft
-        `vmap_jit_recompiles_per_nautilus_batch_length.md`). This change neither fixes nor worsens
-        that.
-
-        Because this is a `cached_property`, the compiled function is stored after its first
-        creation, avoiding repeated JIT compilation overhead.
+        The order is jit **of** vmap, so a batch is one XLA program, traced once per batch shape
+        and served from jit's C++ fast path afterwards (PyAutoFit#1636; the previous
+        `jax.vmap(jax.jit(call))` re-entered Python's batching machinery on every call). The
+        executable is still specialised per batch *length*: a backend that varies its batch size
+        recompiles per distinct length unless it pads (`autofit.non_linear.objective.
+        evaluate_in_chunks`). Kept as a property for existing callers.
         """
-        import jax
+        return self.objective(BATCHED)
 
-        return log_on_first_compile(
-            jax.jit(jax.vmap(self.call)),
-            "vectorized (vmap) likelihood function",
-        )
-
-    @cached_property
+    @property
     def _jit(self):
         """
-        JIT-compiled likelihood function.
-
-        This wraps the base likelihood function (`self.call`) with `jax.jit`,
-        producing a compiled version optimized for repeated evaluation on a
-        single set of parameters. The first call triggers compilation, while
-        later calls benefit from the compiled execution.
-
-        As a `cached_property`, the compiled function is cached after its
-        first use, so JIT compilation only occurs once.
+        The `"scalar"` objective, `jax.jit(call)` on JAX (`objective("scalar")`). Kept as a
+        property for existing callers.
         """
-        import jax
-
-        return log_on_first_compile(
-            jax.jit(self.call),
-            "likelihood function",
-        )
+        return self.objective(SCALAR)
 
     @cached_property
     def _grad(self):
