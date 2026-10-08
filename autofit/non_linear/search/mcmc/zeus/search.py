@@ -15,7 +15,7 @@ from autofit.non_linear.search.mcmc.abstract_mcmc import AbstractMCMC
 from autofit.non_linear.search.mcmc.auto_correlations import AutoCorrelationsSettings
 from autofit.non_linear.search.mcmc.auto_correlations import AutoCorrelations
 from autofit.non_linear.test_mode import is_test_mode
-from autofit.non_linear.samples.adapter import RawSamples
+from autofit.non_linear.samples.adapter import ChainPosterior, RawSamples
 from autofit.non_linear.search import capabilities as cap
 
 if TYPE_CHECKING:
@@ -336,7 +336,8 @@ class Zeus(AbstractMCMC):
         The zeus chain after burn-in and thinning, as raw samples.
 
         The parameters and log posteriors come out of zeus under the *same*
-        ``discard`` / ``thin`` (PyAutoFit#1628); the log likelihood is the log
+        ``discard`` / ``thin`` (PyAutoFit#1628), through ``ChainPosterior.thin``,
+        which falls back to the whole chain when burn-in removal leaves no draws; the log likelihood is the log
         posterior minus the log prior (``samples_from_raw``), and every draw has
         weight 1.
 
@@ -353,9 +354,7 @@ class Zeus(AbstractMCMC):
             search_internal=search_internal
         )
 
-        test_mode = is_test_mode()
-
-        if test_mode:
+        if is_test_mode():
             discard = 5
             thin = 5
 
@@ -363,38 +362,12 @@ class Zeus(AbstractMCMC):
             discard = int(3.0 * np.max(auto_correlations.times))
             thin = int(np.max(auto_correlations.times) / 2.0)
 
-        samples_after_burn_in = search_internal.get_chain(
-            discard=discard, thin=thin, flat=True
-        )
-
-        if not test_mode and len(samples_after_burn_in) == 0:
-
-            logging.info(
-                """
-                After thinnng the Zeus samples in order to remove burn-in, no samples were left.
-                
-                To create a samples object containing samples, so that the code can continue and results
-                can be inspected, the full list of samples before removing burn-in has been used. This may 
-                indicate that the sampler has not converged and therefore your results may not be reliable.
-                
-                To fix this, run Zeus with more steps to ensure convergence is achieved or change the auto
-                correlation settings to be less aggressive in thinning samples.                
-                """
-            )
-
-            discard = 0
-            thin = 1
-
-            samples_after_burn_in = search_internal.get_chain(flat=True)
-
-        # The log posteriors must be requested with the *same* `discard` and `thin`
-        # as whichever branch above produced the chain (PyAutoFit#1628).
-        log_posterior = search_internal.get_log_prob(
-            discard=discard, thin=thin, flat=True
-        )
+        parameters, log_posterior = ChainPosterior.from_sampler(
+            search_internal, label="Zeus"
+        ).thin(discard=discard, thin=thin)
 
         return RawSamples(
-            parameters=samples_after_burn_in,
+            parameters=parameters,
             log_posterior=log_posterior,
             info=self.samples_info_from(
                 search_internal=search_internal,

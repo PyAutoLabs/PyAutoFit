@@ -29,7 +29,7 @@ belong to the search's ``info`` entries, which are passed through untouched.
 import logging
 import math
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Type
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Type
 
 import numpy as np
 
@@ -251,3 +251,108 @@ def samples_from_raw(
         samples_info=info,
         **{**raw.samples_kwargs, **samples_kwargs},
     )
+
+
+class ChainPosterior:
+    """
+    The equally weighted draws of an ensemble or multi-chain MCMC backend, thinned and
+    with burn-in removed: the one implementation shared by Emcee, Zeus and
+    BlackJAX NUTS.
+
+    ``get_chain(discard, thin)`` and ``get_log_prob(discard, thin)`` return the flat
+    ``(N, D)`` draws and ``(N,)`` log values for a burn-in and thinning, so emcee's and
+    zeus's own ``get_chain(discard=..., thin=..., flat=True)`` slicing is used
+    unchanged. ``from_arrays`` builds the getters for a backend that only stores
+    arrays.
+    """
+
+    def __init__(
+        self,
+        get_chain: Callable[[int, int], np.ndarray],
+        get_log_prob: Callable[[int, int], np.ndarray],
+        label: str = "MCMC",
+    ):
+        self.get_chain = get_chain
+        self.get_log_prob = get_log_prob
+        self.label = label
+
+    @classmethod
+    def from_sampler(cls, sampler, label: str = "MCMC") -> "ChainPosterior":
+        """
+        For an emcee or zeus sampler (or backend), via their ``get_chain`` and
+        ``get_log_prob`` with ``flat=True``.
+        """
+        return cls(
+            get_chain=lambda discard, thin: sampler.get_chain(
+                discard=discard, thin=thin, flat=True
+            ),
+            get_log_prob=lambda discard, thin: sampler.get_log_prob(
+                discard=discard, thin=thin, flat=True
+            ),
+            label=label,
+        )
+
+    @classmethod
+    def from_arrays(
+        cls,
+        chain: np.ndarray,
+        log_prob: np.ndarray,
+        chain_major: bool = False,
+        label: str = "MCMC",
+    ) -> "ChainPosterior":
+        """
+        For draws stored as arrays of shape ``(n_steps, n_chains, n_dim)`` and
+        ``(n_steps, n_chains)``.
+
+        Burn-in and thinning slice the step axis as emcee does
+        (``[discard + thin - 1 :: thin]``, the whole chain for ``discard=0,
+        thin=1``). ``chain_major=True`` flattens chain by chain (all of chain 0's
+        draws in order, then chain 1's, ...); otherwise draw by draw, as emcee's
+        ``flat=True`` does.
+        """
+        chain = np.asarray(chain)
+        log_prob = np.asarray(log_prob)
+
+        def _flat(values, discard, thin):
+            values = values[discard + thin - 1 :: thin]
+            if chain_major:
+                values = np.moveaxis(values, 0, 1)
+            return values.reshape((-1,) + values.shape[2:])
+
+        return cls(
+            get_chain=lambda discard, thin: _flat(chain, discard, thin),
+            get_log_prob=lambda discard, thin: _flat(log_prob, discard, thin),
+            label=label,
+        )
+
+    def thin(self, discard: int, thin: int) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        The draws and log values after removing ``discard`` burn-in steps and keeping
+        every ``thin``-th step.
+
+        When that leaves no draws (an unconverged chain whose auto-correlation time
+        is comparable to its length), the whole chain is used instead, with a log
+        message, so the samples can still be built and inspected. The log values are
+        always requested with the same ``discard`` and ``thin`` as the draws, so the
+        two stay in correspondence (PyAutoFit#1628).
+        """
+        draws = self.get_chain(discard, thin)
+
+        if len(draws) == 0:
+            logger.info(
+                f"""
+                After thinning the {self.label} samples in order to remove burn-in, no samples were left.
+
+                To create a samples object containing samples, so that the code can continue and results
+                can be inspected, the full list of samples before removing burn-in has been used. This may
+                indicate that the sampler has not converged and therefore your results may not be reliable.
+
+                To fix this, run {self.label} with more steps to ensure convergence is achieved or change the
+                auto correlation settings to be less aggressive in thinning samples.
+                """
+            )
+            discard = 0
+            thin = 1
+            draws = self.get_chain(discard, thin)
+
+        return draws, self.get_log_prob(discard, thin)

@@ -18,7 +18,7 @@ from autofit.non_linear.search.mcmc.abstract_mcmc import AbstractMCMC
 from autofit.non_linear.search.mcmc.auto_correlations import AutoCorrelationsSettings
 from autofit.non_linear.search.mcmc.auto_correlations import AutoCorrelations
 from autofit.non_linear.test_mode import is_test_mode
-from autofit.non_linear.samples.adapter import RawSamples
+from autofit.non_linear.samples.adapter import ChainPosterior, RawSamples
 from autofit.non_linear.search import capabilities as cap
 
 if TYPE_CHECKING:
@@ -305,7 +305,8 @@ class Emcee(AbstractMCMC):
         The emcee chain after burn-in and thinning, as raw samples.
 
         The parameters and log posteriors come out of emcee under the *same*
-        ``discard`` / ``thin`` (PyAutoFit#1628); the log likelihood is the log
+        ``discard`` / ``thin`` (PyAutoFit#1628), through ``ChainPosterior.thin``,
+        which falls back to the whole chain when burn-in removal leaves no draws; the log likelihood is the log
         posterior minus the log prior (``samples_from_raw``), and every draw has
         weight 1.
 
@@ -330,10 +331,9 @@ class Emcee(AbstractMCMC):
             discard = int(3.0 * np.max(auto_correlations.times))
             thin = int(np.max(auto_correlations.times) / 2.0)
 
-        parameters = search_internal.get_chain(discard=discard, thin=thin, flat=True)
-        log_posterior = search_internal.get_log_prob(
-            discard=discard, thin=thin, flat=True
-        )
+        parameters, log_posterior = ChainPosterior.from_sampler(
+            search_internal, label="Emcee"
+        ).thin(discard=discard, thin=thin)
 
         return RawSamples(
             parameters=parameters,

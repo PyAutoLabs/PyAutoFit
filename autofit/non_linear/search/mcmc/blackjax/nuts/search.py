@@ -25,7 +25,7 @@ from autofit.non_linear.search.mcmc.blackjax.chains import (
     stack_initial_positions,
 )
 from autofit.non_linear.test_mode import is_test_mode
-from autofit.non_linear.samples.adapter import RawSamples
+from autofit.non_linear.samples.adapter import ChainPosterior, RawSamples
 from autofit.non_linear.search import capabilities as cap
 
 if TYPE_CHECKING:
@@ -637,22 +637,19 @@ class BlackJAXNUTS(AbstractMCMC):
         The BlackJAX chains pickled under ``search_internal/`` as raw samples. NUTS
         samples are unweighted draws from the posterior, so every weight is 1.
         """
-        positions = search_internal["positions"]  # (n_samples, n_chains, n_dim)
-        log_likelihood_array = search_internal["log_likelihood_history"]  # (n_samples, n_chains)
-
         # Chain-major flatten: all of chain 0's samples (in draw order), then
-        # chain 1's, etc. -- matches `total_walkers = num_chains` below.
-        n_samples, n_chains, n_dim = positions.shape
-        positions_chain_major = np.moveaxis(positions, 0, 1).reshape(
-            n_chains * n_samples, n_dim
-        )
-        log_likelihood_chain_major = np.moveaxis(log_likelihood_array, 0, 1).reshape(
-            n_chains * n_samples
-        )
+        # chain 1's, etc. -- matches `total_walkers = num_chains` below. NUTS keeps
+        # every post-warmup draw (no burn-in removal or thinning).
+        parameters, log_likelihood = ChainPosterior.from_arrays(
+            chain=search_internal["positions"],  # (n_samples, n_chains, n_dim)
+            log_prob=search_internal["log_likelihood_history"],  # (n_samples, n_chains)
+            chain_major=True,
+            label="BlackJAXNUTS",
+        ).thin(discard=0, thin=1)
 
         return RawSamples(
-            parameters=positions_chain_major,
-            log_likelihood=[float(x) for x in log_likelihood_chain_major],
+            parameters=parameters,
+            log_likelihood=[float(x) for x in log_likelihood],
             info=self.samples_info_from(search_internal=search_internal),
             samples_kwargs=dict(
                 auto_correlation_settings=self.auto_correlation_settings,
