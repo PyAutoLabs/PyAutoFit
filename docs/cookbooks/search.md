@@ -17,13 +17,17 @@ It first covers standard options available for all non-linear searches:
 - **Plots**: Perform non-linear search specific visualization using their in-built visualization tools.
 - **Start Point**: Manually specify the start point of a non-linear search, or sample a specific region of parameter space.
 
-It then provides example code for using every search:
+It then provides example code for a selection of the available searches:
 
 - **Emcee (MCMC)**: The Emcee ensemble sampler MCMC.
 - **Zeus (MCMC)**: The Zeus ensemble sampler MCMC.
 - **DynestyDynamic (Nested Sampling)**: The Dynesty dynamic nested sampler.
 - **DynestyStatic (Nested Sampling)**: The Dynesty static nested sampler.
+- **Nautilus (Nested Sampling)**: The Nautilus importance nested sampler.
 - **LBFGS**: The L-BFGS scipy optimization.
+
+The full list of searches, including the JAX-based BlackJAXNUTS, SMC, NSS and MultiStart optimizers, is given in the
+[non-linear search API reference](https://pyautofit.readthedocs.io/en/latest/api/searches.html).
 
 ## Example Fit
 
@@ -355,6 +359,35 @@ search = af.DynestyStatic(
     slices=5,
     fmove=0.9,
     max_move=100,
+)
+```
+
+## Nautilus (Nested Sampling)
+
+The Nautilus sampler is a nested sampling algorithm which uses neural-network regression to build its bounds,
+combined with importance nested sampling. It is the search used in most of the **PyAutoFit** workspace examples.
+
+Information about Nautilus can be found at the following links:
+
+- <https://github.com/johannesulf/nautilus>
+- <https://nautilus-sampler.readthedocs.io/en/stable/>
+
+```python
+search = af.Nautilus(
+    n_live=100,
+    n_update=None,
+    enlarge_per_dim=1.1,
+    n_points_min=None,
+    split_threshold=100,
+    n_networks=4,
+    n_batch=100,
+    n_like_new_bound=None,
+    vectorized=False,
+    seed=None,
+    f_live=0.01,
+    n_shell=1,
+    n_eff=500,
+    discard_exploration=False,
 )
 ```
 

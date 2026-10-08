@@ -1,7 +1,11 @@
 # Configs
 
-**PyAutoFit** uses a number of configuration files that customize the default behaviour of the non-linear searches,
-visualization and other aspects of **PyAutoFit**.
+**PyAutoFit** uses a number of configuration files that customize the default behaviour of visualization, output,
+priors, the grid search and other aspects of **PyAutoFit**.
+
+The default settings of each non-linear search are not set by configuration files: they are the default values of
+the arguments of each search class (e.g. `af.Nautilus`, `af.Emcee`), and are changed by passing those arguments when
+the search is created.
 
 Descriptions of every configuration file and their input parameters are provided in the `README.md` in
 the [config directory of the workspace](https://github.com/PyAutoLabs/autofit_workspace/tree/main/config)

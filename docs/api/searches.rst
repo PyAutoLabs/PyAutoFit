@@ -24,8 +24,10 @@ Nested Samplers
    :template: custom-class-template.rst
    :recursive:
 
+   Nautilus
    DynestyDynamic
    DynestyStatic
+   NSS
 
 MCMC
 ----
@@ -54,6 +56,11 @@ Maximum Likelihood Estimators
 
    BFGS
    LBFGS
+   MultiStartAdam
+   MultiStartADABelief
+   MultiStartLion
+   MultiStartProdigy
+   Drawer
 
 There are also a number of tools which are used to customize the behaviour of non-linear searches in **PyAutoFit**,
 including directory output structure, parameter sample initialization and MCMC auto correlation analysis.

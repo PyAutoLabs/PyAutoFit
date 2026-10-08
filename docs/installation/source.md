@@ -12,29 +12,19 @@ First, clone (or fork) the **PyAutoFit** GitHub repository:
 git clone https://github.com/PyAutoLabs/PyAutoFit
 ```
 
-Next, install the **PyAutoFit** dependencies via pip:
+Next, install **PyAutoFit** and its dependencies in editable mode via pip:
 
 ```bash
-pip install -r PyAutoFit/requirements.txt
+pip install -e PyAutoFit
 ```
 
-If you are using a `conda` environment, add the source repository as follows:
+An editable install means changes you make to the source code are used straight away, so there is no need to add
+the repository to your `PYTHONPATH`.
+
+For unit tests to pass you will also need the optional requirements:
 
 ```bash
-conda-develop PyAutoFit
-```
-
-Alternatively, if you are using a Python environment include the **PyAutoFit** source repository in your PYTHONPATH
-(noting that you must replace the text `/path/to` with the path to the **PyAutoFit** directory on your computer):
-
-```bash
-export PYTHONPATH=$PYTHONPATH:/path/to/PyAutoFit
-```
-
-For unit tests to pass you will also need the following optional requirements:
-
-```bash
-pip install -r PyAutoFit/optional_requirements.txt
+pip install -e "PyAutoFit[optional]"
 ```
 
 Finally, check the **PyAutoFit** unit tests run and pass (you may need to install pytest via `pip install pytest`):
