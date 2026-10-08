@@ -140,6 +140,7 @@ class SearchUpdater:
             samples_summary=samples_summary,
             during_analysis=during_analysis,
             search_internal=search_internal,
+            samples=samples,
         )
 
         visualization_time = time.time() - start
@@ -166,15 +167,17 @@ class SearchUpdater:
         instance: Optional[ModelInstance] = None,
         paths_override: Optional[AbstractPaths] = None,
         search_internal=None,
+        samples: Optional[Samples] = None,
         plot_search: bool = True,
     ):
         """
         Perform visualization of the non-linear search's model-fitting results.
 
         Delegates to the analysis object for model-specific plots and to the
-        search's ``plot_results`` for search-specific plots. ``plot_search=False``
-        outputs only the analysis visuals (used for the starting point, before the
-        search has samples).
+        search's ``plot_results`` for search-specific plots. ``update`` passes the
+        ``samples`` it has already converted; without them they are converted from
+        ``search_internal`` here. ``plot_search=False`` outputs only the analysis
+        visuals (used for the starting point, before the search has samples).
 
         Returns immediately when ``visualization_enabled`` is False.
         """
@@ -215,9 +218,10 @@ class SearchUpdater:
         ):
             if not isinstance(paths, NullPaths):
                 try:
-                    samples = self._samples_from(
-                        model, search_internal,
-                    )
+                    if samples is None:
+                        samples = self._samples_from(
+                            model, search_internal,
+                        )
 
                     self._plot_results(samples=samples)
                 except FileNotFoundError:

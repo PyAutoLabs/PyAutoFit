@@ -261,10 +261,13 @@ class Emcee(AbstractMCMC):
         """
         pass
 
-    def samples_info_from(self, search_internal=None):
+    def samples_info_from(self, search_internal=None, auto_correlations=None):
         search_internal = search_internal or self.backend
 
-        auto_correlations = self.auto_correlations_from(search_internal=search_internal)
+        if auto_correlations is None:
+            auto_correlations = self.auto_correlations_from(
+                search_internal=search_internal
+            )
 
         return {
             "check_size": auto_correlations.check_size,
@@ -293,15 +296,17 @@ class Emcee(AbstractMCMC):
 
         search_internal = search_internal or self.backend
 
+        # Computed once per conversion and shared by the burn-in, `samples_info` and
+        # `SamplesMCMC`; each computation integrates the whole chain twice.
+        auto_correlations = self.auto_correlations_from(
+            search_internal=search_internal
+        )
+
         if is_test_mode():
             discard = 5
             thin = 5
 
         else:
-            auto_correlations = self.auto_correlations_from(
-                search_internal=search_internal
-            )
-
             discard = int(3.0 * np.max(auto_correlations.times))
             thin = int(np.max(auto_correlations.times) / 2.0)
 
@@ -348,11 +353,12 @@ class Emcee(AbstractMCMC):
         return SamplesMCMC(
             model=model,
             sample_list=sample_list,
-            samples_info=self.samples_info_from(search_internal=search_internal),
-            auto_correlation_settings=self.auto_correlation_settings,
-            auto_correlations=self.auto_correlations_from(
-                search_internal=search_internal
+            samples_info=self.samples_info_from(
+                search_internal=search_internal,
+                auto_correlations=auto_correlations,
             ),
+            auto_correlation_settings=self.auto_correlation_settings,
+            auto_correlations=auto_correlations,
         )
 
     def auto_correlations_from(self, search_internal=None):
