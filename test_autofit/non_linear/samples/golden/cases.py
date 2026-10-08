@@ -2,7 +2,7 @@
 The golden samples cases: how each stored backend internal is loaded and converted.
 
 Shared by ``generate.py`` (which writes the fixtures on the reference checkout) and
-``test_golden_samples.py`` (which replays the conversion and compares bytes), so the
+``test_golden_samples.py`` (which replays the conversion and compares the tables), so the
 two can never drift apart.
 """
 import json

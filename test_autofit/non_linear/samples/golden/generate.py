@@ -7,8 +7,8 @@ fit with each of Emcee, DynestyStatic, Nautilus, BlackJAXNUTS and SMC and stores
 the backend's own internal state; then, in a fresh process, it converts that stored
 state back through ``samples_via_internal_from`` (``cases.samples_from``) and writes
 the ``samples.csv`` and ``samples_info.json`` the conversion produces.
-``test_golden_samples.py`` replays the same conversion and requires the bytes of
-``samples.csv`` to match.
+``test_golden_samples.py`` replays the same conversion and requires ``samples.csv``
+to match: same header and row order, values equal to floating-point roundoff.
 
     python test_autofit/non_linear/samples/golden/generate.py [case ...]
 

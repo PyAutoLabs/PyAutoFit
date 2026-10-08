@@ -105,6 +105,7 @@ cookbooks/multi_level_model
 searches/index
 searches/citations
 design/run_ctx
+design/checkpointing
 ```
 
 ```{toctree}
