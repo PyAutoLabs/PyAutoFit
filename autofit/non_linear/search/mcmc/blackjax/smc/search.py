@@ -12,7 +12,7 @@ import numpy as np
 from autonerves import conf
 
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
-from autofit.non_linear.fitness import Fitness
+from autofit.non_linear.objective import jax_objective
 from autofit.non_linear.initializer import Initializer, InitializerPrior
 from autofit.non_linear.search.mcmc.abstract_mcmc import AbstractMCMC
 from autofit.non_linear.search.mcmc.auto_correlations import AutoCorrelationsSettings
@@ -360,16 +360,7 @@ class SMC(AbstractMCMC):
         # The resample sentinel is the library-standard `-1e99` rather than `-inf`: blackjax's ESS root solver
         # multiplies the log-likelihood by a candidate `delta` that can be exactly 0.0, and `0 * -inf` is NaN.
         # A large finite negative value gives the same zero weight without that hazard.
-        fitness = Fitness(
-            model=model,
-            analysis=analysis,
-            paths=self.paths,
-            fom_is_log_likelihood=True,
-            resample_figure_of_merit=-1.0e99,
-            iterations_per_quick_update=self.iterations_per_quick_update,
-            background_quick_update=self.quick_update_background,
-            live_visual_update=self.live_visual_update,
-        )
+        fitness = self.make_fitness(analysis=analysis, model=model)
 
         # ---- Whitening ---------------------------------------------------
         #
@@ -404,18 +395,10 @@ class SMC(AbstractMCMC):
                 "Pass initializer=result.start_point_from() alongside inverse_mass_matrix=result."
             )
 
-        _, parameter_lists, _ = self.initializer.samples_from_model(
-            total_points=n_start_points,
+        _, parameter_lists, _ = self.start_points(
             model=model,
             fitness=fitness,
-            paths=self.paths,
-            n_cores=self.number_of_cores,
-        )
-
-        self.plot_start_point(
-            parameter_vector=parameter_lists[0],
-            model=model,
-            analysis=analysis,
+            n=n_start_points,
         )
 
         start_points = stack_initial_positions(parameter_lists)
@@ -442,6 +425,10 @@ class SMC(AbstractMCMC):
         lower_jax = jnp.asarray(lower_limits)
         upper_jax = jnp.asarray(upper_limits)
 
+        # The shared unjitted scalar objective (``fitness.call``), composed below into the
+        # whitened coordinates SMC steps in.
+        objective = fitness.objective("scalar", compile=False)
+
         def physical_from_z(z):
             return shift_jax + whitening_jax @ z
 
@@ -460,7 +447,7 @@ class SMC(AbstractMCMC):
             # rejects it. Without this the likelihood may be evaluated on a nonsensical instance and return NaN,
             # whose derivative is already on the autodiff tape by the time any guard sees it.
             parameters = jnp.clip(physical_from_z(z), lower_jax, upper_jax)
-            return fitness.call(parameters)
+            return objective(parameters)
 
         # ---- The tempering path ------------------------------------------
         if self.is_warm_start:
@@ -527,7 +514,13 @@ class SMC(AbstractMCMC):
 
         state = smc.init(initial_particles)
 
-        vmapped_log_likelihood = jax.jit(jax.vmap(log_likelihood_z))
+        # The "batched" objective of the whitened log likelihood, built by the shared
+        # factory: one lazy jit of the vmap, with its first compile logged.
+        vmapped_log_likelihood = jax_objective(
+            log_likelihood_z,
+            "batched",
+            description="SMC whitened log likelihood (vmap)",
+        )
 
         self.logger.info(
             f"SMC: adaptive tempered SMC ({self.num_particles} particles, kernel={self.kernel}, "

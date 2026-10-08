@@ -417,7 +417,7 @@ class Analysis(ABC):
             model=model,
             analysis=self,
             fom_is_log_likelihood=True,
-            use_jax_vmap=True,
+            batched=True,
             batch_size=batch_size,
         )
 

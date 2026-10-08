@@ -16,7 +16,7 @@ class SettingsSearch:
         number_of_cores: Optional[int] = 1,
         session: Optional[sa.orm.Session] = None,
         info: Optional[dict] = None,
-        use_jax_vmap: bool = True,
+        use_jax_vmap: Optional[bool] = None,
     ):
         """
         Stores all the input settings that are used in search's and their `fit functions.
@@ -40,7 +40,21 @@ class SettingsSearch:
         info
             Optional dictionary containing information about the model-fit that is stored in the database and can be
             loaded by the aggregator after the model-fit is complete.
+        use_jax_vmap
+            Deprecated: a JAX analysis is evaluated through the batched objective of a search that has one
+            automatically. Still forwarded (to the searches that accept it) for one release.
         """
+        if use_jax_vmap is not None:
+            from autofit.non_linear.search.abstract_search import (
+                warn_deprecated_jax_knob,
+            )
+
+            warn_deprecated_jax_knob(
+                "SettingsSearch",
+                "use_jax_vmap",
+                "a JAX analysis is evaluated through the batched objective of a search "
+                "that has one automatically.",
+            )
 
         self.path_prefix = path_prefix
         self.unique_tag = unique_tag

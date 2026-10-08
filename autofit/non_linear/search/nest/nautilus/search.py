@@ -13,7 +13,6 @@ from typing import Dict, Optional, Tuple, TYPE_CHECKING
 from autofit import exc
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.mapper.prior.vectorized import PriorVectorized
-from autofit.non_linear.fitness import Fitness
 from autofit.non_linear.parallel import fork_context
 from autofit.non_linear.paths.null import NullPaths
 from autofit.non_linear.search.nest import abstract_nest
@@ -214,7 +213,7 @@ class Nautilus(abstract_nest.AbstractNest):
         silence: bool = False,
         force_x1_cpu: bool = False,
         session: Optional[sa.orm.Session] = None,
-        use_jax_vmap: bool = True,
+        use_jax_vmap: Optional[bool] = None,
         **kwargs,
     ):
         """
@@ -298,6 +297,19 @@ class Nautilus(abstract_nest.AbstractNest):
         self.verbose = verbose
 
         self.force_x1_cpu = force_x1_cpu
+        if use_jax_vmap is not None:
+            from autofit.non_linear.search.abstract_search import (
+                warn_deprecated_jax_knob,
+            )
+
+            warn_deprecated_jax_knob(
+                type(self).__name__,
+                "use_jax_vmap",
+                "a JAX analysis is evaluated through the batched objective "
+                "automatically (use_jax_vmap=False still evaluates it point by point "
+                "until the argument is removed).",
+            )
+
         self.use_jax_vmap = use_jax_vmap
 
         if is_test_mode():
@@ -312,26 +324,35 @@ class Nautilus(abstract_nest.AbstractNest):
         )
         self.n_like_max = 1
 
-    def _fit(self, model: AbstractPriorModel, analysis):
+    def fitness_overrides(self, analysis) -> dict:
         """
-        Fit a model using the search and the Analysis class which contains the data and returns the log likelihood from
-        instances of the model, which the `NonLinearSearch` seeks to maximize.
+        The single-process path evaluates batches: a JAX analysis through the batched
+        objective, `n_batch` points per call (`force_x1_cpu` with a numpy analysis
+        evaluates point by point).
+        """
+        if self.force_x1_cpu or analysis.is_jax:
+            return {
+                "batched": self.use_jax_vmap is not False and analysis.is_jax,
+                "batch_size": self.n_batch,
+            }
+        return {}
+
+    def run(self, ctx):
+        """
+        Run Nautilus (the ``run(ctx)`` hook; see ``docs/design/run_ctx.md``) and return
+        the sampler.
+
+        A JAX analysis (or ``force_x1_cpu``) runs in this process through the fit's
+        objective, batched on JAX; otherwise likelihoods are spread over the fit's pool.
+        Nautilus resumes from its own native checkpoint (``checkpoint.hdf5``).
 
         Parameters
         ----------
-        model : ModelMapper
-            The model which generates instances for different points in parameter space.
-        analysis : Analysis
-            Contains the data and the log likelihood function which fits an instance of the model to the data, returning
-            the log likelihood the `NonLinearSearch` maximizes.
-
-        Returns
-        -------
-        A result object comprising the Samples object that includes the maximum log likelihood instance and full
-        set of accepted ssamples of the fit.
+        ctx
+            The fit's ``FitContext``.
         """
 
-        if not isinstance(self.paths, NullPaths):
+        if not isinstance(ctx.paths, NullPaths):
             checkpoint_exists = Path(self.checkpoint_file).exists()
         else:
             checkpoint_exists = False
@@ -346,49 +367,19 @@ class Nautilus(abstract_nest.AbstractNest):
                 "Starting new Nautilus non-linear search (no previous samples found)."
             )
 
-        if self.force_x1_cpu or analysis.is_jax:
-
-            fitness = Fitness(
-                model=model,
-                analysis=analysis,
-                paths=self.paths,
-                fom_is_log_likelihood=True,
-                resample_figure_of_merit=-1.0e99,
-                iterations_per_quick_update=self.iterations_per_quick_update,
-                background_quick_update=self.quick_update_background,
-                live_visual_update=self.live_visual_update,
-                # The vectorised (jax.vmap) likelihood needs a JAX analysis;
-                # `force_x1_cpu` with a numpy analysis evaluates point by point.
-                use_jax_vmap=self.use_jax_vmap and analysis.is_jax,
-                batch_size=self.n_batch,
+        if self.force_x1_cpu or ctx.pool.is_jax:
+            return self.fit_x1_cpu(
+                fitness=ctx.fitness,
+                model=ctx.model,
+                update=ctx.update,
             )
 
-            search_internal = self.fit_x1_cpu(
-                fitness=fitness,
-                model=model,
-                analysis=analysis,
-            )
-
-        else:
-
-            fitness = Fitness(
-                model=model,
-                analysis=analysis,
-                paths=self.paths,
-                fom_is_log_likelihood=True,
-                resample_figure_of_merit=-1.0e99,
-                iterations_per_quick_update=self.iterations_per_quick_update,
-                background_quick_update=self.quick_update_background,
-                live_visual_update=self.live_visual_update,
-            )
-
-            search_internal = self.fit_multiprocessing(
-                fitness=fitness,
-                model=model,
-                analysis=analysis,
-            )
-
-        return search_internal, fitness
+        return self.fit_multiprocessing(
+            fitness=ctx.fitness,
+            model=ctx.model,
+            pools=ctx.pool,
+            update=ctx.update,
+        )
 
     @property
     def sampler_cls(self):
@@ -418,7 +409,7 @@ class Nautilus(abstract_nest.AbstractNest):
         except TypeError:
             pass
 
-    def fit_x1_cpu(self, fitness, model, analysis):
+    def fit_x1_cpu(self, fitness, model, analysis=None, update=None):
         """
         Perform the non-linear search, using one CPU core.
 
@@ -437,7 +428,7 @@ class Nautilus(abstract_nest.AbstractNest):
             the log likelihood the search maximizes.
         """
 
-        if analysis.is_jax:
+        if fitness.analysis.is_jax:
             self.logger.info(
                 "Running search with JAX vectorization (parallelization handled by JAX)."
             )
@@ -452,7 +443,7 @@ class Nautilus(abstract_nest.AbstractNest):
             n_dim=model.prior_count,
             filepath=self.checkpoint_file,
             pool=None,
-            vectorized=fitness.use_jax_vmap,
+            vectorized=fitness.batched,
             n_live=self.n_live,
             n_update=self.n_update,
             enlarge_per_dim=self.enlarge_per_dim,
@@ -464,9 +455,15 @@ class Nautilus(abstract_nest.AbstractNest):
             seed=self.seed,
         )
 
-        return self.call_search(search_internal=search_internal, model=model, analysis=analysis, fitness=fitness)
+        return self.call_search(
+            search_internal=search_internal,
+            model=model,
+            analysis=analysis,
+            fitness=fitness,
+            update=update,
+        )
 
-    def fit_multiprocessing(self, fitness, model, analysis):
+    def fit_multiprocessing(self, fitness, model, analysis=None, pools=None, update=None):
         """
         Perform the non-linear search, using multiple CPU cores parallelized via Python's multiprocessing module.
 
@@ -520,14 +517,16 @@ class Nautilus(abstract_nest.AbstractNest):
         # unpickles a fresh copy for every likelihood call. Worker memory then
         # grows by a few MB per call (8-core RAL runs reached the 96 GB cgroup
         # limit) while the parent starves the pool serialising it (#1547).
-        if self.number_of_cores <= 1:
+        pools = pools if pools is not None else self._pools()
+
+        if pools.number_of_cores <= 1:
             pool_context = nullcontext(None)
         else:
             from nautilus.pool import initialize_worker
 
             pool_context = _LikelihoodWorkerPool(
                 fork_context().Pool(
-                    self.number_of_cores,
+                    pools.number_of_cores,
                     initializer=initialize_worker,
                     initargs=(fitness.call_wrap,),
                 )
@@ -556,7 +555,8 @@ class Nautilus(abstract_nest.AbstractNest):
                 search_internal=search_internal,
                 model=model,
                 analysis=analysis,
-                fitness=fitness
+                fitness=fitness,
+                update=update,
             )
 
         # Drop the pool references so their finalizers don't fire at interpreter
@@ -574,7 +574,7 @@ class Nautilus(abstract_nest.AbstractNest):
 
         return search_internal
 
-    def call_search(self, search_internal, model, analysis, fitness):
+    def call_search(self, search_internal, model, analysis, fitness, update=None):
         """
         The x1 CPU and multiprocessing searches both call this function to perform the non-linear search.
 
@@ -652,13 +652,16 @@ class Nautilus(abstract_nest.AbstractNest):
 
             if not finished:
 
-                self.perform_update(
-                    model=model,
-                    analysis=analysis,
-                    during_analysis=True,
-                    fitness=fitness,
-                    search_internal=search_internal
-                )
+                if update is not None:
+                    update(search_internal)
+                else:
+                    self.perform_update(
+                        model=model,
+                        analysis=analysis,
+                        during_analysis=True,
+                        fitness=fitness,
+                        search_internal=search_internal
+                    )
 
         return search_internal
 
@@ -743,51 +746,26 @@ class Nautilus(abstract_nest.AbstractNest):
             "number_live_points": int(search_internal.n_live),
         }
 
-    def samples_via_internal_from(
-        self, model: AbstractPriorModel, search_internal=None
-    ):
+    samples_cls = SamplesNest
+
+    def raw_samples_from(self, model, internal):
         """
-        Returns a `Samples` object from the nautilus internal results.
-
-        The samples contain all information on the parameter space sampling (e.g. the parameters,
-        log likelihoods, etc.).
-
-        The internal search results are converted from the native format used by the search to lists of values
-        (e.g. `parameter_lists`, `log_likelihood_list`).
-
-        Parameters
-        ----------
-        model
-            Maps input vectors of unit parameter values to physical values and model instances via priors.
+        Nautilus's posterior as ``RawSamples``: parameters, log likelihoods and the
+        exponentiated log weights.
         """
+        from autofit.non_linear.search.fit_context import RawSamples
 
-        if search_internal is None:
-            search_internal = self.paths.load_search_internal()
+        parameters, log_weights, log_likelihoods = internal.posterior()
 
-        parameters, log_weights, log_likelihoods = search_internal.posterior()
-
-        parameter_lists = parameters.tolist()
-        log_likelihood_list = log_likelihoods.tolist()
-        weight_list = np.exp(log_weights).tolist()
-
-        log_prior_list = [
-            sum(model.log_prior_list_from_vector(vector=vector))
-            for vector in parameter_lists
-        ]
-
-        sample_list = Sample.from_lists(
-            model=model,
-            parameter_lists=parameter_lists,
-            log_likelihood_list=log_likelihood_list,
-            log_prior_list=log_prior_list,
-            weight_list=weight_list,
+        return RawSamples(
+            parameters=parameters.tolist(),
+            log_likelihood=log_likelihoods.tolist(),
+            weights=np.exp(log_weights).tolist(),
+            info=self.info_from(internal),
         )
 
-        return SamplesNest(
-            model=model,
-            sample_list=sample_list,
-            samples_info=self.samples_info_from(search_internal=search_internal),
-        )
+    def info_from(self, internal):
+        return self.samples_info_from(search_internal=internal)
 
     @property
     def batch_size(self):

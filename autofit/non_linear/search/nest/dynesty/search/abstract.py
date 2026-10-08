@@ -11,7 +11,6 @@ import numpy as np
 import warnings
 
 from autofit import exc
-from autofit.non_linear.fitness import Fitness
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.paths.null import NullPaths
 from autofit.non_linear.search.nest.abstract_nest import AbstractNest
@@ -109,7 +108,7 @@ class AbstractDynesty(AbstractNest, ABC):
         number_of_cores: int = 1,
         silence: bool = False,
         force_x1_cpu: bool = False,
-        use_jax_jit: bool = True,
+        use_jax_jit: Optional[bool] = None,
         session: Optional[sa.orm.Session] = None,
         **kwargs,
     ):
@@ -175,6 +174,18 @@ class AbstractDynesty(AbstractNest, ABC):
 
         self.maxcall = maxcall
         self.force_x1_cpu = force_x1_cpu
+        if use_jax_jit is not None:
+            from autofit.non_linear.search.abstract_search import (
+                warn_deprecated_jax_knob,
+            )
+
+            warn_deprecated_jax_knob(
+                type(self).__name__,
+                "use_jax_jit",
+                "a JAX analysis is always jitted lazily (use_jax_jit=False still "
+                "evaluates it eagerly until the argument is removed).",
+            )
+
         self.use_jax_jit = use_jax_jit
 
         self.logger.debug(f"Creating {self.__class__.__name__} Search")
@@ -235,16 +246,13 @@ class AbstractDynesty(AbstractNest, ABC):
         set of accepted samples of the fit.
         """
 
-        fitness = Fitness(
-            model=model,
+        fitness = self.make_fitness(
             analysis=analysis,
-            paths=self.paths,
-            fom_is_log_likelihood=True,
-            resample_figure_of_merit=-1.0e99,
-            iterations_per_quick_update=self.iterations_per_quick_update,
-            background_quick_update=self.quick_update_background,
-            live_visual_update=self.live_visual_update,
-            use_jax_jit=analysis.is_jax and self.use_jax_jit,
+            model=model,
+            # A JAX analysis is jitted lazily by the scalar objective `__call__`
+            # dispatches to; the deprecated `use_jax_jit=False` keeps its old meaning
+            # (eager JAX) for one release.
+            compile=self.use_jax_jit is not False,
         )
 
         if not isinstance(self.paths, NullPaths):
@@ -261,17 +269,21 @@ class AbstractDynesty(AbstractNest, ABC):
                 "Starting new Dynesty non-linear search (no previous samples found)."
             )
 
+        # The fit's effective core count: the JAX fork rule makes it 1 for a JAX
+        # analysis (`autofit.non_linear.parallel.pool`).
+        number_of_cores = self._pools().number_of_cores
+
         finished = False
 
         while not finished:
             try:
-                if self.number_of_cores <= 1 or self.force_x1_cpu or analysis.is_jax:
+                if number_of_cores <= 1 or self.force_x1_cpu or analysis.is_jax:
                     raise RuntimeError
 
                 Pool = _fork_pool_cls()
 
                 with Pool(
-                    njobs=self.number_of_cores,
+                    njobs=number_of_cores,
                     loglike=fitness,
                     prior_transform=prior_transform,
                     logl_args=(model, fitness),
@@ -282,7 +294,7 @@ class AbstractDynesty(AbstractNest, ABC):
                         fitness=fitness,
                         checkpoint_exists=checkpoint_exists,
                         pool=pool,
-                        queue_size=self.number_of_cores,
+                        queue_size=number_of_cores,
                     )
 
                     finished = self.run_search_internal(search_internal=search_internal)
@@ -299,7 +311,7 @@ class AbstractDynesty(AbstractNest, ABC):
                         self.logger.info(
                             "Running Dynesty single-CPU per `force_x1_cpu=True` (no pool)."
                         )
-                    elif self.number_of_cores <= 1:
+                    elif number_of_cores <= 1:
                         self.logger.info(
                             "Running Dynesty single-CPU (number_of_cores=1, no pool)."
                         )
@@ -567,12 +579,11 @@ class AbstractDynesty(AbstractNest, ABC):
             unit_parameters,
             parameters,
             log_likelihood_list,
-        ) = self.initializer.samples_from_model(
-            total_points=self.number_live_points,
+        ) = self.start_points(
             model=model,
             fitness=fitness,
-            paths=self.paths,
-            n_cores=self.number_of_cores,
+            n=self.number_live_points,
+            plot=False,
         )
 
         init_unit_parameters = np.zeros(

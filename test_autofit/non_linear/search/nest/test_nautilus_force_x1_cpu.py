@@ -26,7 +26,9 @@ def test_force_x1_cpu_runs_with_a_numpy_analysis(monkeypatch):
     monkeypatch.setenv("PYAUTO_TEST_MODE", "1")
     search = af.Nautilus(force_x1_cpu=True)
 
-    assert search.use_jax_vmap is True
+    # Default: the deprecated knob is unset, so the batched objective is chosen by
+    # the analysis alone (numpy -> point by point).
+    assert search.use_jax_vmap is None
 
     result = search.fit(model=af.Model(af.ex.Gaussian), analysis=NumpyAnalysis())
 

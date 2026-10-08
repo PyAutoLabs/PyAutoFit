@@ -7,7 +7,7 @@ import numpy as np
 import os
 import time
 import warnings
-from abc import ABC, abstractmethod
+from abc import ABC, ABCMeta, abstractmethod
 from collections import Counter
 from functools import wraps
 from pathlib import Path
@@ -37,7 +37,12 @@ from autofit.non_linear.fitness import Fitness
 # `ITERATIONS_NEVER` is defined in `fitness.py` (so `Fitness.manage_quick_update` can
 # use it) and re-exported here for existing importers, e.g. `multi_start_gradient`.
 from autofit.non_linear.fitness import ITERATIONS_NEVER  # noqa: F401
-from autofit.non_linear.parallel import SneakyPool, fork_context
+from autofit.non_linear.parallel import (
+    PoolFactory,
+    SneakyPool,
+    check_factor_search_cores,
+    fork_context,
+)
 from autofit.non_linear.search.updater import log_process_state
 from autofit.non_linear.paths.abstract import AbstractPaths
 from autofit.non_linear.paths.database import DatabasePaths
@@ -66,6 +71,24 @@ logger = logging.getLogger(__name__)
 # construction and search chaining.  Keep fallback sampling bounded so an
 # impossible model fails clearly instead of hanging a smoke-test worker.
 TEST_MODE_REPRESENTATIVE_MAX_ATTEMPTS = 100
+
+
+def warn_deprecated_jax_knob(owner: str, name: str, instead: str):
+    """
+    Warn, as a ``FutureWarning`` so end users see it, that the deprecated JAX knob
+    ``name`` was passed to ``owner``.
+
+    ``use_jax_jit`` and ``use_jax_vmap`` stay accepted for one release (search-
+    extensibility phase A2): every search now selects its objective through
+    ``Fitness.objective(kind)``, jitting a JAX analysis lazily and batching it where
+    the backend has a batched fast path.
+    """
+    warnings.warn(
+        f"{owner}({name}=...) is deprecated and will be removed after one release: "
+        f"{instead}",
+        FutureWarning,
+        stacklevel=3,
+    )
 
 
 def check_cores(func):
@@ -136,7 +159,30 @@ def configure_handler(func):
     return decorated
 
 
-class NonLinearSearch(AbstractFactorOptimiser, ABC):
+class _SearchMeta(ABCMeta):
+    """
+    Keeps ``NonLinearSearch`` abstract until a subclass implements its backend through
+    either hook: overriding ``_fit`` (the legacy contract) or ``run(ctx)`` (the bridge,
+    ``docs/design/run_ctx.md``). ``_fit`` stays an abstract method; a class that
+    defines ``run`` is concrete because the inherited ``_fit`` is the bridge to it.
+    """
+
+    def __new__(mcls, name, bases, namespace, **kwargs):
+        cls = super().__new__(mcls, name, bases, namespace, **kwargs)
+
+        run = getattr(cls, "run", None)
+
+        if (
+            "_fit" in cls.__abstractmethods__
+            and run is not None
+            and not getattr(run, "_is_bridge_default", False)
+        ):
+            cls.__abstractmethods__ = frozenset(cls.__abstractmethods__ - {"_fit"})
+
+        return cls
+
+
+class NonLinearSearch(AbstractFactorOptimiser, ABC, metaclass=_SearchMeta):
     # Visualization switches toggled per factor search by ``optimise`` (EP),
     # governed by ``general.yaml -> output -> visualize_ep_factor_searches``.
     # Class-level (not set in ``__init__``) so search doubles that skip
@@ -402,41 +448,9 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
                 f" AnalysisFactors, HierarchicalFactors and PriorFactors"
             )
 
-        # A deliberate refusal, not a silent downgrade. `number_of_cores` is the
-        # user's stated intent, and the *same* search instance is re-entered once
-        # per factor per EP step — so quietly rewriting it to 1 here would mutate
-        # shared state the caller still owns and would hide the misconfiguration
-        # rather than fix it. Raising makes the operator change the search they
-        # built.
-        #
-        # The guard lives here, in `AbstractSearch.optimise`, rather than in any
-        # one search: `optimise` is the single door every factor optimisation
-        # passes through, so every search type (Nautilus, Dynesty, Emcee, the MLE
-        # searches) is covered by one check instead of N.
-        #
-        # `getattr` with a default of 1: a handful of search doubles subclass
-        # `NonLinearSearch` without running its `__init__` (e.g. the regression
-        # suite's `StaticSearch`), and they run nothing in parallel anyway.
-        number_of_cores = getattr(self, "number_of_cores", 1)
-
-        if number_of_cores > 1:
-            raise exc.SearchException(
-                f"Expectation propagation never runs a factor search through a "
-                f"Python multiprocessing pool (human ruling 2026-09-09), but the "
-                f"factor optimiser {self.__class__.__name__} was built with "
-                f"number_of_cores={number_of_cores}.\n\n"
-                f"Why: a forked likelihood worker that dies (a segfault, an OOM "
-                f"kill) is silently replaced by `multiprocessing.Pool`, but the "
-                f"task it was running is never re-issued, so the `Pool.map` "
-                f"driving the fit blocks forever and the EP run hangs to the wall "
-                f"clock rather than failing. RAL job 342351_0 burned 27 hours "
-                f"exactly this way.\n\n"
-                f"Fix, either of:\n"
-                f"  - build the factor search with number_of_cores=1;\n"
-                f"  - get parallelism from a vectorised JAX likelihood instead, "
-                f"`Analysis(use_jax=True)` — Nautilus then takes `fit_x1_cpu` "
-                f"with vectorized=True and no pool at all."
-            )
+        # A deliberate refusal, not a silent downgrade: EP never forks a factor
+        # search (`autofit.non_linear.parallel.pool.check_factor_search_cores`).
+        check_factor_search_cores(self)
 
         model = factor.prior_model.mapper_from_prior_arguments(
             {
@@ -557,6 +571,8 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             del state["_logger"]
         if "paths" in state:
             del state["paths"]
+        # Per-fit state, never serialized with the search.
+        state.pop("_fit_pools", None)
         return state
 
     @property
@@ -673,6 +689,10 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             If the model has 0 dimensions.
         """
         self.check_model(model=model)
+
+        # Per-fit: set by `start_resume_fit` when the fit's pools are resolved, and read
+        # by `search.summary`; cleared so a reused search never reports a stale count.
+        self._parallel_summary = None
 
         if analysis.is_jax:
             try:
@@ -878,11 +898,19 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         # smoke runs use `PYAUTO_TEST_MODE>=2`, which returned above.
         cap.check_jax_required(self, analysis)
 
+        # The fit's pools, with the one JAX fork rule applied once (one INFO line when it
+        # downgrades) and the effective worker count recorded for `search.summary`.
+        self._fit_pools = PoolFactory(self, analysis)
+        self._parallel_summary = self._fit_pools.summary
+
         model.freeze()
-        search_internal, fitness = self._fit(
-            model=model,
-            analysis=analysis,
-        )
+        try:
+            search_internal, fitness = self._fit(
+                model=model,
+                analysis=analysis,
+            )
+        finally:
+            self._fit_pools = None
 
         if hasattr(fitness, "shutdown_quick_update"):
             fitness.shutdown_quick_update()
@@ -1407,9 +1435,144 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             weight_list=(weights / weights.sum()).tolist(),
         )
 
+    # Whether `ctx.start_points` makes the start-point plot. `Drawer` draws its whole
+    # result through the initializer, so it has no starting point to plot.
+    _plots_start_point = True
+
+    # The `Samples` class `samples_from_raw` builds for a `run(ctx)` search.
+    samples_cls = Samples
+
     @abstractmethod
     def _fit(self, model: AbstractPriorModel, analysis: Analysis):
-        pass
+        """
+        Run the backend and return ``(search_internal, fitness)``.
+
+        A search either overrides this (every search not yet migrated) or implements
+        ``run(ctx)``, in which case this is the bridge (``docs/design/run_ctx.md``): it
+        builds the fit's ``Fitness`` and ``FitContext`` -- after the test-mode bypass and
+        the fail-fast gates, which ``start_resume_fit`` has already run -- calls
+        ``run(ctx)`` and cleans the context up on every exit.
+        """
+        if type(self).run is NonLinearSearch.run:
+            raise NotImplementedError(
+                f"{type(self).__name__} implements neither run(ctx) nor _fit."
+            )
+
+        from autofit.non_linear.search.fit_context import FitContext
+
+        fitness = self.make_fitness(
+            analysis=analysis, model=model, **self.fitness_overrides(analysis)
+        )
+
+        ctx = FitContext(
+            search=self,
+            model=model,
+            analysis=analysis,
+            fitness=fitness,
+            pool=self._pools(),
+            test_mode_level=test_mode_level(),
+        )
+
+        try:
+            search_internal = self.run(ctx)
+        except BaseException:
+            ctx.close(failed=True)
+            raise
+
+        ctx.close(failed=False)
+
+        return search_internal, fitness
+
+    def run(self, ctx) -> Any:
+        """
+        The backend loop of a search on the ``run(ctx)`` hook: run the backend through
+        ``ctx`` and return its internal state (``search_internal``). See
+        ``docs/design/run_ctx.md``.
+        """
+        raise NotImplementedError
+
+    run._is_bridge_default = True
+
+    def raw_samples_from(self, model: AbstractPriorModel, internal):
+        """
+        Map a ``run(ctx)`` search's internal state onto a ``RawSamples``
+        (``autofit.non_linear.search.fit_context``).
+        """
+        raise NotImplementedError
+
+    def info_from(self, internal) -> Optional[dict]:
+        """
+        The ``samples_info`` entries of a ``run(ctx)`` search's internal state.
+        """
+        return None
+
+    def fitness_overrides(self, analysis: Analysis) -> dict:
+        """
+        ``Fitness`` keyword arguments a ``run(ctx)`` search adds to ``make_fitness`` for
+        this analysis (e.g. ``batched=True`` for a batched backend). Empty by default.
+        """
+        return {}
+
+    def make_fitness(
+        self, analysis: Analysis, model: AbstractPriorModel, **overrides
+    ) -> Fitness:
+        """
+        The `Fitness` this search evaluates its likelihood through, the one construction
+        site every search shares.
+
+        Its figure-of-merit convention comes from the search's declared capabilities
+        (`autofit.non_linear.search.capabilities`), never from per-site literals:
+
+        - `objective_target.quantity` picks what the objective returns: the log
+          likelihood (`fom_is_log_likelihood=True`), the log posterior, or -2 x the log
+          posterior (`convert_to_chi_squared=True`, for the minimizers);
+        - `invalid_value` is the sentinel the backend sees for an invalid model. For a
+          `neg2_log_posterior` search that is the value *after* the -2 multiply, so the
+          `resample_figure_of_merit` substituted before it is `invalid_value / -2`
+          (`+inf` -> `-inf`).
+
+        The quick-update cadence, background worker and live-visual settings are always
+        forwarded, so no search can silently drop quick updates (what
+        `test_quick_update_wiring.py` used to scan for).
+
+        Parameters
+        ----------
+        analysis
+            The analysis whose likelihood is wrapped.
+        model
+            The model being fitted.
+        overrides
+            Any other `Fitness` keyword argument, which wins over the derived and
+            forwarded ones (e.g. `batched=True`, `store_history=True`).
+        """
+        target = type(self).objective_target
+
+        kwargs = dict(
+            model=model,
+            analysis=analysis,
+            paths=self.paths,
+            iterations_per_quick_update=self.iterations_per_quick_update,
+            background_quick_update=self.quick_update_background,
+            live_visual_update=self.live_visual_update,
+        )
+
+        if target is not None:
+            quantity = target.quantity
+            neg2 = quantity == cap.ObjectiveQuantity.NEG2_LOG_POSTERIOR
+
+            kwargs.update(
+                fom_is_log_likelihood=quantity == cap.ObjectiveQuantity.LOG_LIKELIHOOD,
+                convert_to_chi_squared=neg2,
+                resample_figure_of_merit=(
+                    type(self).invalid_value / -2.0
+                    if neg2
+                    else type(self).invalid_value
+                ),
+            )
+
+        kwargs.update(overrides)
+
+        return Fitness(**kwargs)
 
     def check_model(self, model: AbstractPriorModel):
         if model is not None and model.prior_count == 0:
@@ -1639,6 +1802,61 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             plot_search=False,
         )
 
+    def start_points(
+        self,
+        model: AbstractPriorModel,
+        fitness: Fitness,
+        n: int,
+        plot: bool = True,
+        **initializer_kwargs,
+    ):
+        """
+        The search's ``n`` initial points, drawn by its initializer, with the start-point
+        plot made once, here, from the first of them.
+
+        The one place the searches draw start points: the initializer is evaluated through
+        ``fitness`` (so a JAX analysis runs its lazily jitted scalar objective) with the
+        fit's effective core count (the JAX fork rule of ``PoolFactory``).
+
+        Parameters
+        ----------
+        model
+            The model being fitted.
+        fitness
+            The fit's ``Fitness``; its analysis visualizes the start point.
+        n
+            The number of points.
+        plot
+            ``False`` skips the start-point plot, for searches whose initial points are
+            not a starting point (``Drawer`` draws its whole result this way, Dynesty its
+            initial live points).
+        initializer_kwargs
+            Passed to ``initializer.samples_from_model`` (e.g. ``test_mode_samples``).
+
+        Returns
+        -------
+        The initializer's ``(unit_parameter_lists, parameter_lists, figure_of_merit_list)``.
+        """
+        unit_parameter_lists, parameter_lists, figure_of_merit_list = (
+            self.initializer.samples_from_model(
+                total_points=n,
+                model=model,
+                fitness=fitness,
+                paths=self.paths,
+                n_cores=self._pools().number_of_cores,
+                **initializer_kwargs,
+            )
+        )
+
+        if plot:
+            self.plot_start_point(
+                parameter_vector=parameter_lists[0],
+                model=model,
+                analysis=fitness.analysis,
+            )
+
+        return unit_parameter_lists, parameter_lists, figure_of_merit_list
+
     def samples_from(self, model: AbstractPriorModel, search_internal=None) -> Samples:
         """
         Loads the samples of a non-linear search from its output files.
@@ -1671,9 +1889,32 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
     def samples_via_internal_from(
         self, model: AbstractPriorModel, search_internal=None
     ):
-        raise NotImplementedError
+        """
+        The samples of the internal state. A ``run(ctx)`` search gets them from its
+        ``raw_samples_from``; any other search overrides this.
+        """
+        if type(self).raw_samples_from is NonLinearSearch.raw_samples_from:
+            raise NotImplementedError
 
-    @check_cores
+        from autofit.non_linear.search.fit_context import samples_from_raw
+
+        if search_internal is None:
+            search_internal = self.paths.load_search_internal()
+
+        return samples_from_raw(
+            model=model,
+            raw=self.raw_samples_from(model, search_internal),
+            samples_cls=self.samples_cls,
+        )
+
+    def _pools(self) -> PoolFactory:
+        """
+        The current fit's `PoolFactory` (the JAX fork rule applied to its analysis), or,
+        outside a fit, one built from `number_of_cores` alone.
+        """
+        pools = self.__dict__.get("_fit_pools")
+        return pools if pools is not None else PoolFactory(self)
+
     def make_pool(self):
         """Make the pool instance used to parallelize a `NonLinearSearch` alongside a set of unique ids for every
         process in the pool. If the specified number of cores is 1, a pool instance is not made and None is returned.
@@ -1684,10 +1925,8 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         The pool instance is also set up with a list of unique pool ids, which are used during model-fitting to
         identify a 'master core' (the one whose id value is lowest) which handles model result output, visualization,
         etc."""
-        self.logger.info("...using pool")
-        return fork_context().Pool(processes=self.number_of_cores)
+        return self._pools()()
 
-    @check_cores
     def make_sneaky_pool(self, fitness: Fitness) -> Optional[SneakyPool]:
         """
         Create a pool for multiprocessing that uses slight-of-hand
@@ -1705,14 +1944,7 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         An implementation of a multiprocessing pool
         """
 
-        self.logger.warning(
-            "...using SneakyPool. This copies the likelihood function "
-            "to each process on instantiation to avoid copying multiple "
-            "times."
-        )
-        return SneakyPool(
-            processes=self.number_of_cores, paths=self.paths, fitness=fitness
-        )
+        return self._pools().sneaky(fitness)
 
     def __eq__(self, other):
         return isinstance(other, NonLinearSearch) and self.__dict__ == other.__dict__
