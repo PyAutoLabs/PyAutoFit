@@ -37,7 +37,12 @@ from autofit.non_linear.fitness import Fitness
 # `ITERATIONS_NEVER` is defined in `fitness.py` (so `Fitness.manage_quick_update` can
 # use it) and re-exported here for existing importers, e.g. `multi_start_gradient`.
 from autofit.non_linear.fitness import ITERATIONS_NEVER  # noqa: F401
-from autofit.non_linear.parallel import SneakyPool, fork_context
+from autofit.non_linear.parallel import (
+    PoolFactory,
+    SneakyPool,
+    check_factor_search_cores,
+    fork_context,
+)
 from autofit.non_linear.search.updater import log_process_state
 from autofit.non_linear.paths.abstract import AbstractPaths
 from autofit.non_linear.paths.database import DatabasePaths
@@ -420,41 +425,9 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
                 f" AnalysisFactors, HierarchicalFactors and PriorFactors"
             )
 
-        # A deliberate refusal, not a silent downgrade. `number_of_cores` is the
-        # user's stated intent, and the *same* search instance is re-entered once
-        # per factor per EP step — so quietly rewriting it to 1 here would mutate
-        # shared state the caller still owns and would hide the misconfiguration
-        # rather than fix it. Raising makes the operator change the search they
-        # built.
-        #
-        # The guard lives here, in `AbstractSearch.optimise`, rather than in any
-        # one search: `optimise` is the single door every factor optimisation
-        # passes through, so every search type (Nautilus, Dynesty, Emcee, the MLE
-        # searches) is covered by one check instead of N.
-        #
-        # `getattr` with a default of 1: a handful of search doubles subclass
-        # `NonLinearSearch` without running its `__init__` (e.g. the regression
-        # suite's `StaticSearch`), and they run nothing in parallel anyway.
-        number_of_cores = getattr(self, "number_of_cores", 1)
-
-        if number_of_cores > 1:
-            raise exc.SearchException(
-                f"Expectation propagation never runs a factor search through a "
-                f"Python multiprocessing pool (human ruling 2026-09-09), but the "
-                f"factor optimiser {self.__class__.__name__} was built with "
-                f"number_of_cores={number_of_cores}.\n\n"
-                f"Why: a forked likelihood worker that dies (a segfault, an OOM "
-                f"kill) is silently replaced by `multiprocessing.Pool`, but the "
-                f"task it was running is never re-issued, so the `Pool.map` "
-                f"driving the fit blocks forever and the EP run hangs to the wall "
-                f"clock rather than failing. RAL job 342351_0 burned 27 hours "
-                f"exactly this way.\n\n"
-                f"Fix, either of:\n"
-                f"  - build the factor search with number_of_cores=1;\n"
-                f"  - get parallelism from a vectorised JAX likelihood instead, "
-                f"`Analysis(use_jax=True)` — Nautilus then takes `fit_x1_cpu` "
-                f"with vectorized=True and no pool at all."
-            )
+        # A deliberate refusal, not a silent downgrade: EP never forks a factor
+        # search (`autofit.non_linear.parallel.pool.check_factor_search_cores`).
+        check_factor_search_cores(self)
 
         model = factor.prior_model.mapper_from_prior_arguments(
             {
@@ -575,6 +548,8 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             del state["_logger"]
         if "paths" in state:
             del state["paths"]
+        # Per-fit state, never serialized with the search.
+        state.pop("_fit_pools", None)
         return state
 
     @property
@@ -691,6 +666,10 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             If the model has 0 dimensions.
         """
         self.check_model(model=model)
+
+        # Per-fit: set by `start_resume_fit` when the fit's pools are resolved, and read
+        # by `search.summary`; cleared so a reused search never reports a stale count.
+        self._parallel_summary = None
 
         if analysis.is_jax:
             try:
@@ -896,11 +875,19 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         # smoke runs use `PYAUTO_TEST_MODE>=2`, which returned above.
         cap.check_jax_required(self, analysis)
 
+        # The fit's pools, with the one JAX fork rule applied once (one INFO line when it
+        # downgrades) and the effective worker count recorded for `search.summary`.
+        self._fit_pools = PoolFactory(self, analysis)
+        self._parallel_summary = self._fit_pools.summary
+
         model.freeze()
-        search_internal, fitness = self._fit(
-            model=model,
-            analysis=analysis,
-        )
+        try:
+            search_internal, fitness = self._fit(
+                model=model,
+                analysis=analysis,
+            )
+        finally:
+            self._fit_pools = None
 
         if hasattr(fitness, "shutdown_quick_update"):
             fitness.shutdown_quick_update()
@@ -1752,7 +1739,14 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
     ):
         raise NotImplementedError
 
-    @check_cores
+    def _pools(self) -> PoolFactory:
+        """
+        The current fit's `PoolFactory` (the JAX fork rule applied to its analysis), or,
+        outside a fit, one built from `number_of_cores` alone.
+        """
+        pools = self.__dict__.get("_fit_pools")
+        return pools if pools is not None else PoolFactory(self)
+
     def make_pool(self):
         """Make the pool instance used to parallelize a `NonLinearSearch` alongside a set of unique ids for every
         process in the pool. If the specified number of cores is 1, a pool instance is not made and None is returned.
@@ -1763,10 +1757,8 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         The pool instance is also set up with a list of unique pool ids, which are used during model-fitting to
         identify a 'master core' (the one whose id value is lowest) which handles model result output, visualization,
         etc."""
-        self.logger.info("...using pool")
-        return fork_context().Pool(processes=self.number_of_cores)
+        return self._pools()()
 
-    @check_cores
     def make_sneaky_pool(self, fitness: Fitness) -> Optional[SneakyPool]:
         """
         Create a pool for multiprocessing that uses slight-of-hand
@@ -1784,14 +1776,7 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         An implementation of a multiprocessing pool
         """
 
-        self.logger.warning(
-            "...using SneakyPool. This copies the likelihood function "
-            "to each process on instantiation to avoid copying multiple "
-            "times."
-        )
-        return SneakyPool(
-            processes=self.number_of_cores, paths=self.paths, fitness=fitness
-        )
+        return self._pools().sneaky(fitness)
 
     def __eq__(self, other):
         return isinstance(other, NonLinearSearch) and self.__dict__ == other.__dict__

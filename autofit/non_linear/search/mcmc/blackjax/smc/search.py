@@ -400,7 +400,7 @@ class SMC(AbstractMCMC):
             model=model,
             fitness=fitness,
             paths=self.paths,
-            n_cores=self.number_of_cores,
+            n_cores=self._pools().number_of_cores,
         )
 
         self.plot_start_point(

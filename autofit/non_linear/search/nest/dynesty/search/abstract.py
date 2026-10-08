@@ -269,17 +269,21 @@ class AbstractDynesty(AbstractNest, ABC):
                 "Starting new Dynesty non-linear search (no previous samples found)."
             )
 
+        # The fit's effective core count: the JAX fork rule makes it 1 for a JAX
+        # analysis (`autofit.non_linear.parallel.pool`).
+        number_of_cores = self._pools().number_of_cores
+
         finished = False
 
         while not finished:
             try:
-                if self.number_of_cores <= 1 or self.force_x1_cpu or analysis.is_jax:
+                if number_of_cores <= 1 or self.force_x1_cpu or analysis.is_jax:
                     raise RuntimeError
 
                 Pool = _fork_pool_cls()
 
                 with Pool(
-                    njobs=self.number_of_cores,
+                    njobs=number_of_cores,
                     loglike=fitness,
                     prior_transform=prior_transform,
                     logl_args=(model, fitness),
@@ -290,7 +294,7 @@ class AbstractDynesty(AbstractNest, ABC):
                         fitness=fitness,
                         checkpoint_exists=checkpoint_exists,
                         pool=pool,
-                        queue_size=self.number_of_cores,
+                        queue_size=number_of_cores,
                     )
 
                     finished = self.run_search_internal(search_internal=search_internal)
@@ -307,7 +311,7 @@ class AbstractDynesty(AbstractNest, ABC):
                         self.logger.info(
                             "Running Dynesty single-CPU per `force_x1_cpu=True` (no pool)."
                         )
-                    elif self.number_of_cores <= 1:
+                    elif number_of_cores <= 1:
                         self.logger.info(
                             "Running Dynesty single-CPU (number_of_cores=1, no pool)."
                         )
@@ -580,7 +584,7 @@ class AbstractDynesty(AbstractNest, ABC):
             model=model,
             fitness=fitness,
             paths=self.paths,
-            n_cores=self.number_of_cores,
+            n_cores=self._pools().number_of_cores,
         )
 
         init_unit_parameters = np.zeros(

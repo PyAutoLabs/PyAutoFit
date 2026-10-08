@@ -33,7 +33,9 @@ class NumpyAnalysis(af.Analysis):
         super().__init__(use_jax=use_jax)
 
     def log_likelihood_function(self, instance):
-        return -0.5 * float((instance.centre - 50.0) ** 2)
+        # Traceable on both backends: a `use_jax=True` analysis is jitted by every search
+        # (search-extensibility phase A2), so a host `float(...)` would not trace.
+        return -0.5 * (instance.centre - 50.0) ** 2
 
 
 class ForwardAnalysis(NumpyAnalysis):

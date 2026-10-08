@@ -264,3 +264,12 @@ def capability_summary_from(search) -> str:
         f"{invalid_value_to_str(cls.invalid_value)}\n"
         f"Status = {cls.status}\n"
     )
+
+
+def run_summary_from(search) -> str:
+    """
+    The run-time lines ``search.summary`` adds below the static capabilities: the
+    requested and effective worker counts of the last fit (the JAX fork rule of
+    ``autofit.non_linear.parallel.pool``). Empty before a fit has resolved its pools.
+    """
+    return getattr(search, "_parallel_summary", None) or ""

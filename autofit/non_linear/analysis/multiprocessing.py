@@ -82,6 +82,19 @@ class AnalysisPool:
         n_cores
             The number of cores available to perform analyses over
         """
+        self.processes = list()
+
+        # The one JAX fork rule (`autofit.non_linear.parallel.pool`). This pool always
+        # forks (at least one process), so it refuses a JAX analysis outright.
+        if any(getattr(analysis, "is_jax", False) for analysis in analyses):
+            from autofit import exc
+            from autofit.non_linear.parallel.pool import JAX_FORK_REASON
+
+            raise exc.SearchException(
+                f"AnalysisPool cannot evaluate a JAX analysis: {JAX_FORK_REASON}. "
+                "Evaluate the analyses in this process instead."
+            )
+
         self.analyses = analyses
         self.n_cores = n_cores
 

@@ -517,14 +517,16 @@ class Nautilus(abstract_nest.AbstractNest):
         # unpickles a fresh copy for every likelihood call. Worker memory then
         # grows by a few MB per call (8-core RAL runs reached the 96 GB cgroup
         # limit) while the parent starves the pool serialising it (#1547).
-        if self.number_of_cores <= 1:
+        pools = self._pools()
+
+        if pools.number_of_cores <= 1:
             pool_context = nullcontext(None)
         else:
             from nautilus.pool import initialize_worker
 
             pool_context = _LikelihoodWorkerPool(
                 fork_context().Pool(
-                    self.number_of_cores,
+                    pools.number_of_cores,
                     initializer=initialize_worker,
                     initargs=(fitness.call_wrap,),
                 )

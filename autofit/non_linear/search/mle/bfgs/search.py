@@ -271,7 +271,7 @@ class AbstractBFGS(AbstractMLE):
                 model=model,
                 fitness=fitness,
                 paths=self.paths,
-                n_cores=self.number_of_cores,
+                n_cores=self._pools().number_of_cores,
             )
 
             x0 = np.asarray(parameter_lists[0])

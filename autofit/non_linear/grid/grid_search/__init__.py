@@ -7,7 +7,7 @@ from typing import List, Tuple, Union, Type, Optional, Dict
 from autonerves.dictable import to_dict
 from autofit import exc
 from autofit.mapper import prior as p
-from autofit.non_linear.parallel import Process
+from autofit.non_linear.parallel import Process, effective_number_of_cores
 from autofit.text.formatter import write_table
 from .job import Job
 from .result import GridSearchResult
@@ -182,7 +182,15 @@ class GridSearch:
 
         self.logger.info("Running grid search...")
 
-        process_class = Process if self.parallel else Sequential
+        # The one JAX fork rule (`autofit.non_linear.parallel.pool`): the grid's job
+        # pool never forks a JAX analysis, it runs the cells sequentially instead.
+        parallel = self.parallel and effective_number_of_cores(
+            requested=self.number_of_cores,
+            is_jax=getattr(analysis, "is_jax", False),
+            where="GridSearch",
+        ) > 1
+
+        process_class = Process if parallel else Sequential
         # noinspection PyArgumentList
         return self._fit(
             model=model,

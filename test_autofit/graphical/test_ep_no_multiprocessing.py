@@ -52,6 +52,7 @@ def make_no_forking(monkeypatch):
     module_paths = (
         "autofit.non_linear.parallel",
         "autofit.non_linear.parallel.context",
+        "autofit.non_linear.parallel.pool",
         "autofit.non_linear.search.abstract_search",
         "autofit.non_linear.search.nest.dynesty.search.abstract",
         "autofit.non_linear.search.nest.nautilus.search",
