@@ -37,7 +37,11 @@ class Emcee(AbstractMCMC):
     honours_gradient_mode = False
     posterior_kind = cap.PosteriorKind.CHAIN
     produces_evidence = False
-    resumable = False
+    # Resumable: ``_fit`` reopens the HDF backend, loads the last sample and iteration
+    # count and samples only the remaining steps. The search-extensibility report's
+    # section 3.1 table listed Emcee as not resumable; that was corrected here (A1
+    # review) against the published meaning "resumes from its own checkpoint".
+    resumable = True
     warm_start = cap.WarmStart.CONSUMER
     install_extra = ""
     upstream_url = "https://github.com/dfm/emcee"

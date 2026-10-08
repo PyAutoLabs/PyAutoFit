@@ -43,7 +43,7 @@ Capabilities
      - no
      - chain
      - no
-     - no
+     - yes
      - consumer
      - base
      - stable
