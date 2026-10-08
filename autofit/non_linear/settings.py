@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from typing import Optional, List, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -51,6 +52,13 @@ class SettingsSearch:
 
     @property
     def search_dict(self):
+        """
+        Every search setting as a dictionary, including ``use_jax_vmap``.
+
+        Only searches whose constructor accepts ``use_jax_vmap`` (e.g. ``Nautilus``) use it; any other search
+        logs it as an unknown keyword argument. Use ``search_dict_for`` to get the settings filtered to what a
+        given search accepts.
+        """
         return {
             "path_prefix": self.path_prefix,
             "unique_tag": self.unique_tag,
@@ -58,6 +66,26 @@ class SettingsSearch:
             "session": self.session,
             "use_jax_vmap": self.use_jax_vmap,
         }
+
+    def search_dict_for(self, search_cls) -> dict:
+        """
+        The search settings as a dictionary for the search class ``search_cls``.
+
+        ``use_jax_vmap`` is included only when the signature of ``search_cls.__init__`` names it, so a search
+        that does not vectorise its likelihood does not receive (and warn about) an argument it ignores. Use as
+        ``search_cls(**settings_search.search_dict_for(search_cls), ...)``.
+
+        Parameters
+        ----------
+        search_cls
+            The non-linear search class the settings are passed to.
+        """
+        search_dict = self.search_dict
+
+        if "use_jax_vmap" not in inspect.signature(search_cls.__init__).parameters:
+            search_dict.pop("use_jax_vmap")
+
+        return search_dict
 
     @property
     def fit_dict(self):

@@ -281,14 +281,6 @@ class Zeus(AbstractMCMC):
                     if samples.converged:
                         iterations_remaining = 0
 
-            auto_correlation_time = zeus.AutoCorrTime(
-                samples=search_internal.get_chain()
-            )
-
-            discard = int(3.0 * np.max(auto_correlation_time))
-            thin = int(np.max(auto_correlation_time) / 2.0)
-            chain = search_internal.get_chain(discard=discard, thin=thin, flat=True)
-
             if self.maxcall is not None:
                 if search_internal.ncall_total > self.maxcall:
                     iterations_remaining = 0

@@ -96,3 +96,60 @@ def test__log_posteriors_are_aligned_with_the_thinned_chain(monkeypatch):
     assert samples.max_log_likelihood_sample.log_likelihood == pytest.approx(
         analysis.log_likelihood_function(instance=instance), rel=1.0e-8
     )
+
+
+def test__update_computes_auto_correlations_once(monkeypatch):
+    """
+    One full update converts the Emcee chain to samples once, and that conversion
+    computes the auto-correlation times once: the burn-in, ``samples_info`` and the
+    ``SamplesMCMC`` share one result, and visualization reuses the converted samples.
+    """
+    monkeypatch.setenv("PYAUTO_TEST_MODE", "1")
+
+    np.random.seed(1)
+
+    model = af.Model(af.ex.Gaussian)
+    analysis = af.ex.Analysis(
+        data=np.full(100, 5.0),
+        noise_map=np.full(100, 1.0),
+    )
+
+    search = af.Emcee(
+        name="emcee_auto_correlations_once",
+        unique_tag="auto_correlations_once_test",
+        auto_correlation_settings=af.AutoCorrelationsSettings(
+            check_for_convergence=False,
+            check_size=5,
+            required_length=2,
+        ),
+        number_of_cores=1,
+    )
+
+    calls = []
+    auto_correlations_from = af.Emcee.auto_correlations_from
+
+    def counting_auto_correlations_from(self, search_internal=None):
+        calls.append(search_internal)
+        return auto_correlations_from(self, search_internal=search_internal)
+
+    monkeypatch.setattr(
+        af.Emcee, "auto_correlations_from", counting_auto_correlations_from
+    )
+
+    from autofit.non_linear.search.updater import SearchUpdater
+
+    calls_per_update = []
+    update = SearchUpdater.update
+
+    def recording_update(self, *args, **kwargs):
+        calls_before = len(calls)
+        samples = update(self, *args, **kwargs)
+        calls_per_update.append(len(calls) - calls_before)
+        return samples
+
+    monkeypatch.setattr(SearchUpdater, "update", recording_update)
+
+    search.fit(model=model, analysis=analysis)
+
+    assert len(calls_per_update) > 0
+    assert calls_per_update == [1] * len(calls_per_update)

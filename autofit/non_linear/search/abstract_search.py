@@ -13,7 +13,6 @@ from functools import wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional, Union, Tuple, List, Dict
 
-import psutil
 
 if TYPE_CHECKING:
     from autofit.database.sqlalchemy_ import sa
@@ -38,7 +37,8 @@ from autofit.non_linear.fitness import Fitness
 # `ITERATIONS_NEVER` is defined in `fitness.py` (so `Fitness.manage_quick_update` can
 # use it) and re-exported here for existing importers, e.g. `multi_start_gradient`.
 from autofit.non_linear.fitness import ITERATIONS_NEVER  # noqa: F401
-from autofit.non_linear.parallel import SneakyPool, SneakierPool, fork_context
+from autofit.non_linear.parallel import SneakyPool, fork_context
+from autofit.non_linear.search.updater import log_process_state
 from autofit.non_linear.paths.abstract import AbstractPaths
 from autofit.non_linear.paths.database import DatabasePaths
 from autofit.non_linear.paths.directory import DirectoryPaths
@@ -143,6 +143,13 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
     # them. Outside EP both are always True.
     _visualize_fit = True
     _visualize_before_fit = True
+
+    # Keyword arguments the base class expects in ``**kwargs``: ``save_all_samples`` is
+    # read by ``__init__``, and ``initial_values`` / ``inplace`` are the
+    # ``AbstractFactorOptimiser`` arguments ``search.json`` records, so a search loaded
+    # from it passes them back. Any other key reaching the base class is logged as
+    # unknown (a warning, never an error).
+    _known_kwargs = ("save_all_samples", "initial_values", "inplace")
 
     def __init__(
         self,
@@ -259,14 +266,20 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
                 "iterations_per_full_update"
             ])
 
-        self.iterations = 0
-
         self.silence = silence
 
         if conf.instance["general"]["hpc"]["hpc_mode"]:
             self.silence = True
 
         self.kwargs = kwargs
+
+        for key in kwargs:
+            if key not in self._known_kwargs:
+                logger.warning(
+                    f"{type(self).__name__} received the unknown keyword argument "
+                    f"{key!r}, which is ignored. Check its spelling against the "
+                    f"search's constructor."
+                )
 
         self.number_of_cores = number_of_cores
 
@@ -655,7 +668,7 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         else:
             logger.info(f"Starting non-linear search with {self.number_of_cores} cores.")
         logger.info(self.quick_update_message)
-        self._log_process_state()
+        log_process_state()
 
         model = analysis.modify_model(model)
         self.paths.model = model
@@ -711,28 +724,6 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         self.logger.info("Search complete, returning result")
 
         return result
-
-    @staticmethod
-    def _log_process_state():
-        total_files = 0
-
-        for process in psutil.process_iter(attrs=["pid"]):
-            try:
-                proc_info = process.as_dict(attrs=["pid"])
-                logger.debug(
-                    f"Process ID: {proc_info['pid']} has the following open files:"
-                )
-
-                open_files = process.open_files()
-                for file in open_files:
-                    logger.debug(file)
-                    total_files += 1
-
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
-
-        if conf.instance["logging"]["total_files_open"]:
-            logger.info(f"Total Files Open: {total_files}")
 
     def pre_fit_output(
         self, analysis: Analysis, model: AbstractPriorModel, info: Optional[Dict] = None
@@ -1385,9 +1376,10 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         """
         Override in subclasses to reduce sampler iterations for test mode.
 
-        Called during __init__ when test mode is active (level 1).
-        Subclasses should directly mutate instance attributes to minimize
-        the number of iterations the sampler performs.
+        The base class never calls this method: each search that overrides it
+        calls it at the end of its own ``__init__`` when ``is_test_mode()`` is
+        true (test mode level 1). Overrides directly mutate instance attributes
+        to minimize the number of iterations the sampler performs.
         """
         pass
 
@@ -1537,6 +1529,7 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         instance: Optional[ModelInstance] = None,
         paths_override: Optional[AbstractPaths] = None,
         search_internal=None,
+        plot_search: bool = True,
     ):
         """
         Perform visualization of the non-linear search's model-fitting results.
@@ -1551,6 +1544,7 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             instance=instance,
             paths_override=paths_override,
             search_internal=search_internal,
+            plot_search=plot_search,
         )
 
     @property
@@ -1591,12 +1585,15 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         paths = copy.copy(self.paths)
         paths.image_path_suffix = "_start"
 
+        # The search has no samples before it starts, so only the analysis visuals
+        # of the starting point are output, not the search's own plots.
         self.perform_visualization(
             model=model,
             analysis=analysis,
             instance=instance,
             during_analysis=False,
             paths_override=paths,
+            plot_search=False,
         )
 
     def samples_from(self, model: AbstractPriorModel, search_internal=None) -> Samples:
@@ -1620,7 +1617,12 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             return self.samples_via_internal_from(
                 model=model, search_internal=search_internal
             )
-        except (FileNotFoundError, NotImplementedError, AttributeError):
+        except (FileNotFoundError, NotImplementedError) as e:
+            logger.warning(
+                f"The samples of {type(self).__name__} could not be loaded from its "
+                f"internal results ({type(e).__name__}: {e}), so they are loaded from "
+                f"the samples.csv in the output folder instead."
+            )
             return self.paths.samples
 
     def samples_via_internal_from(
@@ -1668,21 +1670,6 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         return SneakyPool(
             processes=self.number_of_cores, paths=self.paths, fitness=fitness
         )
-
-    def make_sneakier_pool(self, fitness_function: Fitness, **kwargs) -> SneakierPool:
-
-        self.logger.info(f"number of cores == {self.number_of_cores}")
-
-        if self.number_of_cores > 1:
-            self.logger.info("Creating SneakierPool...")
-        else:
-            self.logger.info("Creating multiprocessing Pool of size 1...")
-
-        pool = SneakierPool(
-            processes=self.number_of_cores, fitness=fitness_function, **kwargs
-        )
-
-        return pool
 
     def __eq__(self, other):
         return isinstance(other, NonLinearSearch) and self.__dict__ == other.__dict__

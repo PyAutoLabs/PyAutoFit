@@ -871,3 +871,51 @@ class TestReducedModeRejectedFinalSample:
                 model=model,
                 analysis=af.m.MockAnalysis(),
             )
+
+
+def _unknown_kwarg_messages(caplog):
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if "unknown keyword argument" in record.getMessage()
+    ]
+
+
+def test_unknown_constructor_kwarg_logs_a_warning(caplog):
+    import logging
+
+    with caplog.at_level(logging.WARNING):
+        search = af.DynestyStatic(nlive_typo=10)
+
+    assert search.kwargs == {"nlive_typo": 10}
+    messages = _unknown_kwarg_messages(caplog)
+    assert len(messages) == 1
+    assert "'nlive_typo'" in messages[0]
+    assert "DynestyStatic" in messages[0]
+
+
+def test_search_json_round_trip_logs_no_unknown_kwarg(caplog):
+    import json
+    import logging
+
+    loaded_dict = json.loads(json.dumps(af.to_dict(af.DynestyStatic())))
+
+    with caplog.at_level(logging.WARNING):
+        af.from_dict(loaded_dict)
+
+    assert _unknown_kwarg_messages(caplog) == []
+
+
+def test_settings_search_dict_for_filters_use_jax_vmap(caplog):
+    import logging
+
+    settings_search = af.SettingsSearch(path_prefix="settings_search_test")
+
+    assert "use_jax_vmap" in settings_search.search_dict
+    assert settings_search.search_dict_for(af.Nautilus)["use_jax_vmap"] is True
+    assert "use_jax_vmap" not in settings_search.search_dict_for(af.DynestyStatic)
+
+    with caplog.at_level(logging.WARNING):
+        af.DynestyStatic(**settings_search.search_dict_for(af.DynestyStatic))
+
+    assert _unknown_kwarg_messages(caplog) == []

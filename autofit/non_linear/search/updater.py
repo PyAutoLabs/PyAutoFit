@@ -27,6 +27,35 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def log_process_state():
+    """
+    Log the number of files open across all running processes.
+
+    Each process's open files are logged at DEBUG; the total is logged at INFO when
+    ``logging.total_files_open`` is enabled in the config. Called at the start of a
+    fit and after every full update, to help diagnose file-handle leaks.
+    """
+    total_files = 0
+
+    for process in psutil.process_iter(attrs=["pid"]):
+        try:
+            proc_info = process.as_dict(attrs=["pid"])
+            logger.debug(
+                f"Process ID: {proc_info['pid']} has the following open files:"
+            )
+
+            open_files = process.open_files()
+            for file in open_files:
+                logger.debug(file)
+                total_files += 1
+
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+    if conf.instance["logging"]["total_files_open"]:
+        logger.info(f"Total Files Open: {total_files}")
+
+
 class SearchUpdater:
     """
     Handles periodic output updates during a non-linear search.
@@ -111,6 +140,7 @@ class SearchUpdater:
             samples_summary=samples_summary,
             during_analysis=during_analysis,
             search_internal=search_internal,
+            samples=samples,
         )
 
         visualization_time = time.time() - start
@@ -124,7 +154,7 @@ class SearchUpdater:
             visualization_time=visualization_time,
         )
 
-        self._log_process_state()
+        log_process_state()
 
         return samples
 
@@ -137,12 +167,17 @@ class SearchUpdater:
         instance: Optional[ModelInstance] = None,
         paths_override: Optional[AbstractPaths] = None,
         search_internal=None,
+        samples: Optional[Samples] = None,
+        plot_search: bool = True,
     ):
         """
         Perform visualization of the non-linear search's model-fitting results.
 
         Delegates to the analysis object for model-specific plots and to the
-        search's ``plot_results`` for search-specific plots.
+        search's ``plot_results`` for search-specific plots. ``update`` passes the
+        ``samples`` it has already converted; without them they are converted from
+        ``search_internal`` here. ``plot_search=False`` outputs only the analysis
+        visuals (used for the starting point, before the search has samples).
 
         Returns immediately when ``visualization_enabled`` is False.
         """
@@ -178,12 +213,15 @@ class SearchUpdater:
                 during_analysis=during_analysis,
             )
 
-        if analysis.should_visualize(paths=paths, during_analysis=during_analysis):
+        if plot_search and analysis.should_visualize(
+            paths=paths, during_analysis=during_analysis
+        ):
             if not isinstance(paths, NullPaths):
                 try:
-                    samples = self._samples_from(
-                        model, search_internal,
-                    )
+                    if samples is None:
+                        samples = self._samples_from(
+                            model, search_internal,
+                        )
 
                     self._plot_results(samples=samples)
                 except FileNotFoundError:
@@ -334,25 +372,3 @@ class SearchUpdater:
             )
         except exc.FitException:
             pass
-
-    @staticmethod
-    def _log_process_state():
-        total_files = 0
-
-        for process in psutil.process_iter(attrs=["pid"]):
-            try:
-                proc_info = process.as_dict(attrs=["pid"])
-                logger.debug(
-                    f"Process ID: {proc_info['pid']} has the following open files:"
-                )
-
-                open_files = process.open_files()
-                for file in open_files:
-                    logger.debug(file)
-                    total_files += 1
-
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
-
-        if conf.instance["logging"]["total_files_open"]:
-            logger.info(f"Total Files Open: {total_files}")

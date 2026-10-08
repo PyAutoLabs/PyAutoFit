@@ -18,7 +18,9 @@ from autofit.non_linear.search.mcmc.abstract_mcmc import AbstractMCMC
 from autofit.non_linear.search.mcmc.auto_correlations import AutoCorrelationsSettings
 from autofit.non_linear.search.mcmc.blackjax.chains import (
     InverseMassMatrixSpec,
+    SERIALISED_KINDS,
     inverse_mass_matrix_kind_from,
+    inverse_mass_matrix_spec_from,
     resolve_inverse_mass_matrix,
     stack_initial_positions,
 )
@@ -219,6 +221,10 @@ class SMC(AbstractMCMC):
 
             The ``"diagonal"`` / ``"dense"`` strings `BlackJAXNUTS` accepts are **rejected** here: they name an
             adaptation strategy, and SMC does not adapt its metric, so they would silently give a cold run.
+
+            ``search.json`` records only the kind (``"none"``, ``"array"`` or ``"result"``), so a search loaded
+            from it receives that string: ``"none"`` behaves as ``None``, while ``"array"`` / ``"result"`` raise at
+            fit time because the covariance was not saved.
         auto_correlation_settings
             Kept for API parity with the other MCMC searches. SMC particles are not a chain, so no
             auto-correlation diagnostics are computed and ``check_for_convergence`` defaults to ``False``.
@@ -253,7 +259,7 @@ class SMC(AbstractMCMC):
                 f"SMC kernel must be one of {VALID_KERNELS}, got {kernel!r}"
             )
 
-        if isinstance(inverse_mass_matrix, str):
+        if isinstance(inverse_mass_matrix, str) and inverse_mass_matrix not in SERIALISED_KINDS:
             raise ValueError(
                 "SMC does not adapt its metric, so the 'diagonal' / 'dense' strings BlackJAXNUTS accepts "
                 "carry no information here and would silently give a cold (prior-whitened) run. Pass a "
@@ -275,8 +281,12 @@ class SMC(AbstractMCMC):
         # at fit time, when `n_dim` is known) and the public attribute is the small descriptive string used by
         # `__identifier_fields__` and persisted onto `search_internal` / `samples_info`. Validated eagerly here so
         # a bad value fails at construction, not mid-fit.
-        self._inverse_mass_matrix_spec = inverse_mass_matrix
-        self.inverse_mass_matrix = inverse_mass_matrix_kind_from(inverse_mass_matrix)
+        self._inverse_mass_matrix_spec = inverse_mass_matrix_spec_from(
+            inverse_mass_matrix
+        )
+        self.inverse_mass_matrix = inverse_mass_matrix_kind_from(
+            self._inverse_mass_matrix_spec
+        )
 
         if is_test_mode():
             self.apply_test_mode()

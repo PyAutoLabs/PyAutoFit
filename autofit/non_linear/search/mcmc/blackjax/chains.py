@@ -22,6 +22,25 @@ InverseMassMatrixSpec = Union[None, str, np.ndarray, object]
 
 _VALID_STRING_KINDS = ("diagonal", "dense")
 
+# The kinds `inverse_mass_matrix_kind_from` returns for a `None`, array or `Result`
+# specification. `search.json` records the kind string, not the specification, so a
+# search loaded from it receives one of these: "none" is equivalent to `None`, while
+# "array" / "result" name a seed whose values were not recorded and cannot be resolved.
+SERIALISED_KINDS = ("none", "array", "result")
+
+
+def inverse_mass_matrix_spec_from(spec: InverseMassMatrixSpec) -> InverseMassMatrixSpec:
+    """
+    Normalise an ``inverse_mass_matrix`` specification passed to a constructor.
+
+    The kind string ``"none"`` that ``search.json`` records for a ``None`` specification is mapped back to
+    ``None``, so a search loaded from ``search.json`` behaves as the one that wrote it. Every other value is
+    returned unchanged.
+    """
+    if isinstance(spec, str) and spec == "none":
+        return None
+    return spec
+
 
 def inverse_mass_matrix_kind_from(spec: InverseMassMatrixSpec) -> str:
     """
@@ -42,7 +61,7 @@ def inverse_mass_matrix_kind_from(spec: InverseMassMatrixSpec) -> str:
         return "none"
 
     if isinstance(spec, str):
-        if spec not in _VALID_STRING_KINDS:
+        if spec not in _VALID_STRING_KINDS + SERIALISED_KINDS:
             raise ValueError(
                 f"inverse_mass_matrix string must be one of {_VALID_STRING_KINDS}, got {spec!r}"
             )
@@ -96,10 +115,16 @@ def resolve_inverse_mass_matrix(
         return True, None
 
     if isinstance(spec, str):
-        if spec == "diagonal":
+        if spec in ("diagonal", "none"):
             return True, None
         if spec == "dense":
             return False, None
+        if spec in SERIALISED_KINDS:
+            raise ValueError(
+                f"inverse_mass_matrix={spec!r} is the kind recorded in search.json for a seed whose values "
+                "were not saved, so this search (loaded from search.json) cannot be fitted with it. Pass "
+                "the original seed array or Result as inverse_mass_matrix instead."
+            )
         raise ValueError(
             f"inverse_mass_matrix string must be one of {_VALID_STRING_KINDS}, got {spec!r}"
         )

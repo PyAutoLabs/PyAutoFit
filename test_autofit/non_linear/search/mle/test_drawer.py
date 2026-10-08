@@ -36,3 +36,27 @@ def test__dict_round_trip_with_number_of_cores():
     assert isinstance(restored, af.Drawer)
     assert restored.total_draws == 3
     assert restored.number_of_cores == 1
+
+
+def test__fit_with_default_null_paths():
+    # A Drawer built without a name or path_prefix fits with `NullPaths`, which has no
+    # timer and writes no search internal; the fit must build its samples from the
+    # in-memory search internal instead of crashing on `self.timer.time`.
+    import numpy as np
+
+    from autofit.non_linear.paths.null import NullPaths
+
+    search = af.Drawer(total_draws=5)
+
+    assert isinstance(search.paths, NullPaths)
+
+    model = af.Model(af.ex.Gaussian)
+    analysis = af.ex.Analysis(
+        data=np.full(20, 1.0),
+        noise_map=np.full(20, 1.0),
+    )
+
+    result = search.fit(model=model, analysis=analysis)
+
+    assert len(result.samples.parameter_lists) == 5
+    assert result.samples.samples_info["time"] is None
