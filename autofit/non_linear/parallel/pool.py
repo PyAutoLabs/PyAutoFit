@@ -157,6 +157,8 @@ class PoolFactory:
             where=type(search).__name__,
         )
 
+        self._created = []
+
     @property
     def summary(self) -> str:
         """
@@ -193,7 +195,9 @@ class PoolFactory:
             return None
 
         getattr(self.search, "logger", logger).info("...using pool")
-        return fork_context().Pool(processes=n_cores, **pool_kwargs)
+        pool = fork_context().Pool(processes=n_cores, **pool_kwargs)
+        self._created.append(pool)
+        return pool
 
     def sneaky(self, fitness):
         """
@@ -210,8 +214,25 @@ class PoolFactory:
             "to each process on instantiation to avoid copying multiple "
             "times."
         )
-        return SneakyPool(
+        pool = SneakyPool(
             processes=self.number_of_cores,
             paths=self.search.paths,
             fitness=fitness,
         )
+        self._created.append(pool)
+        return pool
+
+    def close(self):
+        """
+        Terminate every pool this factory built, after a failed fit. A successful fit's
+        pools are closed by the search that used them, exactly as before.
+        """
+        for pool in self._created:
+            terminate = getattr(pool, "terminate", None)
+            if terminate is None:
+                continue
+            try:
+                terminate()
+            except Exception:
+                logger.debug("Pool termination after a failed fit raised", exc_info=True)
+        self._created = []

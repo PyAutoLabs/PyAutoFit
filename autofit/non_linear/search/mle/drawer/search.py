@@ -33,6 +33,9 @@ class Drawer(AbstractMLE):
     objective_target = cap.ObjectiveTarget(cap.ObjectiveQuantity.LOG_POSTERIOR, cap.CoordinateSpace.PHYSICAL)
     invalid_value = -float("inf")
 
+    # The draws are the result, not a starting point: nothing to plot.
+    _plots_start_point = False
+
     __identifier_fields__ = ("total_draws",)
 
     def __init__(
@@ -110,101 +113,55 @@ class Drawer(AbstractMLE):
 
         self.logger.debug("Creating Drawer Search")
 
-    def _fit(self, model: AbstractPriorModel, analysis):
+    def run(self, ctx):
         """
-        Fit a model using Drawer and the Analysis class which contains the data and returns the log likelihood from
-        instances of the model, which the `NonLinearSearch` seeks to maximize.
+        Draw ``total_draws`` points from the initializer and return them (the ``run(ctx)``
+        hook; see ``docs/design/run_ctx.md``).
+
+        Every log likelihood evaluation happens in the initializer, through the fit's
+        objective (lazily jitted on a JAX analysis).
 
         Parameters
         ----------
-        model : ModelMapper
-            The model which generates instances for different points in parameter space.
-        analysis : Analysis
-            Contains the data and the log likelihood function which fits an instance of the model to the data, returning
-            the log likelihood the `NonLinearSearch` maximizes.
+        ctx
+            The fit's ``FitContext``.
 
         Returns
         -------
-        A result object comprising the Samples object that inclues the maximum log likelihood instance and full
-        chains used by the fit.
+        The internal state: the drawn parameter lists, their log posteriors and the run time.
         """
-
-        fitness = self.make_fitness(analysis=analysis, model=model)
-
-        total_draws = self.total_draws
-
         self.logger.info(
-            f"Performing DrawerSearch for a total of {total_draws} points."
+            f"Performing DrawerSearch for a total of {self.total_draws} points."
         )
 
-        (
-            unit_parameter_lists,
-            parameter_lists,
-            log_posterior_list,
-        ) = self.start_points(
-            model=model,
-            fitness=fitness,
-            n=self.total_draws,
-            plot=False,
-        )
+        parameters, log_posteriors = ctx.start_points(self.total_draws)
 
         search_internal = {
-            "parameter_lists": parameter_lists,
-            "log_posterior_list": log_posterior_list,
+            "parameter_lists": parameters.tolist(),
+            "log_posterior_list": log_posteriors.tolist(),
             "time": self.timer.time if self.timer else None,
         }
 
-        self.paths.save_search_internal(
+        ctx.paths.save_search_internal(
             obj=search_internal,
         )
 
         self.logger.info("Drawer complete")
 
-        return search_internal, fitness
+        return search_internal
 
-    def samples_via_internal_from(self, model, search_internal=None):
+    def raw_samples_from(self, model, internal):
         """
-        Returns a `Samples` object from the Drawer internal results.
-
-        The `search_internal` dictionary returned by `_fit` is used when passed, so a fit with `NullPaths`
-        (which writes nothing to disk) can still build its samples; otherwise it is loaded from the output folder.
-
-        Parameters
-        ----------
-        model
-            Maps input vectors of unit parameter values to physical values and model instances via priors.
-        search_internal
-            The dictionary of parameter lists, log posteriors and run time that `_fit` returns.
+        The drawn points as ``RawSamples``: log posteriors, unit weights, and the internal
+        dictionary itself as ``samples_info``.
         """
-        search_internal_dict = (
-            search_internal
-            if search_internal is not None
-            else self.paths.load_search_internal()
+        from autofit.non_linear.search.fit_context import RawSamples
+
+        return RawSamples(
+            parameters=internal["parameter_lists"],
+            log_posterior=internal["log_posterior_list"],
+            info=self.info_from(internal),
         )
 
-        parameter_lists = search_internal_dict["parameter_lists"]
-        log_posterior_list = search_internal_dict["log_posterior_list"]
-
-        log_prior_list = [
-            sum(model.log_prior_list_from_vector(vector=vector))
-            for vector in parameter_lists
-        ]
-        log_likelihood_list = [
-            lp - prior for lp, prior in zip(log_posterior_list, log_prior_list)
-        ]
-
-        weight_list = len(log_likelihood_list) * [1.0]
-
-        sample_list = Sample.from_lists(
-            model=model,
-            parameter_lists=parameter_lists,
-            log_likelihood_list=log_likelihood_list,
-            log_prior_list=log_prior_list,
-            weight_list=weight_list,
-        )
-
-        return Samples(
-            model=model,
-            sample_list=sample_list,
-            samples_info=search_internal_dict,
-        )
+    def info_from(self, internal):
+        return internal

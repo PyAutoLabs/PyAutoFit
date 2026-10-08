@@ -7,7 +7,7 @@ import numpy as np
 import os
 import time
 import warnings
-from abc import ABC, abstractmethod
+from abc import ABC, ABCMeta, abstractmethod
 from collections import Counter
 from functools import wraps
 from pathlib import Path
@@ -159,7 +159,30 @@ def configure_handler(func):
     return decorated
 
 
-class NonLinearSearch(AbstractFactorOptimiser, ABC):
+class _SearchMeta(ABCMeta):
+    """
+    Keeps ``NonLinearSearch`` abstract until a subclass implements its backend through
+    either hook: overriding ``_fit`` (the legacy contract) or ``run(ctx)`` (the bridge,
+    ``docs/design/run_ctx.md``). ``_fit`` stays an abstract method; a class that
+    defines ``run`` is concrete because the inherited ``_fit`` is the bridge to it.
+    """
+
+    def __new__(mcls, name, bases, namespace, **kwargs):
+        cls = super().__new__(mcls, name, bases, namespace, **kwargs)
+
+        run = getattr(cls, "run", None)
+
+        if (
+            "_fit" in cls.__abstractmethods__
+            and run is not None
+            and not getattr(run, "_is_bridge_default", False)
+        ):
+            cls.__abstractmethods__ = frozenset(cls.__abstractmethods__ - {"_fit"})
+
+        return cls
+
+
+class NonLinearSearch(AbstractFactorOptimiser, ABC, metaclass=_SearchMeta):
     # Visualization switches toggled per factor search by ``optimise`` (EP),
     # governed by ``general.yaml -> output -> visualize_ep_factor_searches``.
     # Class-level (not set in ``__init__``) so search doubles that skip
@@ -1412,9 +1435,83 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
             weight_list=(weights / weights.sum()).tolist(),
         )
 
+    # Whether `ctx.start_points` makes the start-point plot. `Drawer` draws its whole
+    # result through the initializer, so it has no starting point to plot.
+    _plots_start_point = True
+
+    # The `Samples` class `samples_from_raw` builds for a `run(ctx)` search.
+    samples_cls = Samples
+
     @abstractmethod
     def _fit(self, model: AbstractPriorModel, analysis: Analysis):
-        pass
+        """
+        Run the backend and return ``(search_internal, fitness)``.
+
+        A search either overrides this (every search not yet migrated) or implements
+        ``run(ctx)``, in which case this is the bridge (``docs/design/run_ctx.md``): it
+        builds the fit's ``Fitness`` and ``FitContext`` -- after the test-mode bypass and
+        the fail-fast gates, which ``start_resume_fit`` has already run -- calls
+        ``run(ctx)`` and cleans the context up on every exit.
+        """
+        if type(self).run is NonLinearSearch.run:
+            raise NotImplementedError(
+                f"{type(self).__name__} implements neither run(ctx) nor _fit."
+            )
+
+        from autofit.non_linear.search.fit_context import FitContext
+
+        fitness = self.make_fitness(
+            analysis=analysis, model=model, **self.fitness_overrides(analysis)
+        )
+
+        ctx = FitContext(
+            search=self,
+            model=model,
+            analysis=analysis,
+            fitness=fitness,
+            pool=self._pools(),
+            test_mode_level=test_mode_level(),
+        )
+
+        try:
+            search_internal = self.run(ctx)
+        except BaseException:
+            ctx.close(failed=True)
+            raise
+
+        ctx.close(failed=False)
+
+        return search_internal, fitness
+
+    def run(self, ctx) -> Any:
+        """
+        The backend loop of a search on the ``run(ctx)`` hook: run the backend through
+        ``ctx`` and return its internal state (``search_internal``). See
+        ``docs/design/run_ctx.md``.
+        """
+        raise NotImplementedError
+
+    run._is_bridge_default = True
+
+    def raw_samples_from(self, model: AbstractPriorModel, internal):
+        """
+        Map a ``run(ctx)`` search's internal state onto a ``RawSamples``
+        (``autofit.non_linear.search.fit_context``).
+        """
+        raise NotImplementedError
+
+    def info_from(self, internal) -> Optional[dict]:
+        """
+        The ``samples_info`` entries of a ``run(ctx)`` search's internal state.
+        """
+        return None
+
+    def fitness_overrides(self, analysis: Analysis) -> dict:
+        """
+        ``Fitness`` keyword arguments a ``run(ctx)`` search adds to ``make_fitness`` for
+        this analysis (e.g. ``batched=True`` for a batched backend). Empty by default.
+        """
+        return {}
 
     def make_fitness(
         self, analysis: Analysis, model: AbstractPriorModel, **overrides
@@ -1792,7 +1889,23 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
     def samples_via_internal_from(
         self, model: AbstractPriorModel, search_internal=None
     ):
-        raise NotImplementedError
+        """
+        The samples of the internal state. A ``run(ctx)`` search gets them from its
+        ``raw_samples_from``; any other search overrides this.
+        """
+        if type(self).raw_samples_from is NonLinearSearch.raw_samples_from:
+            raise NotImplementedError
+
+        from autofit.non_linear.search.fit_context import samples_from_raw
+
+        if search_internal is None:
+            search_internal = self.paths.load_search_internal()
+
+        return samples_from_raw(
+            model=model,
+            raw=self.raw_samples_from(model, search_internal),
+            samples_cls=self.samples_cls,
+        )
 
     def _pools(self) -> PoolFactory:
         """
