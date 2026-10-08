@@ -208,7 +208,10 @@ class NSS(abstract_nest.AbstractNest):
     citation_keys = ("blackjax",)
     status = cap.Status.EXPERIMENTAL
     test_mode_budget = {"termination": -1.0}
-    objective_target = cap.ObjectiveTarget(cap.ObjectiveQuantity.LOG_LIKELIHOOD, cap.CoordinateSpace.UNIT_CUBE)
+    # Physical: the unit-cube initial draws are transformed before ``algo.init``, and
+    # the sampler then proposes physical vectors (``instance_from_vector``) against a
+    # physical-space prior density.
+    objective_target = cap.ObjectiveTarget(cap.ObjectiveQuantity.LOG_LIKELIHOOD, cap.CoordinateSpace.PHYSICAL)
     invalid_value = NSS_INVALID_LOG_LIKELIHOOD
 
     __identifier_fields__ = (

@@ -268,7 +268,7 @@ What each search's objective returns, the coordinates its backend proposes point
      - ``n_like_max=1``
    * - :class:`~autofit.NSS`
      - ``log_likelihood``
-     - ``unit_cube``
+     - ``physical``
      - ``-1e+30``
      - ``termination=-1.0``
    * - :class:`~autofit.Drawer`

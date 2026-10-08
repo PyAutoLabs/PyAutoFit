@@ -433,7 +433,7 @@ SEARCHES: Tuple[RegistryEntry, ...] = (
             citation_keys=("blackjax",),
             status="experimental",
             test_mode_budget={"termination": -1.0},
-            objective_target=("log_likelihood", "unit_cube"),
+            objective_target=("log_likelihood", "physical"),
             invalid_value="-1e+30",
         ),
         example=None,
