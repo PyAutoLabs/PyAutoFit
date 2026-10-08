@@ -149,3 +149,22 @@ pins the following details the table left open; each is flagged for review in th
   `samples_from_raw` are A3's `autofit/non_linear/samples/adapter.py` (re-exported from
   `autofit/non_linear/search/fit_context.py`), and `samples_via_internal_from` is
   implemented once on `NonLinearSearch` over `raw_samples_from` for every search.
+
+## Revision 2 (phase A3b, 2026-10-08): NSS on the bridge
+
+The signature and the member list are unchanged.
+
+- **`NSS` moved onto `run(ctx)`** ahead of A5, because A3b needed it on `Fitness`: it samples
+  through `ctx.fitness.objective("scalar", compile=False)` (blackjax traces it inside its own
+  jitted step), resumes from `ctx.resume` (its `NativeFileCheckpointer("nss_checkpoint.pkl")`)
+  and switches the `Fitness` quick-update cadence off through `fitness_overrides`, since it
+  fires its own between outer iterations. `make_fitness` is now the only `Fitness`
+  construction site in `autofit/non_linear/search`, and NSS's resume likelihood sanity check
+  runs when the bridge builds that `Fitness`, before sampling.
+- **The bridge repeats the REQUIRED gate** (`capabilities.check_jax_required`) before it
+  builds the `Fitness`, so a caller that reaches `_fit` without `fit` gets the shared message
+  for every `run(ctx)` search, not a tracer error from the backend.
+- **The JAX preflight** (`autofit/non_linear/search/preflight.py`) runs in `start_resume_fit`
+  after the test-mode bypass and the REQUIRED gate, before the context exists: the x64 check
+  and one `jax.eval_shape` trace of the declared objective kind (and its gradient kind for
+  `gradient == "uses"`). `run` therefore only ever sees a likelihood that traces.

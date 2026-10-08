@@ -402,6 +402,9 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC, metaclass=_SearchMeta):
     test_mode_budget = {}
     objective_target = None
     invalid_value = -float("inf")
+    # True for a search whose backend is wrong in float32: `fit` then raises, rather
+    # than warns, when a JAX analysis runs with `jax_enable_x64` off (A3b preflight).
+    requires_fp64 = False
 
     def optimise(
         self,
@@ -898,6 +901,16 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC, metaclass=_SearchMeta):
         # shared SearchException before any backend state exists. `PYAUTO_DISABLE_JAX=1`
         # smoke runs use `PYAUTO_TEST_MODE>=2`, which returned above.
         cap.check_jax_required(self, analysis)
+
+        # The JAX checks (search-extensibility A3b, `autofit.non_linear.search.preflight`),
+        # after the test-mode bypass and the REQUIRED gate and before any backend state
+        # exists: warn once when x64 is off (raise for `requires_fp64`), then trace the
+        # declared objective kind(s) once with `jax.eval_shape` so a non-traceable
+        # likelihood fails here, naming the search, rather than inside the backend.
+        from autofit.non_linear.search import preflight
+
+        preflight.check_x64(self, analysis)
+        preflight.trace_preflight(self, analysis, model)
 
         # The fit's pools, with the one JAX fork rule applied once (one INFO line when it
         # downgrades) and the effective worker count recorded for `search.summary`.

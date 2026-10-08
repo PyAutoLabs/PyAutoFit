@@ -150,6 +150,7 @@ def _capabilities(
     objective_target: Tuple[str, str],
     invalid_value: str,
     checkpointer: str = "dill",
+    requires_fp64: bool = False,
 ) -> Dict[str, Any]:
     quantity, space = objective_target
     values = dict(
@@ -169,6 +170,7 @@ def _capabilities(
         objective_target={"quantity": quantity, "space": space},
         invalid_value=invalid_value,
         checkpointer=checkpointer,
+        requires_fp64=requires_fp64,
     )
     return {name: values[name] for name in CAPABILITY_ATTRIBUTES}
 
