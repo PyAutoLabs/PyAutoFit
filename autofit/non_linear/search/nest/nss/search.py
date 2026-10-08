@@ -232,6 +232,7 @@ class NSS(abstract_nest.AbstractNest):
         ``model.log_prior_list_from_vector`` traceable.
 
         Phases 1-3 of the ``nss_first_class_sampler`` roadmap are live:
+
         - Phase 1: the wrapper itself (this class).
         - Phase 2: checkpoint/resume via ``checkpoint_interval`` — a
           ``nss_checkpoint.pkl`` is written to ``paths.search_internal_path``
