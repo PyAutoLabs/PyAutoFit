@@ -32,16 +32,10 @@ class AbstractNest(NonLinearSearch, ABC):
         **kwargs
     ):
         """
-        Abstract class of a nested sampling `NonLinearSearch` (e.g. MultiNest, Dynesty).
+        Abstract class of a nested sampling `NonLinearSearch` (e.g. Dynesty, Nautilus, NSS).
 
-        **PyAutoFit** allows a nested sampler to automatically terminate when the acceptance ratio falls below an input
-        threshold value. When this occurs, all samples are accepted using the current maximum log likelihood value,
-        irrespective of how well the model actually fits the data.
-
-        This feature should be used for non-linear searches where the nested sampler gets 'stuck', for example because
-        the log likelihood function is stochastic or varies rapidly over small scales in parameter space. The results of
-        samples using this feature are not realiable (given the log likelihood is being manipulated to end the run), but
-        they are still valid results for linking priors to a new search and non-linear search.
+        It defaults the initializer to `InitializerPrior` (nested sampling draws its initial live points from the
+        prior), rejects `InitializerParamBounds`, and provides the corner plot of the nested sampling results.
 
         Parameters
         ----------

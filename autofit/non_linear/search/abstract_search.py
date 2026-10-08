@@ -1376,9 +1376,10 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         """
         Override in subclasses to reduce sampler iterations for test mode.
 
-        Called during __init__ when test mode is active (level 1).
-        Subclasses should directly mutate instance attributes to minimize
-        the number of iterations the sampler performs.
+        The base class never calls this method: each search that overrides it
+        calls it at the end of its own ``__init__`` when ``is_test_mode()`` is
+        true (test mode level 1). Overrides directly mutate instance attributes
+        to minimize the number of iterations the sampler performs.
         """
         pass
 
