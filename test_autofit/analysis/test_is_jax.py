@@ -161,6 +161,31 @@ def test_whole_graph_fit_of_a_mixed_graph_raises(monkeypatch):
         af.Drawer(total_draws=2).fit(model=graph.global_prior_model, analysis=graph)
 
 
+class _BackendReached(Exception):
+    pass
+
+
+@requires_jax
+def test_whole_graph_check_survives_a_model_analysis_wrapper(monkeypatch):
+    monkeypatch.delenv("PYAUTO_TEST_MODE", raising=False)
+    graph = g.FactorGraphModel(
+        _factor(NumpyAnalysis(), "numpy_factor"),
+        _factor(NumpyAnalysis(use_jax=True), "jax_factor"),
+    )
+    search = af.Drawer(total_draws=2)
+
+    def reached(*args, **kwargs):
+        raise _BackendReached()
+
+    monkeypatch.setattr(search, "_fit", reached)
+
+    with pytest.raises(exc.SearchException, match="jax_factor"):
+        search.fit(
+            model=graph.global_prior_model,
+            analysis=ModelAnalysis(graph, graph.global_prior_model),
+        )
+
+
 @requires_jax
 @pytest.mark.filterwarnings("ignore::RuntimeWarning")
 def test_mixed_factor_graph_still_runs_per_factor_ep(monkeypatch):

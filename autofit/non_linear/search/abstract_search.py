@@ -859,9 +859,19 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         # Runtime gates, after the test-mode bypass return so `PYAUTO_TEST_MODE>=2`
         # (which never runs a backend) is not affected by them.
         from autofit.graphical.declarative.collection import FactorGraphModel
+        from autofit.graphical.declarative.factor.analysis import AnalysisFactor
+        from autofit.non_linear.analysis.model_analysis import ModelAnalysis
 
-        if isinstance(analysis, FactorGraphModel):
-            analysis.check_backend_agreement()
+        # Unwrap the analysis wrappers that forward their wrapped analysis's
+        # likelihood, so a graph wrapped in `ModelAnalysis` (or an `AnalysisFactor`)
+        # is still checked as one whole graph.
+        inner = analysis
+        while isinstance(inner, (ModelAnalysis, AnalysisFactor)) and not isinstance(
+            inner, FactorGraphModel
+        ):
+            inner = inner.__dict__.get("analysis")
+        if isinstance(inner, FactorGraphModel):
+            inner.check_backend_agreement()
 
         # Fail fast: a jax_use='required' search given a numpy analysis raises the one
         # shared SearchException before any backend state exists. `PYAUTO_DISABLE_JAX=1`
