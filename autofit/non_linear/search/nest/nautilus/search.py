@@ -357,7 +357,9 @@ class Nautilus(abstract_nest.AbstractNest):
                 iterations_per_quick_update=self.iterations_per_quick_update,
                 background_quick_update=self.quick_update_background,
                 live_visual_update=self.live_visual_update,
-                use_jax_vmap=self.use_jax_vmap,
+                # The vectorised (jax.vmap) likelihood needs a JAX analysis;
+                # `force_x1_cpu` with a numpy analysis evaluates point by point.
+                use_jax_vmap=self.use_jax_vmap and analysis.is_jax,
                 batch_size=self.n_batch,
             )
 
