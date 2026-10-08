@@ -416,6 +416,10 @@ class NSS(abstract_nest.AbstractNest):
             like latent-sample generation, which calls ``fitness.batch_size``.
         """
 
+        # jax_use='required': NSS traces its likelihood inside blackjax and has no numpy
+        # path. `fit` already ran this gate; repeated for direct callers.
+        cap.check_jax_required(self, analysis)
+
         import jax
         import jax.numpy as jnp
         import time

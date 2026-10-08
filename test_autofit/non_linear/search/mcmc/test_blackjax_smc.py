@@ -540,7 +540,7 @@ def test__hmc_kernel_runs_and_holds_acceptance():
 def test__non_jax_analysis_raises_a_clear_error():
     search = af.SMC(num_particles=8, num_mcmc_steps=1, max_smc_steps=1)
 
-    with pytest.raises(ValueError, match="use_jax=True"):
+    with pytest.raises(af.exc.SearchException, match="use_jax=True"):
         search.fit(
             model=gaussian_target_model(),
             analysis=GaussianTargetAnalysis(),

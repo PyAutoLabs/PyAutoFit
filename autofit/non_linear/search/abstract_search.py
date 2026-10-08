@@ -863,6 +863,11 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         if isinstance(analysis, FactorGraphModel):
             analysis.check_backend_agreement()
 
+        # Fail fast: a jax_use='required' search given a numpy analysis raises the one
+        # shared SearchException before any backend state exists. `PYAUTO_DISABLE_JAX=1`
+        # smoke runs use `PYAUTO_TEST_MODE>=2`, which returned above.
+        cap.check_jax_required(self, analysis)
+
         model.freeze()
         search_internal, fitness = self._fit(
             model=model,

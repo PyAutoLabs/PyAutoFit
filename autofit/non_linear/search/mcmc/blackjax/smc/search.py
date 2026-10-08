@@ -347,17 +347,9 @@ class SMC(AbstractMCMC):
         import blackjax
         import blackjax.smc.resampling as resampling
 
-        # JAX is mandatory: MALA/HMC need gradients of the log-density. Refuse cleanly if the analysis was built
-        # without ``use_jax=True``.
-        xp = getattr(analysis, "_xp", None)
-        if xp is None or not xp.__name__.startswith("jax"):
-            raise ValueError(
-                "SMC requires an Analysis built with use_jax=True. Its inner kernel (MALA/HMC) is "
-                "gradient-based and the log-likelihood must flow through jax.grad. Construct "
-                "Analysis(..., use_jax=True) and call enable_pytrees() / register_model(model) before fit. "
-                "See autofit_workspace_test/scripts/searches/BlackJAXNUTS.py for a worked example of the "
-                "sibling BlackJAX search."
-            )
+        # JAX is mandatory (jax_use='required'): MALA/HMC need gradients of the log-density. `fit` already ran
+        # this gate; repeated for direct callers.
+        cap.check_jax_required(self, analysis)
 
         n_dim = model.prior_count
 

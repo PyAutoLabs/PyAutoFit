@@ -974,13 +974,8 @@ class AbstractMultiStartGradient(AbstractMLE):
                 "`pip install jax optax`."
             ) from e
 
-        if not getattr(analysis, "_use_jax", False):
-            raise ValueError(
-                f"{type(self).__name__} is a JAX-native gradient search and "
-                "requires a JAX-traceable Analysis (e.g. `AnalysisImaging(..., "
-                "use_jax=True)`). The supplied analysis is not running on the JAX "
-                "backend."
-            )
+        # jax_use='required': `fit` already ran this gate; repeated for direct callers.
+        cap.check_jax_required(self, analysis)
 
         # ``fitness.call`` is differentiated inside ``jax.jit(jax.vmap(...))``
         # below, so the per-evaluation quick-update counting that fires from
