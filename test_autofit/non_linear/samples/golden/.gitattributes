@@ -1,0 +1,3 @@
+# Byte-exact golden fixtures: samples.csv is written with CRLF line endings by the csv
+# module and is compared byte for byte, so git must not normalise it.
+* -text

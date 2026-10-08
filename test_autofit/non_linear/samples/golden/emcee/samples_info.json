@@ -1,0 +1,8 @@
+{
+    "change_threshold": 0.01,
+    "check_size": 100,
+    "class_path": "autofit.non_linear.samples.mcmc.SamplesMCMC",
+    "required_length": 50,
+    "total_steps": 400,
+    "total_walkers": 12
+}
