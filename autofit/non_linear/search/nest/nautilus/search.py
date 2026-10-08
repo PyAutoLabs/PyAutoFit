@@ -346,7 +346,7 @@ class Nautilus(abstract_nest.AbstractNest):
                 "Starting new Nautilus non-linear search (no previous samples found)."
             )
 
-        if self.force_x1_cpu or analysis._use_jax:
+        if self.force_x1_cpu or analysis.is_jax:
 
             fitness = Fitness(
                 model=model,
@@ -435,7 +435,7 @@ class Nautilus(abstract_nest.AbstractNest):
             the log likelihood the search maximizes.
         """
 
-        if analysis._use_jax:
+        if analysis.is_jax:
             self.logger.info(
                 "Running search with JAX vectorization (parallelization handled by JAX)."
             )

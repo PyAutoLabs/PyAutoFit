@@ -447,7 +447,7 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
 
         analysis = factor.analysis
 
-        uses_jax = getattr(analysis, "_use_jax", False)
+        uses_jax = analysis.is_jax
 
         self.logger.info(
             f"EP factor step [{factor.name}]: running the factor search "
@@ -674,7 +674,7 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
         """
         self.check_model(model=model)
 
-        if getattr(analysis, "_use_jax", False):
+        if analysis.is_jax:
             try:
                 import jax
                 devices = jax.devices()
@@ -855,6 +855,13 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
                 analysis=analysis,
                 call_likelihood=(mode == 2),
             )
+
+        # Runtime gates, after the test-mode bypass return so `PYAUTO_TEST_MODE>=2`
+        # (which never runs a backend) is not affected by them.
+        from autofit.graphical.declarative.collection import FactorGraphModel
+
+        if isinstance(analysis, FactorGraphModel):
+            analysis.check_backend_agreement()
 
         model.freeze()
         search_internal, fitness = self._fit(

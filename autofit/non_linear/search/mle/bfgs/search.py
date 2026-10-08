@@ -314,7 +314,7 @@ class AbstractBFGS(AbstractMLE):
                 # box makes the objective non-finite on either branch. Bounds are
                 # passed on both — they are correct on both, and having them
                 # diverge by branch would be a trap of its own.
-                if analysis._use_jax:
+                if analysis.is_jax:
 
                     search_internal = optimize.minimize(
                         fun=fitness._jit,

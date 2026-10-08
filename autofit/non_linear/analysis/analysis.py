@@ -152,8 +152,25 @@ class Analysis(ABC):
         return method
 
     @property
+    def is_jax(self) -> bool:
+        """
+        Whether this analysis evaluates its likelihood on the JAX backend.
+
+        The single read-only probe every search, ``Fitness`` and the latent machinery use
+        to ask "is this analysis JAX?". ``use_jax`` passed to ``__init__`` is the user's
+        choice; ``is_jax`` is the resolved value after ``PYAUTO_DISABLE_JAX=1`` and the
+        no-JAX-installed fallback have been applied. An analysis that never called
+        ``Analysis.__init__`` is numpy.
+
+        Wrappers forward it: ``ModelAnalysis`` takes its wrapped analysis's value,
+        ``AnalysisFactor`` reads its analysis and ``FactorGraphModel`` derives it from its
+        factors.
+        """
+        return bool(getattr(self, "_use_jax", False))
+
+    @property
     def _xp(self):
-        if self._use_jax:
+        if self.is_jax:
             import jax.numpy as jnp
             return jnp
         return np
@@ -356,7 +373,7 @@ class Analysis(ABC):
     @property
     def supports_jax_visualization(self) -> bool:
         """Whether the visualizer can work directly with JAX arrays."""
-        return self._use_jax
+        return self.is_jax
 
     def perform_quick_update(self, paths, instance):
         raise NotImplementedError
@@ -388,7 +405,7 @@ class Analysis(ABC):
         The projected bytes, or ``None`` when this analysis is not on the JAX
         path (nothing to measure).
         """
-        if not self._use_jax:
+        if not self.is_jax:
             return None
 
         import jax
@@ -441,7 +458,7 @@ class Analysis(ABC):
         if skip_fit_output():
             return
 
-        if not self._use_jax:
+        if not self.is_jax:
             print("use_jax=False for this analysis, therefore does not use GPU and VRAM use cannot be profiled.")
             return
 

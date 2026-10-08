@@ -244,7 +244,7 @@ class AbstractDynesty(AbstractNest, ABC):
             iterations_per_quick_update=self.iterations_per_quick_update,
             background_quick_update=self.quick_update_background,
             live_visual_update=self.live_visual_update,
-            use_jax_jit=getattr(analysis, "_use_jax", False) and self.use_jax_jit,
+            use_jax_jit=analysis.is_jax and self.use_jax_jit,
         )
 
         if not isinstance(self.paths, NullPaths):
@@ -265,7 +265,7 @@ class AbstractDynesty(AbstractNest, ABC):
 
         while not finished:
             try:
-                if self.number_of_cores <= 1 or self.force_x1_cpu or analysis._use_jax:
+                if self.number_of_cores <= 1 or self.force_x1_cpu or analysis.is_jax:
                     raise RuntimeError
 
                 Pool = _fork_pool_cls()
@@ -291,7 +291,7 @@ class AbstractDynesty(AbstractNest, ABC):
 
             except RuntimeError as e:
                 if not checkpoint_exists:
-                    if getattr(analysis, "_use_jax", False):
+                    if analysis.is_jax:
                         self.logger.info(
                             "Running Dynesty with JAX-jitted likelihood (single CPU, no pool)."
                         )
