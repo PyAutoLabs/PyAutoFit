@@ -265,5 +265,21 @@ def test_hierarchical_factor_carries_the_flag(monkeypatch):
     assert not any(factor.is_jax for factor in hierarchical(True).factors)
 
 
+@requires_jax
+def test_factor_graph_derives_jax_through_a_hierarchical_factor():
+    h = af.HierarchicalFactor(
+        af.GaussianPrior,
+        mean=af.GaussianPrior(mean=0, sigma=1),
+        sigma=1.0,
+        use_jax=True,
+    )
+    h.add_drawn_variable(af.GaussianPrior(mean=0, sigma=1))
+    graph = af.FactorGraphModel(h)
+
+    assert all(factor.is_jax for factor in h.factors)
+    assert graph.is_jax is True
+    graph.check_backend_agreement()
+
+
 def test_supports_jax_visualization_reads_is_jax():
     assert NumpyAnalysis().supports_jax_visualization is False

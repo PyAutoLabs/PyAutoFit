@@ -83,11 +83,15 @@ class FactorGraphModel(AbstractDeclarativeFactor):
         """
         The graph's backend: the explicit ``use_jax`` when one was given, otherwise
         ``True`` exactly when every factor is JAX (``is_jax`` reads this).
+
+        The factors are the flattened ones (a ``HierarchicalFactor`` contributes the
+        factors it generates), the same set ``check_backend_agreement`` reads, so a
+        derived backend always agrees with its own factors.
         """
         explicit = self.__dict__.get("_explicit_use_jax")
         if explicit is not None:
             return bool(explicit)
-        flags = [factor.is_jax for factor in self.__dict__.get("_model_factors", [])]
+        flags = [factor.is_jax for factor in self._flat_factors()]
         return bool(flags) and all(flags)
 
     @_use_jax.setter
