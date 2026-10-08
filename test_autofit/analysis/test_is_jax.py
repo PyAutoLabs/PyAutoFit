@@ -218,6 +218,34 @@ def test_factor_graph_flags_survive_pytree_flattening_and_pickling():
 
 
 @requires_jax
+def test_legacy_factor_graph_pickle_keeps_its_explicit_backend():
+    """
+    Graphs pickled before the backend was derived from the factors stored an explicit
+    ``_use_jax`` attribute (``False`` by default). Unpickling migrates it, so the graph
+    keeps that choice rather than re-deriving JAX from its children, and
+    ``tree_flatten`` still works.
+    """
+    graph = g.FactorGraphModel(
+        _factor(NumpyAnalysis(use_jax=True), "a"),
+        _factor(NumpyAnalysis(use_jax=True), "b"),
+        use_jax=False,
+    )
+
+    legacy_state = dict(graph.__dict__)
+    del legacy_state["_explicit_use_jax"]
+    legacy_state["_use_jax"] = False
+    legacy = g.FactorGraphModel.__new__(g.FactorGraphModel)
+    legacy.__dict__.update(legacy_state)
+
+    restored = pickle.loads(pickle.dumps(legacy))
+
+    assert restored.is_jax is False
+    children, aux_data = restored.tree_flatten()
+    assert aux_data[2] is False
+    assert g.FactorGraphModel.tree_unflatten(aux_data, children).is_jax is False
+
+
+@requires_jax
 def test_hierarchical_factor_carries_the_flag(monkeypatch):
     def hierarchical(use_jax):
         factor = g.HierarchicalFactor(

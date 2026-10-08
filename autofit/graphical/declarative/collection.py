@@ -63,6 +63,21 @@ class FactorGraphModel(AbstractDeclarativeFactor):
             use_jax=aux_data[2],
         )
 
+    def __setstate__(self, state):
+        """
+        Restore a pickled graph, migrating pickles written before ``use_jax`` could be
+        derived from the factors.
+
+        Those stored the graph's backend as a plain ``_use_jax`` attribute, which the
+        ``_use_jax`` property below now shadows; it is moved to ``_explicit_use_jax``
+        so the graph keeps the backend it was built with (then always an explicit
+        bool, ``False`` by default) and ``tree_flatten`` finds the attribute.
+        """
+        state = dict(state)
+        if "_explicit_use_jax" not in state:
+            state["_explicit_use_jax"] = state.pop("_use_jax", None)
+        self.__dict__.update(state)
+
     @property
     def _use_jax(self) -> bool:
         """
