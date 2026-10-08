@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 from abc import ABC
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Dict, Optional, Tuple, Union, TYPE_CHECKING
 
@@ -53,6 +54,21 @@ def _fork_pool_cls():
             return self
 
     return ForkPool
+
+
+class _SingleCoreRun(Exception):
+    """
+    Control flow inside ``AbstractDynesty._fit``: run dynesty without a pool.
+
+    Raised when the fit is single-core by construction (``number_of_cores <= 1``,
+    ``force_x1_cpu`` or a JAX analysis) and when the multiprocessing pool cannot be
+    created (``RuntimeError`` from its ``__enter__``, e.g. on platforms with weak
+    multiprocessing support), which is then its ``__cause__``. It is a private
+    ``Exception`` subclass, not a ``RuntimeError``, so the ``except`` that catches it
+    never swallows a ``RuntimeError`` raised while dynesty runs (a genuine dynesty
+    error, or JAX's ``XlaRuntimeError``, which subclasses ``RuntimeError``): those
+    propagate instead of silently restarting the run single-core.
+    """
 
 
 DYNESTY_FILENAME = "savestate.save"
@@ -234,8 +250,9 @@ class AbstractDynesty(AbstractNest, ABC):
         as on the existing `force_x1_cpu` path.
 
         However, certain operating systems (e.g. Windows) do not support Python multiprocessing particularly well.
-        This can cause Dynesty to crash when a pool is included. If this occurs (raising a `RunTimeException`)
-        a Dynesty object without a pool is created and used instead.
+        If creating the pool raises a `RuntimeError`, a Dynesty object without a pool is created and used instead.
+        Only the pool's creation falls back: a `RuntimeError` raised while Dynesty runs (including JAX's
+        `XlaRuntimeError`) propagates rather than silently restarting the run single-core (`_SingleCoreRun`).
 
         Parameters
         ----------
@@ -283,17 +300,26 @@ class AbstractDynesty(AbstractNest, ABC):
         while not finished:
             try:
                 if number_of_cores <= 1 or self.force_x1_cpu or analysis.is_jax:
-                    raise RuntimeError
+                    raise _SingleCoreRun()
 
                 Pool = _fork_pool_cls()
 
-                with Pool(
-                    njobs=number_of_cores,
-                    loglike=fitness,
-                    prior_transform=prior_transform,
-                    logl_args=(model, fitness),
-                    ptform_args=(model,),
-                ) as pool:
+                with ExitStack() as stack:
+                    # Only a failure to *create* the pool falls back to a single-core
+                    # run; a RuntimeError raised while dynesty runs propagates.
+                    try:
+                        pool = stack.enter_context(
+                            Pool(
+                                njobs=number_of_cores,
+                                loglike=fitness,
+                                prior_transform=prior_transform,
+                                logl_args=(model, fitness),
+                                ptform_args=(model,),
+                            )
+                        )
+                    except RuntimeError as error:
+                        raise _SingleCoreRun() from error
+
                     search_internal = self.search_internal_from(
                         model=model,
                         fitness=fitness,
@@ -306,7 +332,7 @@ class AbstractDynesty(AbstractNest, ABC):
 
                     checkpoint_exists = True
 
-            except RuntimeError as e:
+            except _SingleCoreRun as e:
                 if not checkpoint_exists:
                     if analysis.is_jax:
                         self.logger.info(
@@ -323,7 +349,7 @@ class AbstractDynesty(AbstractNest, ABC):
                     else:
                         self.logger.info(
                             f"""
-                            The Dynesty multiprocessing pool could not be created ({e!r}).
+                            The Dynesty multiprocessing pool could not be created ({e.__cause__!r}).
 
                             A single CPU non-multiprocessing Dynesty run is being performed.
                             """

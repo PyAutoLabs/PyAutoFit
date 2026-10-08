@@ -156,20 +156,20 @@ def test__init_iterations_per_quick_update_no_longer_warns(caplog):
 
 
 @requires_nss
-def test__load_checkpoint_called_when_file_exists(tmp_path):
-    """Verify ``_load_checkpoint`` is invoked from ``_fit`` when a checkpoint
-    file exists at the resolved path.
+def test__resume_state_loaded_when_ctx_resume_is_set(tmp_path):
+    """Verify ``run(ctx)`` resumes from ``ctx.resume`` (NSS's ``nss_checkpoint.pkl``
+    resume state) instead of initialising fresh particles.
 
     We replace ``_blackjax.nss`` with a mock that fails loudly if ``algo.init``
-    fires — i.e. if the fresh-init branch ran. The resume branch must call
-    ``_load_checkpoint`` first; we patch that helper to return a sentinel
-    that satisfies the immediate-termination logZ check, so the outer loop
-    exits before doing any real work.
+    fires — i.e. if the fresh-init branch ran. The resume branch must load
+    ``ctx.resume`` first; it returns a sentinel state that satisfies the
+    immediate-termination logZ check, so the outer loop exits before doing
+    any real work.
     """
     from types import SimpleNamespace
+    from unittest.mock import MagicMock
 
-    fake_checkpoint = tmp_path / "nss_checkpoint.pkl"
-    fake_checkpoint.write_bytes(b"placeholder - actual contents replaced by mock")
+    from autofit.non_linear.paths.null import NullPaths
 
     sentinel_state = SimpleNamespace(
         integrator=SimpleNamespace(logZ=0.0, logZ_live=-100.0),
@@ -179,32 +179,32 @@ def test__load_checkpoint_called_when_file_exists(tmp_path):
         ),
     )
 
-    # Minimum stub for model + analysis. _fit calls model.prior_count and
-    # both vector_from_unit_vector + log_prior_list_from_vector inside the
-    # closure construction (which isn't traced unless one_step fires).
+    # Minimum stub for the model. ``run`` reads ``prior_count`` and draws the
+    # initial particles through ``vector_from_unit_vector``; the prior closure
+    # isn't traced unless one_step fires.
     mock_model = SimpleNamespace(
         prior_count=2,
-        instance_from_vector=lambda **kw: SimpleNamespace(),
         vector_from_unit_vector=lambda v, xp=None: jnp.asarray([0.0, 0.0]),
         log_prior_list_from_vector=lambda **kw: [0.0, 0.0],
     )
-    mock_analysis = SimpleNamespace(
-        log_likelihood_function=lambda instance: 0.0,
-        is_jax=True,
+
+    resume = MagicMock()
+    resume.load.return_value = (sentinel_state, [], jax.random.PRNGKey(0), 17)
+
+    paths = NullPaths()
+    ctx = SimpleNamespace(
+        model=mock_model,
+        paths=paths,
+        resume=resume,
+        fitness=SimpleNamespace(
+            objective=lambda kind, compile=None: (lambda params: 0.0),
+            analysis=SimpleNamespace(),
+        ),
     )
 
     search = af.NSS(n_live=4, num_mcmc_steps=1, num_delete=1, termination=-3.0)
-    # Force the checkpoint property to return our sentinel path even though
-    # paths is the default NullPaths.
+
     with patch.object(
-        type(search),
-        "_nss_checkpoint_path",
-        new=fake_checkpoint,
-    ), patch.object(
-        nss_search_module,
-        "_load_checkpoint",
-        return_value=(sentinel_state, [], jax.random.PRNGKey(0), 17),
-    ) as mock_load, patch.object(
         nss_search_module,
         "_blackjax",
     ) as mock_bjax, patch.object(
@@ -216,7 +216,7 @@ def test__load_checkpoint_called_when_file_exists(tmp_path):
                 loglikelihood=np.zeros(1),
             ),
             update_info=SimpleNamespace(
-                num_steps=np.zeros(1, dtype=int),
+                num_expansions=np.zeros(1, dtype=int),
                 num_shrink=np.zeros(1, dtype=int),
             ),
         ),
@@ -226,19 +226,13 @@ def test__load_checkpoint_called_when_file_exists(tmp_path):
         return_value=jnp.zeros((1, 100)),
     ):
         mock_bjax.nss.return_value.init.side_effect = AssertionError(
-            "algo.init called from resume path — expected _load_checkpoint instead."
+            "algo.init called from resume path — expected ctx.resume.load instead."
         )
         mock_bjax.nss.return_value.step.side_effect = AssertionError(
             "algo.step called even though logZ termination should fire immediately."
         )
 
-        # The mocked downstream pipeline (Fitness construction, _NSSInternal
-        # repackaging) is intentionally not realistic — we only care that the
-        # resume branch was entered and ``_load_checkpoint`` was called. Catch
-        # any downstream stub-related failure; the assertion below is the gate.
-        try:
-            search._fit(model=mock_model, analysis=mock_analysis)
-        except (AttributeError, AssertionError, TypeError):
-            pass
+        internal = search.run(ctx)
 
-    mock_load.assert_called_once_with(fake_checkpoint)
+    resume.load.assert_called_once_with(paths)
+    assert isinstance(internal, nss_search_module._NSSInternal)

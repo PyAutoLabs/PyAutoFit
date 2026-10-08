@@ -8,10 +8,8 @@ from typing import Optional, TYPE_CHECKING
 
 import numpy as np
 
-from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.checkpoint import NativeFileCheckpointer
-from autofit.non_linear.fitness import Fitness, get_log_likelihood_ceiling
-from autofit.non_linear.paths.null import NullPaths
+from autofit.non_linear.objective import SCALAR
 from autofit.non_linear.search.nest import abstract_nest
 from .samples import NSSamples
 from autofit.non_linear.samples.adapter import RawSamples
@@ -41,68 +39,13 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-#: The figure of merit ``af.NSS`` substitutes for a log likelihood it refuses to sample from. Not
-#: ``-inf``: blackjax's nested sampler arithmetic (log weights, shell evidence) has to stay finite,
-#: so an unreachably low finite value is used instead.
+#: The figure of merit ``af.NSS`` substitutes for a log likelihood it refuses to sample from
+#: (its declared ``invalid_value``). Not ``-inf``: blackjax's nested sampler arithmetic (log
+#: weights, shell evidence) has to stay finite, so an unreachably low finite value is used
+#: instead. ``Fitness.call`` returns it for a non-finite log likelihood, for one over the
+#: configured magnitude ceiling and, through the traced ``xp.where`` penalty, for a model
+#: that violates an assertion.
 NSS_INVALID_LOG_LIKELIHOOD = -1e30
-
-
-def nss_log_likelihood_from(model, analysis, log_likelihood_ceiling=None):
-    """
-    Build the JAX log-likelihood closure ``af.NSS`` samples through.
-
-    ``af.NSS`` does not call `Fitness.call` while sampling -- it hands blackjax an inline JAX
-    closure -- so it does not inherit that method's guards and has to repeat them here. Keeping the
-    closure in one module-level factory means the guards exist once and can be tested directly,
-    rather than being restated by a test that only resembles the sampled path.
-
-    Two things are rejected, both mapped to `NSS_INVALID_LOG_LIKELIHOOD`:
-
-    - non-finite values (``NaN`` / ``inf``), always;
-    - finite values whose magnitude exceeds the configured ceiling, **if** a config has opted in.
-      An fp64 Cholesky on a non-positive-definite matrix returns finite garbage (log likelihoods up
-      to ``3e+303``), which a nested sampler otherwise accepts as its highest-likelihood live point;
-      the shell log evidence then explodes and the termination criterion never fires. The ceiling is
-      off in the packaged config, because a log likelihood scales with the noise-map units and a
-      fixed magnitude can therefore reject a legitimate fit
-      (`autofit.non_linear.fitness.get_log_likelihood_ceiling` carries the full argument).
-
-    This closure is JAX-only, so it cannot warn when the ceiling fires — the rejection is an
-    ``jnp.where`` on a tracer. `Fitness.call`'s numpy path warns once per process; ``af.NSS`` does
-    not sample through it.
-
-    Parameters
-    ----------
-    model
-        The model whose parameter vector is mapped to an instance.
-    analysis
-        The analysis supplying `log_likelihood_function`.
-    log_likelihood_ceiling
-        The magnitude ceiling. Defaults to the configured value
-        (`autofit.non_linear.fitness.get_log_likelihood_ceiling`), which is ``inf`` — the check
-        disabled — unless a config opts in. It must be a static Python float, because JAX traces
-        the comparison it feeds.
-
-    Returns
-    -------
-    The closure blackjax samples through.
-    """
-    import jax.numpy as jnp
-
-    if log_likelihood_ceiling is None:
-        log_likelihood_ceiling = get_log_likelihood_ceiling()
-
-    def log_likelihood(params):
-        instance = model.instance_from_vector(vector=params, xp=jnp)
-        raw = analysis.log_likelihood_function(instance=instance)
-        raw = jnp.where(jnp.isfinite(raw), raw, NSS_INVALID_LOG_LIKELIHOOD)
-        return jnp.where(
-            jnp.abs(raw) > log_likelihood_ceiling,
-            NSS_INVALID_LOG_LIKELIHOOD,
-            raw,
-        )
-
-    return log_likelihood
 
 
 _CHECKPOINT_FILENAME = "nss_checkpoint.pkl"
@@ -216,7 +159,7 @@ class NSS(abstract_nest.AbstractNest):
     # physical-space prior density.
     objective_target = cap.ObjectiveTarget(cap.ObjectiveQuantity.LOG_LIKELIHOOD, cap.CoordinateSpace.PHYSICAL)
     invalid_value = NSS_INVALID_LOG_LIKELIHOOD
-    # The resume state is NSS's own atomic ``nss_checkpoint.pkl`` (``_fit`` writes,
+    # The resume state is NSS's own atomic ``nss_checkpoint.pkl`` (``run`` writes,
     # reads and deletes it); the archive is the default ``search_internal.dill``.
     resume_state = NativeFileCheckpointer(_CHECKPOINT_FILENAME, loader=_load_checkpoint)
 
@@ -397,47 +340,59 @@ class NSS(abstract_nest.AbstractNest):
         )
         self.termination = -1.0
 
-    def _fit(self, model: AbstractPriorModel, analysis):
+    def fitness_overrides(self, analysis) -> dict:
         """
-        Fit a model using NSS, with checkpoint/resume + on-the-fly visualization.
-
-        Builds JAX-traceable ``log_likelihood`` and ``prior_logprob`` closures
-        threaded through Phase 0's ``xp=jnp`` plumbing, draws ``n_live`` initial
-        particles by mapping unit-cube samples through the prior transform,
-        and runs the NSS outer loop inline (mirroring upstream blackjax's
-        nested-sampling loop pattern). Between outer iterations the
-        loop can (a) pickle resumable state to ``nss_checkpoint.pkl`` and
-        (b) call ``analysis.visualize`` on the current best live particle.
-
-        On entry, if a checkpoint exists at the expected path the loop resumes
-        from the saved ``(state, dead, run_key, iteration)``. On successful
-        exit the checkpoint is deleted — mirrors Nautilus's
-        ``output_search_internal`` post-success cleanup so the next fresh fit
-        doesn't accidentally resume from a stale checkpoint.
-
-        Returns
-        -------
-        (search_internal, fitness)
-            ``search_internal`` is a ``_NSSInternal`` holder (NumPy arrays
-            only). ``fitness`` is a ``Fitness`` instance that ``af.NSS`` does
-            not use for sampling (inline JAX closures handle that) but is
-            required by ``AbstractNest.perform_update`` for post-fit work
-            like latent-sample generation, which calls ``fitness.batch_size``.
+        NSS fires its own quick update between outer iterations (``_fire_quick_update``),
+        so the ``Fitness`` cadence that ``call_wrap`` drives is switched off: blackjax
+        evaluates the raw objective inside its jitted step and never goes through
+        ``call_wrap``, and a second background worker would only duplicate the visuals.
         """
+        return {
+            "iterations_per_quick_update": None,
+            "background_quick_update": False,
+            "live_visual_update": False,
+        }
 
-        # jax_use='required': NSS traces its likelihood inside blackjax and has no numpy
-        # path. `fit` already ran this gate; repeated for direct callers.
-        cap.check_jax_required(self, analysis)
+    def run(self, ctx):
+        """
+        Run NSS (the ``run(ctx)`` hook; see ``docs/design/run_ctx.md``) and return the
+        ``_NSSInternal`` holder of its final state.
 
+        The log likelihood blackjax samples through is the fit's scalar objective
+        (``Fitness.call`` via ``Fitness.objective``), so NSS shares the one guard path
+        every search uses: a non-finite log likelihood, one over the configured
+        magnitude ceiling, and a model that violates an assertion (the traced
+        ``xp.where`` penalty) all return the declared ``invalid_value``
+        (``NSS_INVALID_LOG_LIKELIHOOD``). It is handed over unjitted: blackjax traces it
+        inside its own jitted step, where a nested jit would only add a call boundary.
+
+        The prior log density and the unit-cube initial draws are built from
+        ``ctx.model`` with ``xp=jax.numpy``. Between outer iterations the loop (a)
+        pickles resumable state to NSS's native ``nss_checkpoint.pkl`` (the search's
+        ``resume_state``) and (b) fires a quick-update visualization of the current best
+        live particle. When ``ctx.resume`` holds that file the loop resumes from the
+        saved ``(state, dead, run_key, iteration)``; on successful exit the file is
+        deleted, so the next fresh fit does not resume from a stale checkpoint.
+
+        The likelihood-function sanity check of a resumed run runs when the fit's
+        ``Fitness`` is built, before this method, rather than after sampling.
+
+        Parameters
+        ----------
+        ctx
+            The fit's ``FitContext``.
+        """
         import jax
         import jax.numpy as jnp
         import time
+
+        model = ctx.model
 
         self.logger.info("Starting NSS non-linear search.")
 
         ndim = model.prior_count
 
-        log_likelihood = nss_log_likelihood_from(model=model, analysis=analysis)
+        log_likelihood = ctx.fitness.objective(SCALAR, compile=False)
 
         def prior_logprob(params):
             log_priors = model.log_prior_list_from_vector(vector=params, xp=jnp)
@@ -493,9 +448,10 @@ class NSS(abstract_nest.AbstractNest):
             state, dead_point = algo.step(subk, state)
             return (state, k), dead_point
 
-        checkpoint_path = self._nss_checkpoint_path
-        if checkpoint_path is not None and checkpoint_path.exists():
-            state, dead, run_key, iteration = _load_checkpoint(checkpoint_path)
+        checkpoint_path = self.resume_state.path(ctx.paths)
+
+        if ctx.resume is not None:
+            state, dead, run_key, iteration = ctx.resume.load(ctx.paths)
             self.logger.info(
                 "Resuming NSS from checkpoint at iteration %d (state file %s).",
                 iteration,
@@ -534,7 +490,9 @@ class NSS(abstract_nest.AbstractNest):
                 self.iterations_per_quick_update is not None
                 and iteration % self.iterations_per_quick_update == 0
             ):
-                self._fire_quick_update(state=state, model=model, analysis=analysis)
+                self._fire_quick_update(
+                    state=state, model=model, analysis=ctx.fitness.analysis
+                )
 
         wall_time = time.time() - t_start
 
@@ -580,7 +538,7 @@ class NSS(abstract_nest.AbstractNest):
 
         if checkpoint_path is not None and checkpoint_path.exists():
             try:
-                checkpoint_path.unlink()
+                self.resume_state.discard(ctx.paths)
             except OSError as exc:
                 self.logger.warning(
                     "Failed to delete completed-run checkpoint %s: %s. The "
@@ -590,34 +548,21 @@ class NSS(abstract_nest.AbstractNest):
                     exc,
                 )
 
-        fitness = Fitness(
-            model=model,
-            analysis=analysis,
-            paths=self.paths,
-            fom_is_log_likelihood=True,
-            resample_figure_of_merit=-1.0e99,
-            batch_size=1,
-        )
-
-        return search_internal, fitness
+        return search_internal
 
     @property
     def _nss_checkpoint_path(self) -> Optional[Path]:
-        """Resolve the checkpoint location, or None when paths is NullPaths."""
-        if isinstance(self.paths, NullPaths):
-            return None
-        try:
-            return Path(self.paths.search_internal_path) / _CHECKPOINT_FILENAME
-        except TypeError:
-            return None
+        """Resolve the checkpoint location (the search's ``resume_state`` file), or None
+        when the paths store no internal state (``NullPaths``)."""
+        return self.resume_state.path(self.paths)
 
     def _fire_quick_update(self, state, model, analysis):
         """Push the current best live particle through ``analysis.visualize``.
 
         The Nautilus / Dynesty quick-update path goes through
-        ``Fitness.manage_quick_update``; ``af.NSS`` bypasses ``Fitness._call``
-        for sampling so we invoke ``analysis.visualize`` directly between
-        outer-loop iterations. Wrapped in try/except — a visualization failure
+        ``Fitness.manage_quick_update``; ``af.NSS`` hands blackjax the raw
+        objective (no ``call_wrap`` bookkeeping) so we invoke
+        ``analysis.visualize`` directly between outer-loop iterations. Wrapped in try/except — a visualization failure
         logs a warning but does not kill a long sampler run.
         """
         try:

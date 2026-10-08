@@ -1,26 +1,30 @@
 """
-The log-likelihood guards on the closure ``af.NSS`` samples through.
+The log-likelihood guards on the objective ``af.NSS`` samples through.
 
-``af.NSS`` does not route sampling through `Fitness.call` — it hands blackjax an inline JAX
-closure — so the guards there are a second implementation and need their own test. The closure is
-built by `nss_log_likelihood_from`, and these tests call that factory rather than restating its
-body, so a change to the sampled path cannot pass a test that only resembles it.
+``af.NSS`` hands blackjax its fit's scalar objective (``Fitness.objective("scalar")``,
+built by ``NonLinearSearch.make_fitness`` from NSS's declared ``objective_target`` and
+``invalid_value``), so it shares ``Fitness.call``'s one guard path. These tests build that
+objective exactly as ``NSS.run`` does and check the values NSS's backend sees: before
+search-extensibility A3b NSS sampled through a second, inline closure and these tests
+pinned that closure instead.
 
-The factory is JAX-only, so the file skips whole when JAX is absent (library policy: unit tests are
-the numpy always-green layer).
+JAX-only (NSS is ``jax_use='required'``), so the file skips whole when JAX is absent
+(library policy: unit tests are the numpy always-green layer).
 """
 
 import numpy as np
 import pytest
 
+jnp = pytest.importorskip("jax.numpy")
+
 import autofit as af
-from autofit.non_linear.search.nest.nss.search import (
-    NSS_INVALID_LOG_LIKELIHOOD,
-    nss_log_likelihood_from,
-)
+from autofit.non_linear.search.nest.nss import search as nss_search_module
+from autofit.non_linear.search.nest.nss.search import NSS_INVALID_LOG_LIKELIHOOD
 from test_autofit.non_linear.constant_analysis import ConstantAnalysis
 
-jnp = pytest.importorskip("jax.numpy")
+pytestmark = pytest.mark.skipif(
+    not nss_search_module._HAS_NSS, reason="requires blackjax >= 1.6"
+)
 
 
 PARAMETERS = [1.0, 1.0, 1.0]
@@ -36,12 +40,21 @@ OVER_CEILING = 1.0e30
 UNDER_CEILING = 1.0e19
 
 
-def _log_likelihood_from(log_likelihood, **kwargs):
-    return nss_log_likelihood_from(
+def _log_likelihood_from(log_likelihood, log_likelihood_ceiling=None):
+    """
+    The objective ``NSS.run`` hands blackjax, built from NSS's ``make_fitness``.
+
+    ``Fitness`` reads the configured ceiling once in ``__init__``; an explicit ceiling is
+    set on it before the (lazily traced) objective is first called.
+    """
+    fitness = af.NSS().make_fitness(
         model=af.Model(af.ex.Gaussian),
-        analysis=ConstantAnalysis(log_likelihood=log_likelihood),
-        **kwargs,
+        analysis=ConstantAnalysis(log_likelihood=log_likelihood, use_jax=True),
+        paths=None,
     )
+    if log_likelihood_ceiling is not None:
+        fitness.log_likelihood_ceiling = log_likelihood_ceiling
+    return fitness.objective("scalar", compile=False)
 
 
 def test_nss_closure_rejects_a_log_likelihood_above_the_ceiling():

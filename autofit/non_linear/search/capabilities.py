@@ -32,6 +32,9 @@ Attribute                 Meaning
 ``checkpointer``          Where the search archives its internal state when a fit
                           completes (``autofit.non_linear.checkpoint``): ``dill``,
                           ``pickle`` or ``native:<filename>``.
+``requires_fp64``         Whether the backend needs float64: ``fit`` then raises, rather
+                          than warns once, when a JAX analysis runs with
+                          ``jax_enable_x64`` off (``autofit.non_linear.search.preflight``).
 ========================  ==============================================================
 
 ``invalid_value`` records what the backend actually sees and is not yet normalised. For
@@ -176,6 +179,7 @@ CAPABILITY_ATTRIBUTES = (
     "objective_target",
     "invalid_value",
     "checkpointer",
+    "requires_fp64",
 )
 """
 The names of the static capability attributes, in manifest order.

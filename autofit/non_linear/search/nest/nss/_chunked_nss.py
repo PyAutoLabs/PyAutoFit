@@ -25,7 +25,7 @@ control both seams:
 When ``chunk_size`` is None the builder still uses ``jax.vmap`` and is
 bit-identical to upstream. The builder otherwise produces a
 ``blackjax.SamplingAlgorithm`` with the same shape ``blackjax.nss(...)``
-returns, so ``af.NSS._fit`` is a one-line switch.
+returns, so ``af.NSS.run`` is a one-line switch.
 
 See PyAutoFit#1304 for the diagnosis and A100 evidence (jobs 322605 /
 322606 OOM at the same byte counts as before #1303 landed, because the
