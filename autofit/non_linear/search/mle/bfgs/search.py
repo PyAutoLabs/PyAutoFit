@@ -321,8 +321,13 @@ class AbstractBFGS(AbstractMLE):
                 # diverge by branch would be a trap of its own.
                 if analysis.is_jax:
 
+                    # The exact gradient from the "value_and_grad" objective, one jitted
+                    # call per step: no finite differences (which cost n_params + 1
+                    # likelihood calls per gradient). The host-side wrapper books every
+                    # call as `call_wrap` does, so history and quick updates still fire.
                     search_internal = optimize.minimize(
-                        fun=fitness._jit,
+                        fun=fitness.call_wrap_value_and_grad,
+                        jac=True,
                         x0=x0,
                         method=self.method,
                         options=options,

@@ -359,7 +359,7 @@ class Nautilus(abstract_nest.AbstractNest):
                 live_visual_update=self.live_visual_update,
                 # The vectorised (jax.vmap) likelihood needs a JAX analysis;
                 # `force_x1_cpu` with a numpy analysis evaluates point by point.
-                use_jax_vmap=self.use_jax_vmap and analysis.is_jax,
+                batched=self.use_jax_vmap and analysis.is_jax,
                 batch_size=self.n_batch,
             )
 
@@ -452,7 +452,7 @@ class Nautilus(abstract_nest.AbstractNest):
             n_dim=model.prior_count,
             filepath=self.checkpoint_file,
             pool=None,
-            vectorized=fitness.use_jax_vmap,
+            vectorized=fitness.batched,
             n_live=self.n_live,
             n_update=self.n_update,
             enlarge_per_dim=self.enlarge_per_dim,

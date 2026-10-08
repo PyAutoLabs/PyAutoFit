@@ -244,7 +244,9 @@ class AbstractDynesty(AbstractNest, ABC):
             iterations_per_quick_update=self.iterations_per_quick_update,
             background_quick_update=self.quick_update_background,
             live_visual_update=self.live_visual_update,
-            use_jax_jit=analysis.is_jax and self.use_jax_jit,
+            # A JAX analysis is jitted lazily by the scalar objective `__call__` dispatches
+            # to; `use_jax_jit=False` keeps its old meaning (eager JAX) for one release.
+            compile=self.use_jax_jit is not False,
         )
 
         if not isinstance(self.paths, NullPaths):

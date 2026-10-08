@@ -12,6 +12,7 @@ from autofit.non_linear.search.abstract_search import ITERATIONS_NEVER
 from autofit.non_linear.search.mle.abstract_mle import AbstractMLE
 from autofit.non_linear.analysis import Analysis
 from autofit.non_linear.fitness import Fitness
+from autofit.non_linear.objective import chunk_slices, evaluate_in_chunks
 from autofit.jax.gradient import (
     resolve_gradient_mode,
     validate_gradient_mode,
@@ -1044,7 +1045,11 @@ class AbstractMultiStartGradient(AbstractMLE):
                 f"MultiStartGradient gradient mode: {gradient_mode} ({source})."
             )
 
-        _value_and_grad = value_and_grad_from(fitness.call, gradient_mode)
+        # Built on the shared unjitted scalar objective (``fitness.call``): this
+        # search keeps its own transformed-coordinate builder on top of it.
+        objective = fitness.objective("scalar", compile=False)
+
+        _value_and_grad = value_and_grad_from(objective, gradient_mode)
 
         # Per-start gradient finiteness is reduced *inside* the jitted call, as a
         # third output, rather than by a separate op on its result. The reduction
@@ -1143,7 +1148,7 @@ class AbstractMultiStartGradient(AbstractMLE):
         # draws, and those draws are, and stay, physical.
         _value_and_grad_stepped = (
             value_and_grad_from(
-                lambda phi: fitness.call(_to_physical(phi)), gradient_mode
+                lambda phi: objective(_to_physical(phi)), gradient_mode
             )
             if (has_scaler or has_bijector)
             else _value_and_grad
@@ -1170,29 +1175,11 @@ class AbstractMultiStartGradient(AbstractMLE):
             batch_size = self.batch_size
 
             def batched_value_and_grad(params):
-                foms_chunks = []
-                grads_chunks = []
-                grad_finite_chunks = []
-                violation_chunks = []
-                for lo, hi, pad in _chunk_slices(params.shape[0], batch_size):
-                    chunk = params[lo:hi]
-                    if pad:
-                        chunk = jnp.concatenate([chunk, jnp.tile(chunk[-1:], (pad, 1))])
-                    foms, grads, grad_finite, violation = _vmapped(chunk)
-                    if pad:
-                        foms = foms[:-pad]
-                        grads = grads[:-pad]
-                        grad_finite = grad_finite[:-pad]
-                        violation = violation[:-pad]
-                    foms_chunks.append(foms)
-                    grads_chunks.append(grads)
-                    grad_finite_chunks.append(grad_finite)
-                    violation_chunks.append(violation)
-                return (
-                    jnp.concatenate(foms_chunks),
-                    jnp.concatenate(grads_chunks),
-                    jnp.concatenate(grad_finite_chunks),
-                    jnp.concatenate(violation_chunks),
+                # The shared batching helper: chunks of ``batch_size`` rows,
+                # the ragged final chunk padded to that shape and its padded
+                # rows discarded, so one chunk shape is ever compiled.
+                return evaluate_in_chunks(
+                    _vmapped, params, batch_size=batch_size, xp=jnp
                 )
 
         # The optax rule (resolved from optax / optax.contrib), guarded by
@@ -2211,18 +2198,10 @@ def batch_size_within_budget(fixed, per_start, n_starts, budget_bytes):
 
 def _chunk_slices(n_rows, batch_size):
     """
-    The ``(lo, hi, pad)`` chunk bounds the batched ``value_and_grad`` sweep
-    iterates over: rows ``lo:hi`` of the params array, padded by ``pad`` repeats
-    of the final row so every chunk presents the same ``(batch_size, ndim)``
-    shape to the compiled function (one XLA compile for the whole sweep). Only
-    the final chunk can be ragged (``pad > 0``) — the broad-start collection may
-    return fewer than ``n_starts`` rows, so raggedness is not restricted to
-    ``n_starts % batch_size``.
+    The ``(lo, hi, pad)`` chunk bounds of the batched ``value_and_grad`` sweep;
+    see ``autofit.non_linear.objective.chunk_slices``, where it now lives.
     """
-    return [
-        (lo, min(lo + batch_size, n_rows), max(0, lo + batch_size - n_rows))
-        for lo in range(0, n_rows, batch_size)
-    ]
+    return chunk_slices(n_rows, batch_size)
 
 
 class MultiStartAdam(AbstractMultiStartGradient):
