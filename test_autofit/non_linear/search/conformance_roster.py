@@ -29,7 +29,10 @@ sampler objects), is ``test_conformance_backend.py``. It skips a search only by 
 capability the roster declares for it: ``jax_use`` is ``"none"`` (the search never
 touches JAX), ``"optional"`` (the search runs on a numpy likelihood and has a JAX path)
 or ``"required"`` (the backend is JAX-native), and ``jax_modules`` names the modules a
-``"required"`` backend cannot run without.
+``"required"`` backend cannot run without. Both are derived from the declarative search
+registry (``autofit/non_linear/search/registry.py``), which mirrors each class's
+``jax_use`` attribute and is tested equal to it; reading the registry imports no search
+module, so the roster still collects on every leg.
 
 Golden table
 ------------
@@ -130,9 +133,18 @@ _SEARCH = "autofit.non_linear.search"
 _MULTI_START = f"{_SEARCH}.mle.multi_start_gradient.search"
 
 
-_BLACKJAX = dict(jax_use="required", jax_modules=("jax", "blackjax"))
-_OPTAX = dict(jax_use="required", jax_modules=("jax", "optax"))
-_OPTIONAL = dict(jax_use="optional")
+def _declared(name: str) -> dict:
+    """
+    The ``jax_use`` / ``jax_modules`` of a search, derived from its registry entry.
+    """
+    from autofit.non_linear.search.registry import entry
+
+    registered = entry(name)
+    jax_use = registered.capabilities["jax_use"]
+    return dict(
+        jax_use=jax_use,
+        jax_modules=registered.requires if jax_use == "required" else (),
+    )
 
 
 def searches_under_test() -> List[SearchEntry]:
@@ -140,56 +152,96 @@ def searches_under_test() -> List[SearchEntry]:
     The 15 public searches of PyAutoFit, in a fixed order.
     """
     return [
-        SearchEntry("Emcee", f"{_SEARCH}.mcmc.emcee.search.Emcee", "mcmc"),
-        SearchEntry("Zeus", f"{_SEARCH}.mcmc.zeus.search.Zeus", "mcmc"),
+        SearchEntry(
+            "Emcee",
+            f"{_SEARCH}.mcmc.emcee.search.Emcee",
+            "mcmc",
+            **_declared("Emcee"),
+        ),
+        SearchEntry(
+            "Zeus",
+            f"{_SEARCH}.mcmc.zeus.search.Zeus",
+            "mcmc",
+            **_declared("Zeus"),
+        ),
         SearchEntry(
             "BlackJAXNUTS",
             f"{_SEARCH}.mcmc.blackjax.nuts.search.BlackJAXNUTS",
             "mcmc",
-            **_BLACKJAX,
+            **_declared("BlackJAXNUTS"),
         ),
         SearchEntry(
-            "SMC", f"{_SEARCH}.mcmc.blackjax.smc.search.SMC", "mcmc", **_BLACKJAX
+            "SMC",
+            f"{_SEARCH}.mcmc.blackjax.smc.search.SMC",
+            "mcmc",
+            **_declared("SMC"),
         ),
         SearchEntry(
             "DynestyStatic",
             f"{_SEARCH}.nest.dynesty.search.static.DynestyStatic",
             "nest",
-            **_OPTIONAL,
+            **_declared("DynestyStatic"),
         ),
         SearchEntry(
             "DynestyDynamic",
             f"{_SEARCH}.nest.dynesty.search.dynamic.DynestyDynamic",
             "nest",
-            **_OPTIONAL,
+            **_declared("DynestyDynamic"),
         ),
         SearchEntry(
-            "Nautilus", f"{_SEARCH}.nest.nautilus.search.Nautilus", "nest", **_OPTIONAL
+            "Nautilus",
+            f"{_SEARCH}.nest.nautilus.search.Nautilus",
+            "nest",
+            **_declared("Nautilus"),
         ),
         SearchEntry(
             "NSS",
             f"{_SEARCH}.nest.nss.search.NSS",
             "nest",
             requires=["blackjax"],
-            **_BLACKJAX,
+            **_declared("NSS"),
         ),
-        SearchEntry("Drawer", f"{_SEARCH}.mle.drawer.search.Drawer", "mle"),
-        SearchEntry("BFGS", f"{_SEARCH}.mle.bfgs.search.BFGS", "mle", **_OPTIONAL),
-        SearchEntry("LBFGS", f"{_SEARCH}.mle.bfgs.search.LBFGS", "mle", **_OPTIONAL),
         SearchEntry(
-            "MultiStartAdam", f"{_MULTI_START}.MultiStartAdam", "mle", **_OPTAX
+            "Drawer",
+            f"{_SEARCH}.mle.drawer.search.Drawer",
+            "mle",
+            **_declared("Drawer"),
+        ),
+        SearchEntry(
+            "BFGS",
+            f"{_SEARCH}.mle.bfgs.search.BFGS",
+            "mle",
+            **_declared("BFGS"),
+        ),
+        SearchEntry(
+            "LBFGS",
+            f"{_SEARCH}.mle.bfgs.search.LBFGS",
+            "mle",
+            **_declared("LBFGS"),
+        ),
+        SearchEntry(
+            "MultiStartAdam",
+            f"{_MULTI_START}.MultiStartAdam",
+            "mle",
+            **_declared("MultiStartAdam"),
         ),
         SearchEntry(
             "MultiStartADABelief",
             f"{_MULTI_START}.MultiStartADABelief",
             "mle",
-            **_OPTAX,
+            **_declared("MultiStartADABelief"),
         ),
         SearchEntry(
-            "MultiStartLion", f"{_MULTI_START}.MultiStartLion", "mle", **_OPTAX
+            "MultiStartLion",
+            f"{_MULTI_START}.MultiStartLion",
+            "mle",
+            **_declared("MultiStartLion"),
         ),
         SearchEntry(
-            "MultiStartProdigy", f"{_MULTI_START}.MultiStartProdigy", "mle", **_OPTAX
+            "MultiStartProdigy",
+            f"{_MULTI_START}.MultiStartProdigy",
+            "mle",
+            **_declared("MultiStartProdigy"),
         ),
     ]
 
