@@ -129,7 +129,12 @@ pins the following details the table left open; each is flagged for review in th
 - **`ctx.update(internal)`** is synchronous: the backend is paused while it runs, so the
   internal state is read as it stands (no copy). The snapshot hand-off arrives with A3's
   samples adapter, which converts the samples once.
-- **`ctx.resume`, `ctx.checkpointer`** are `None` until A3 fills them; **`ctx.rng`** is a
+- **`ctx.checkpointer`** is the search's archive strategy, the class attribute
+  `NonLinearSearch.checkpointer` (A3, `autofit/non_linear/checkpoint.py`,
+  `docs/design/checkpointing.md`). **`ctx.resume`** is the search's
+  `NonLinearSearch.resume_state` when the interrupted run's file exists, else `None`: the
+  `Checkpointer` handle, not the loaded state, because a backend may reopen its own native
+  file (`Nautilus` resumes through `Sampler(filepath=...)`). **`ctx.rng`** is a
   `SeedSequence` of the search's `seed` attribute, if any, until A4's search-level seed.
 - **`ctx.close(failed)`** is the cleanup the lifecycle rules require; on failure it closes
   the pools the context built, shuts the quick-update threads down and releases the
@@ -141,5 +146,6 @@ pins the following details the table left open; each is flagged for review in th
 - **Search-side hooks** (not context members): `fitness_overrides(analysis)` lets a search
   add `Fitness` arguments (`Nautilus`: `batched`, `batch_size`), and `samples_cls` names the
   `Samples` class `raw_samples_from`'s result is converted into. `RawSamples` and
-  `samples_from_raw` live provisionally in `autofit/non_linear/search/fit_context.py` until
-  A3's `samples/adapter.py` replaces them.
+  `samples_from_raw` are A3's `autofit/non_linear/samples/adapter.py` (re-exported from
+  `autofit/non_linear/search/fit_context.py`), and `samples_via_internal_from` is
+  implemented once on `NonLinearSearch` over `raw_samples_from` for every search.

@@ -64,7 +64,9 @@ def test_drawer_fit_runs_through_run_ctx(monkeypatch):
     for member in FROZEN_MEMBERS:
         assert hasattr(ctx, member), member
     assert ctx.test_mode_level == 1
-    assert ctx.resume is None and ctx.checkpointer is None
+    # A3: the archive strategy is the search's; Drawer has no resume state.
+    assert ctx.checkpointer == search.checkpointer
+    assert ctx.resume is None
 
     # Never stored on the search.
     assert not any(isinstance(value, FitContext) for value in vars(search).values())
@@ -155,3 +157,33 @@ def test_schedule_chunks_cover_the_budget():
     from autofit.non_linear.search.fit_context import UpdateSchedule
 
     assert list(UpdateSchedule(search).chunks(10)) == [4, 4, 2]
+
+
+def test_resume_is_the_resume_state_only_when_its_file_exists(tmp_path):
+    from autofit.non_linear.checkpoint import NativeFileCheckpointer
+
+    class ResumableToy(ToySearch):
+        resume_state = NativeFileCheckpointer("toy_checkpoint.bin", loader=open)
+
+    search = ResumableToy()
+    search.paths = af.DirectoryPaths(name="toy", path_prefix=str(tmp_path))
+    search.paths.model = af.Model(af.ex.Gaussian)
+
+    def ctx():
+        return FitContext(
+            search=search,
+            model=search.paths.model,
+            analysis=None,
+            fitness=None,
+            pool=None,
+            test_mode_level=0,
+        )
+
+    assert ctx().resume is None
+    assert ctx().checkpointer is search.checkpointer
+
+    path = search.resume_state.path(search.paths)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"state")
+
+    assert ctx().resume is search.resume_state

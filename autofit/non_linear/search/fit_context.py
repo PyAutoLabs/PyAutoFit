@@ -7,10 +7,13 @@ of ``_fit`` is driven through a ``FitContext`` by ``NonLinearSearch._fit``, the 
 a search that overrides ``_fit`` keeps working unchanged. ``Drawer`` and ``Nautilus`` are
 the first two searches on the bridge.
 
-Members filled by later phases are present with their A2 value:
+Members filled by later phases:
 
-- ``ctx.resume`` is ``None`` and ``ctx.checkpointer`` is ``None`` (phase A3 fills both;
-  until then a backend resumes from its own native checkpoint, as ``Nautilus`` does);
+- ``ctx.checkpointer`` is the search's archive strategy (``NonLinearSearch.checkpointer``)
+  and ``ctx.resume`` its resume state (``NonLinearSearch.resume_state``) when the
+  interrupted run's file exists, else ``None`` (phase A3, ``autofit.non_linear.checkpoint``);
+  ``ctx.resume`` is the ``Checkpointer`` handle, not the loaded state, because some
+  backends reopen their own native file (``Nautilus``);
 - ``ctx.rng`` is a ``numpy.random.SeedSequence`` from the search's ``seed`` attribute
   when it has one (phase A4 adds one search-level seed and feeds the initializer).
 
@@ -78,8 +81,13 @@ class FitContext:
         self.test_mode_level = test_mode_level
         self.pool = pool
         self.rng = np.random.SeedSequence(getattr(search, "seed", None))
-        self.resume = None
-        self.checkpointer = None
+        self.checkpointer = search.checkpointer
+        resume_state = search.resume_state
+        self.resume = (
+            resume_state
+            if resume_state is not None and resume_state.exists(search.paths)
+            else None
+        )
         self.schedule = UpdateSchedule(search)
 
     def objective(self, kind: str):

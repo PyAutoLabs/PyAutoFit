@@ -1491,13 +1491,13 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC, metaclass=_SearchMeta):
 
     run._is_bridge_default = True
 
-    def info_from(self, internal) -> Optional[dict]:
+    def info_from(self, internal) -> dict:
         """
         The ``samples_info`` entries of a ``run(ctx)`` search's internal state, the
         ``info`` its ``raw_samples_from`` puts on the ``RawSamples``
         (``autofit.non_linear.samples.adapter``).
         """
-        return None
+        return {}
 
     def fitness_overrides(self, analysis: Analysis) -> dict:
         """
