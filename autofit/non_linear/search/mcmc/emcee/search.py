@@ -12,7 +12,6 @@ from autonerves import conf
 from autofit import exc
 from autofit.mapper.model_mapper import ModelMapper
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
-from autofit.non_linear.fitness import Fitness
 from autofit.non_linear.initializer import Initializer
 from autofit.non_linear.search.mcmc.abstract_mcmc import AbstractMCMC
 from autofit.non_linear.search.mcmc.auto_correlations import AutoCorrelationsSettings
@@ -158,16 +157,7 @@ class Emcee(AbstractMCMC):
         """
         import emcee
 
-        fitness = Fitness(
-            model=model,
-            analysis=analysis,
-            paths=self.paths,
-            fom_is_log_likelihood=False,
-            resample_figure_of_merit=-np.inf,
-            iterations_per_quick_update=self.iterations_per_quick_update,
-            background_quick_update=self.quick_update_background,
-            live_visual_update=self.live_visual_update,
-        )
+        fitness = self.make_fitness(analysis=analysis, model=model)
 
         pool = self.make_sneaky_pool(fitness)
 

@@ -11,7 +11,6 @@ import numpy as np
 import warnings
 
 from autofit import exc
-from autofit.non_linear.fitness import Fitness
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.non_linear.paths.null import NullPaths
 from autofit.non_linear.search.nest.abstract_nest import AbstractNest
@@ -109,7 +108,7 @@ class AbstractDynesty(AbstractNest, ABC):
         number_of_cores: int = 1,
         silence: bool = False,
         force_x1_cpu: bool = False,
-        use_jax_jit: bool = True,
+        use_jax_jit: Optional[bool] = None,
         session: Optional[sa.orm.Session] = None,
         **kwargs,
     ):
@@ -175,6 +174,18 @@ class AbstractDynesty(AbstractNest, ABC):
 
         self.maxcall = maxcall
         self.force_x1_cpu = force_x1_cpu
+        if use_jax_jit is not None:
+            from autofit.non_linear.search.abstract_search import (
+                warn_deprecated_jax_knob,
+            )
+
+            warn_deprecated_jax_knob(
+                type(self).__name__,
+                "use_jax_jit",
+                "a JAX analysis is always jitted lazily (use_jax_jit=False still "
+                "evaluates it eagerly until the argument is removed).",
+            )
+
         self.use_jax_jit = use_jax_jit
 
         self.logger.debug(f"Creating {self.__class__.__name__} Search")
@@ -235,17 +246,12 @@ class AbstractDynesty(AbstractNest, ABC):
         set of accepted samples of the fit.
         """
 
-        fitness = Fitness(
-            model=model,
+        fitness = self.make_fitness(
             analysis=analysis,
-            paths=self.paths,
-            fom_is_log_likelihood=True,
-            resample_figure_of_merit=-1.0e99,
-            iterations_per_quick_update=self.iterations_per_quick_update,
-            background_quick_update=self.quick_update_background,
-            live_visual_update=self.live_visual_update,
-            # A JAX analysis is jitted lazily by the scalar objective `__call__` dispatches
-            # to; `use_jax_jit=False` keeps its old meaning (eager JAX) for one release.
+            model=model,
+            # A JAX analysis is jitted lazily by the scalar objective `__call__`
+            # dispatches to; the deprecated `use_jax_jit=False` keeps its old meaning
+            # (eager JAX) for one release.
             compile=self.use_jax_jit is not False,
         )
 

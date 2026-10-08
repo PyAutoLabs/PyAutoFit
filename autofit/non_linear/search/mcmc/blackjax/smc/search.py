@@ -12,7 +12,6 @@ import numpy as np
 from autonerves import conf
 
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
-from autofit.non_linear.fitness import Fitness
 from autofit.non_linear.objective import jax_objective
 from autofit.non_linear.initializer import Initializer, InitializerPrior
 from autofit.non_linear.search.mcmc.abstract_mcmc import AbstractMCMC
@@ -361,16 +360,7 @@ class SMC(AbstractMCMC):
         # The resample sentinel is the library-standard `-1e99` rather than `-inf`: blackjax's ESS root solver
         # multiplies the log-likelihood by a candidate `delta` that can be exactly 0.0, and `0 * -inf` is NaN.
         # A large finite negative value gives the same zero weight without that hazard.
-        fitness = Fitness(
-            model=model,
-            analysis=analysis,
-            paths=self.paths,
-            fom_is_log_likelihood=True,
-            resample_figure_of_merit=-1.0e99,
-            iterations_per_quick_update=self.iterations_per_quick_update,
-            background_quick_update=self.quick_update_background,
-            live_visual_update=self.live_visual_update,
-        )
+        fitness = self.make_fitness(analysis=analysis, model=model)
 
         # ---- Whitening ---------------------------------------------------
         #

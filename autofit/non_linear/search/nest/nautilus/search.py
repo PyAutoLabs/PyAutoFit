@@ -13,7 +13,6 @@ from typing import Dict, Optional, Tuple, TYPE_CHECKING
 from autofit import exc
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 from autofit.mapper.prior.vectorized import PriorVectorized
-from autofit.non_linear.fitness import Fitness
 from autofit.non_linear.parallel import fork_context
 from autofit.non_linear.paths.null import NullPaths
 from autofit.non_linear.search.nest import abstract_nest
@@ -214,7 +213,7 @@ class Nautilus(abstract_nest.AbstractNest):
         silence: bool = False,
         force_x1_cpu: bool = False,
         session: Optional[sa.orm.Session] = None,
-        use_jax_vmap: bool = True,
+        use_jax_vmap: Optional[bool] = None,
         **kwargs,
     ):
         """
@@ -298,6 +297,19 @@ class Nautilus(abstract_nest.AbstractNest):
         self.verbose = verbose
 
         self.force_x1_cpu = force_x1_cpu
+        if use_jax_vmap is not None:
+            from autofit.non_linear.search.abstract_search import (
+                warn_deprecated_jax_knob,
+            )
+
+            warn_deprecated_jax_knob(
+                type(self).__name__,
+                "use_jax_vmap",
+                "a JAX analysis is evaluated through the batched objective "
+                "automatically (use_jax_vmap=False still evaluates it point by point "
+                "until the argument is removed).",
+            )
+
         self.use_jax_vmap = use_jax_vmap
 
         if is_test_mode():
@@ -348,18 +360,12 @@ class Nautilus(abstract_nest.AbstractNest):
 
         if self.force_x1_cpu or analysis.is_jax:
 
-            fitness = Fitness(
-                model=model,
+            fitness = self.make_fitness(
                 analysis=analysis,
-                paths=self.paths,
-                fom_is_log_likelihood=True,
-                resample_figure_of_merit=-1.0e99,
-                iterations_per_quick_update=self.iterations_per_quick_update,
-                background_quick_update=self.quick_update_background,
-                live_visual_update=self.live_visual_update,
-                # The vectorised (jax.vmap) likelihood needs a JAX analysis;
-                # `force_x1_cpu` with a numpy analysis evaluates point by point.
-                batched=self.use_jax_vmap and analysis.is_jax,
+                model=model,
+                # The batched objective needs a JAX analysis; `force_x1_cpu` with a
+                # numpy analysis evaluates point by point.
+                batched=self.use_jax_vmap is not False and analysis.is_jax,
                 batch_size=self.n_batch,
             )
 
@@ -371,16 +377,7 @@ class Nautilus(abstract_nest.AbstractNest):
 
         else:
 
-            fitness = Fitness(
-                model=model,
-                analysis=analysis,
-                paths=self.paths,
-                fom_is_log_likelihood=True,
-                resample_figure_of_merit=-1.0e99,
-                iterations_per_quick_update=self.iterations_per_quick_update,
-                background_quick_update=self.quick_update_background,
-                live_visual_update=self.live_visual_update,
-            )
+            fitness = self.make_fitness(analysis=analysis, model=model)
 
             search_internal = self.fit_multiprocessing(
                 fitness=fitness,

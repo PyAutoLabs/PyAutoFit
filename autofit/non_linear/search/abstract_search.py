@@ -68,6 +68,24 @@ logger = logging.getLogger(__name__)
 TEST_MODE_REPRESENTATIVE_MAX_ATTEMPTS = 100
 
 
+def warn_deprecated_jax_knob(owner: str, name: str, instead: str):
+    """
+    Warn, as a ``FutureWarning`` so end users see it, that the deprecated JAX knob
+    ``name`` was passed to ``owner``.
+
+    ``use_jax_jit`` and ``use_jax_vmap`` stay accepted for one release (search-
+    extensibility phase A2): every search now selects its objective through
+    ``Fitness.objective(kind)``, jitting a JAX analysis lazily and batching it where
+    the backend has a batched fast path.
+    """
+    warnings.warn(
+        f"{owner}({name}=...) is deprecated and will be removed after one release: "
+        f"{instead}",
+        FutureWarning,
+        stacklevel=3,
+    )
+
+
 def check_cores(func):
     """
     Checks how many cores the search has been configured to
@@ -1410,6 +1428,67 @@ class NonLinearSearch(AbstractFactorOptimiser, ABC):
     @abstractmethod
     def _fit(self, model: AbstractPriorModel, analysis: Analysis):
         pass
+
+    def make_fitness(
+        self, analysis: Analysis, model: AbstractPriorModel, **overrides
+    ) -> Fitness:
+        """
+        The `Fitness` this search evaluates its likelihood through, the one construction
+        site every search shares.
+
+        Its figure-of-merit convention comes from the search's declared capabilities
+        (`autofit.non_linear.search.capabilities`), never from per-site literals:
+
+        - `objective_target.quantity` picks what the objective returns: the log
+          likelihood (`fom_is_log_likelihood=True`), the log posterior, or -2 x the log
+          posterior (`convert_to_chi_squared=True`, for the minimizers);
+        - `invalid_value` is the sentinel the backend sees for an invalid model. For a
+          `neg2_log_posterior` search that is the value *after* the -2 multiply, so the
+          `resample_figure_of_merit` substituted before it is `invalid_value / -2`
+          (`+inf` -> `-inf`).
+
+        The quick-update cadence, background worker and live-visual settings are always
+        forwarded, so no search can silently drop quick updates (what
+        `test_quick_update_wiring.py` used to scan for).
+
+        Parameters
+        ----------
+        analysis
+            The analysis whose likelihood is wrapped.
+        model
+            The model being fitted.
+        overrides
+            Any other `Fitness` keyword argument, which wins over the derived and
+            forwarded ones (e.g. `batched=True`, `store_history=True`).
+        """
+        target = type(self).objective_target
+
+        kwargs = dict(
+            model=model,
+            analysis=analysis,
+            paths=self.paths,
+            iterations_per_quick_update=self.iterations_per_quick_update,
+            background_quick_update=self.quick_update_background,
+            live_visual_update=self.live_visual_update,
+        )
+
+        if target is not None:
+            quantity = target.quantity
+            neg2 = quantity == cap.ObjectiveQuantity.NEG2_LOG_POSTERIOR
+
+            kwargs.update(
+                fom_is_log_likelihood=quantity == cap.ObjectiveQuantity.LOG_LIKELIHOOD,
+                convert_to_chi_squared=neg2,
+                resample_figure_of_merit=(
+                    type(self).invalid_value / -2.0
+                    if neg2
+                    else type(self).invalid_value
+                ),
+            )
+
+        kwargs.update(overrides)
+
+        return Fitness(**kwargs)
 
     def check_model(self, model: AbstractPriorModel):
         if model is not None and model.prior_count == 0:
