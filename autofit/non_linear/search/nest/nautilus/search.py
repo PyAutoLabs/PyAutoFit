@@ -581,9 +581,13 @@ class Nautilus(abstract_nest.AbstractNest):
 
         minimum_iterations_per_full_updates = 3 * self.n_live
 
-        if self.iterations_per_full_update < minimum_iterations_per_full_updates:
+        # The effective update interval is local to this call: the search's own
+        # `iterations_per_full_update` is a constructor argument and is never mutated.
+        iterations_per_full_update = self.iterations_per_full_update
 
-            self.iterations_per_full_update = minimum_iterations_per_full_updates
+        if iterations_per_full_update < minimum_iterations_per_full_updates:
+
+            iterations_per_full_update = minimum_iterations_per_full_updates
 
             logger.info(
                 f"""
@@ -600,7 +604,8 @@ class Nautilus(abstract_nest.AbstractNest):
         while not finished:
 
             iterations, total_iterations = self.iterations_from(
-                search_internal=search_internal
+                search_internal=search_internal,
+                iterations_per_full_update=iterations_per_full_update,
             )
 
             converged = search_internal.run(
@@ -637,7 +642,7 @@ class Nautilus(abstract_nest.AbstractNest):
         return search_internal
 
     def iterations_from(
-        self, search_internal
+        self, search_internal, iterations_per_full_update: Optional[float] = None
     ) -> Tuple[int, int]:
         """
         Return the next cumulative likelihood-call budget and calls performed.
@@ -649,6 +654,10 @@ class Nautilus(abstract_nest.AbstractNest):
         ----------
         search_internal
             The Nautilus sampler.
+        iterations_per_full_update
+            The likelihood calls between full updates; defaults to the search's
+            `iterations_per_full_update`. `call_search` passes its effective value,
+            which is raised to at least three times the number of live points.
 
         Returns
         -------
@@ -662,7 +671,10 @@ class Nautilus(abstract_nest.AbstractNest):
                 return int(self.n_like_max), total_iterations
             return int(1e99), total_iterations
 
-        iterations = total_iterations + self.iterations_per_full_update
+        if iterations_per_full_update is None:
+            iterations_per_full_update = self.iterations_per_full_update
+
+        iterations = total_iterations + iterations_per_full_update
 
         if self.n_like_max is not None and self.n_like_max != float("inf"):
             if iterations > self.n_like_max:

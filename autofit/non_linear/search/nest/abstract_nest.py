@@ -25,7 +25,7 @@ class AbstractNest(NonLinearSearch, ABC):
         unique_tag: Optional[str] = None,
         iterations_per_quick_update: Optional[int] = None,
         iterations_per_full_update: Optional[int] = None,
-        number_of_cores: Optional[int] = None,
+        number_of_cores: int = 1,
         silence: bool = False,
         session: Optional[sa.orm.Session] = None,
         initializer: Optional[AbstractInitializer] = None,

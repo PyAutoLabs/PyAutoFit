@@ -144,7 +144,7 @@ class Drawer(AbstractMLE):
         search_internal = {
             "parameter_lists": parameter_lists,
             "log_posterior_list": log_posterior_list,
-            "time": self.timer.time,
+            "time": self.timer.time if self.timer else None,
         }
 
         self.paths.save_search_internal(
@@ -156,7 +156,24 @@ class Drawer(AbstractMLE):
         return search_internal, fitness
 
     def samples_via_internal_from(self, model, search_internal=None):
-        search_internal_dict = self.paths.load_search_internal()
+        """
+        Returns a `Samples` object from the Drawer internal results.
+
+        The `search_internal` dictionary returned by `_fit` is used when passed, so a fit with `NullPaths`
+        (which writes nothing to disk) can still build its samples; otherwise it is loaded from the output folder.
+
+        Parameters
+        ----------
+        model
+            Maps input vectors of unit parameter values to physical values and model instances via priors.
+        search_internal
+            The dictionary of parameter lists, log posteriors and run time that `_fit` returns.
+        """
+        search_internal_dict = (
+            search_internal
+            if search_internal is not None
+            else self.paths.load_search_internal()
+        )
 
         parameter_lists = search_internal_dict["parameter_lists"]
         log_posterior_list = search_internal_dict["log_posterior_list"]
