@@ -429,6 +429,128 @@ def test__likelihood_pool_healthy_map_completes(monkeypatch):
         pool.join()
 
 
+@requires_nautilus
+def test__multi_core_prepares_the_fitness_before_forking(monkeypatch):
+    """
+    `fit_multiprocessing` runs the likelihood once in the parent (`Fitness.prepare_for_fork`)
+    before it creates the fork pool, so numba's lazy import / first compile is not done by every
+    worker at once (PyAutoArray#654: >= 16 workers segfaulted in llvmlite).
+    """
+    from autofit.non_linear.fitness import Fitness
+    from autofit.non_linear.search.nest.nautilus import search as nautilus_search
+
+    class StopFit(Exception):
+        pass
+
+    events = []
+
+    class StubPool:
+        _processes = 2
+        _pool = []
+
+        def close(self):
+            pass
+
+        def terminate(self):
+            pass
+
+        def join(self):
+            pass
+
+    class StubSampler:
+        def __init__(self, **kwargs):
+            raise StopFit
+
+    class StubContext:
+        def Pool(self, number_of_cores, initializer=None, initargs=()):
+            events.append("pool")
+            return StubPool()
+
+    original = Fitness.prepare_for_fork
+
+    def recording_prepare_for_fork(self):
+        events.append("prepare")
+        original(self)
+
+    monkeypatch.setattr(Fitness, "prepare_for_fork", recording_prepare_for_fork)
+    monkeypatch.setattr(nautilus_search, "fork_context", lambda: StubContext())
+    monkeypatch.setattr(
+        af.Nautilus, "sampler_cls", property(lambda self: StubSampler)
+    )
+    monkeypatch.setenv("PYAUTO_TEST_MODE", "1")
+
+    search = af.Nautilus(
+        name="nautilus_prepare_for_fork",
+        unique_tag="nautilus_prepare_for_fork_test",
+        n_live=10,
+        number_of_cores=2,
+    )
+
+    with pytest.raises(StopFit):
+        search.fit(
+            model=af.Model(af.ex.Gaussian),
+            analysis=af.ex.Analysis(
+                data=np.full(100, 5.0), noise_map=np.full(100, 1.0)
+            ),
+        )
+
+    assert events[:2] == ["prepare", "pool"]
+
+
+class _FakeWorker:
+    def __init__(self, pid, exitcode):
+        self.pid = pid
+        self.exitcode = exitcode
+
+
+class _FakePool:
+    """A pool double exposing only what the dead-worker watchdog reads."""
+
+    def __init__(self, workers):
+        self._pool = workers
+        self._processes = len(workers)
+        self.terminated = False
+
+    def terminate(self):
+        self.terminated = True
+
+
+def _watchdog_message(exitcode):
+    from autofit.non_linear.search.nest.nautilus import search as nautilus_search
+
+    pool = _FakePool([_FakeWorker(101, None), _FakeWorker(102, None)])
+    wrapper = nautilus_search._LikelihoodWorkerPool(pool)
+
+    pool._pool[1].exitcode = exitcode
+
+    with pytest.raises(af.exc.SearchException) as error:
+        wrapper._check_workers_alive()
+
+    assert pool.terminated
+
+    return str(error.value)
+
+
+def test__likelihood_pool__sigsegv_names_native_library_initialisation():
+    message = _watchdog_message(exitcode=-11)
+
+    assert "pid 102" in message
+    assert "segmentation fault" in message
+    assert "numba" in message
+    assert "prepare_for_fork" in message
+    assert "number_of_cores=1" in message
+    assert "report it" in message
+
+
+def test__likelihood_pool__other_deaths_keep_the_generic_message():
+    for exitcode in (-9, 1):
+        message = _watchdog_message(exitcode=exitcode)
+
+        assert "pid 102" in message
+        assert "multiprocessing.Pool" in message
+        assert "segmentation fault" not in message
+
+
 # --- D >= 91: the live-point guard and the HDF5 checkpoint format (#1697) ---
 
 

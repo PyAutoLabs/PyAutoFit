@@ -219,6 +219,26 @@ class _LikelihoodWorkerPool:
 
         self._pool.terminate()
 
+        if any(worker.exitcode == -11 for worker in dead):
+            raise exc.SearchException(
+                f"A Nautilus likelihood worker died mid-fit by a segmentation "
+                f"fault (SIGSEGV): {detail}.\n\n"
+                f"A forked worker that segfaults has typically crashed while "
+                f"initialising a native library after the fork (e.g. numba "
+                f"importing and compiling its first function, which since "
+                f"PyAutoArray 2026.8.20.1 happens lazily on first use): with many "
+                f"workers forked at once, each initialising it, they crash "
+                f"together. PyAutoFit runs the likelihood once in the parent "
+                f"before forking (`Fitness.prepare_for_fork`) to prevent exactly "
+                f"this, so if you see this message:\n"
+                f"  - run the search with number_of_cores=1, which builds no pool "
+                f"at all, to see the underlying error;\n"
+                f"  - check that the likelihood runs serially (e.g. call "
+                f"`analysis.log_likelihood_function` on an instance yourself);\n"
+                f"  - report it, with this message, at "
+                f"https://github.com/PyAutoLabs/PyAutoFit/issues."
+            )
+
         raise exc.SearchException(
             f"A Nautilus likelihood worker died mid-fit: {detail}.\n\n"
             f"A negative exit code is the signal that killed the worker "
@@ -688,6 +708,13 @@ class Nautilus(NonLinearSearch):
             pool_context = nullcontext(None)
         else:
             from nautilus.pool import initialize_worker
+
+            # Initialise lazily loaded native libraries (numba) in the parent before
+            # forking, rather than in every worker at once (`Fitness.prepare_for_fork`).
+            prepare_for_fork = getattr(fitness, "prepare_for_fork", None)
+
+            if prepare_for_fork is not None:
+                prepare_for_fork()
 
             pool_context = _LikelihoodWorkerPool(
                 fork_context().Pool(

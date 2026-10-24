@@ -218,6 +218,15 @@ class SneakyPool:
         initializer
         initargs
         """
+        # Warm the likelihood up in the parent first, so lazily initialised native
+        # libraries (numba's import and first LLVM compile) are not initialised by
+        # every forked process at once (`Fitness.prepare_for_fork`). Every SneakyPool
+        # -- `PoolFactory.sneaky` and the initializer's -- passes through here.
+        prepare = getattr(fitness, "prepare_for_fork", None)
+
+        if processes > 1 and prepare is not None:
+            prepare()
+
         logger.info(f"Creating pool with {processes} processes")
         self._processes = [
             SneakyProcess(

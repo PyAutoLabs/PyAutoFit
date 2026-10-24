@@ -159,6 +159,35 @@ class PoolFactory:
 
         self._created = []
 
+        # The fit's `Fitness`, set by `NonLinearSearch` once it exists, so that
+        # `__call__` can warm the likelihood up before forking (`prepare_for_fork`).
+        self.fitness = None
+
+    def prepare_for_fork(self, fitness=None):
+        """
+        Run the likelihood once in the parent before any pool of this fit forks workers
+        (`Fitness.prepare_for_fork`), so lazily initialised native libraries (numba's
+        import and first LLVM compile) are initialised once here rather than in every
+        forked worker at once, which can segfault them.
+
+        A no-op on one core (no workers are forked), when no fitness is known, or for a
+        fitness without the hook (a test double, an external search's own callable).
+
+        Parameters
+        ----------
+        fitness
+            The fitness the workers will call; defaults to the fit's own (`self.fitness`).
+        """
+        if self.number_of_cores <= 1:
+            return
+
+        fitness = fitness if fitness is not None else self.fitness
+
+        prepare = getattr(fitness, "prepare_for_fork", None)
+
+        if prepare is not None:
+            prepare()
+
     @property
     def summary(self) -> str:
         """
@@ -193,6 +222,8 @@ class PoolFactory:
 
         if n_cores <= 1:
             return None
+
+        self.prepare_for_fork()
 
         getattr(self.search, "logger", logger).info("...using pool")
         pool = fork_context().Pool(processes=n_cores, **pool_kwargs)

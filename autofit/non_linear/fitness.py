@@ -305,6 +305,8 @@ class Fitness:
         self.parameters_history_list = []
         self.log_likelihood_history_list = []
 
+        self._prepared_for_fork = False
+
         if use_jax_vmap is not None:
             _warn_deprecated_fitness_kwarg(
                 "use_jax_vmap", "pass `batched=` instead (the same meaning)"
@@ -395,6 +397,52 @@ class Fitness:
             )
         else:
             logger.info("Visualization warm-up complete.")
+
+    def prepare_for_fork(self):
+        """Run the likelihood once in this (the parent) process before a search forks workers.
+
+        Native libraries that initialise lazily must be initialised in the parent before it
+        forks, or every forked worker initialises them at the same time on its first likelihood
+        call -- and that can segfault. numba is the case that bites: since PyAutoArray made
+        `import numba` lazy (2026.8.20.1), a likelihood whose setup ran no numba in the parent
+        (e.g. an interferometer fit with NUFFT preprocessing and NumPy meshes) imports numba and
+        LLVM-compiles its first functions inside every worker at once, and with 16 or more
+        Nautilus workers they die by SIGSEGV in llvmlite (RAL, PyAutoArray#654). One call here
+        initialises them once, and also moves the numba compile out of N workers into a single
+        parent call that every forked worker inherits.
+
+        The call goes straight to `call`, bypassing `call_wrap`, so it is not recorded into
+        `store_history` or counted towards quick updates. It runs once per `Fitness` (a flag
+        that survives pickling, so a worker never repeats it), is a no-op for a JAX analysis
+        (which never forks likelihood workers), and a failure only logs a warning: the fit
+        itself will raise the real error if the likelihood is genuinely broken.
+        """
+        if self._is_jax or getattr(self, "_prepared_for_fork", False):
+            return
+
+        self._prepared_for_fork = True
+
+        logger.info(
+            "Running the likelihood once before forking workers (initialises lazily "
+            "loaded native libraries, e.g. numba, in the parent)..."
+        )
+        try:
+            self.call(self.model.physical_values_from_prior_medians)
+        except Exception as e:
+            logger.warning(
+                f"Likelihood warm-up before forking workers failed (non-fatal): {e!r}. "
+                f"Forked workers will initialise native libraries themselves."
+            )
+        else:
+            logger.info("Likelihood warm-up before forking workers complete.")
+
+        # A likelihood that returns early (e.g. a resampled model) may never reach its
+        # numba code, so import numba here too: importing it in the parent is on its
+        # own enough to stop forked workers from initialising it all at once.
+        try:
+            import numba  # noqa: F401
+        except ImportError:
+            pass
 
     @property
     def _xp(self):
