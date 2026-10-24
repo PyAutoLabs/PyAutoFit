@@ -95,12 +95,17 @@ class SearchExecutionMixin:
             **self.execution_settings(analysis).fitness_overrides,
         )
 
+        pools = self._pools(analysis)
+        # Every `pools(...)` pool then warms this fitness up before it forks
+        # (`PoolFactory.prepare_for_fork`).
+        pools.fitness = fitness
+
         ctx = FitContext(
             search=self,
             model=model,
             analysis=analysis,
             fitness=fitness,
-            pool=self._pools(analysis),
+            pool=pools,
             test_mode_level=test_mode_level(),
         )
 
