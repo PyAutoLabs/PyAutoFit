@@ -250,13 +250,27 @@ class AbstractBFGS(NonLinearSearch):
         bounds = self._bounds_from(model=model)
 
         try:
-            search_internal_dict = ctx.paths.load_search_internal()
+            search_internal = ctx.paths.load_search_internal()
 
-            x0 = search_internal_dict["x0"]
-            total_iterations = search_internal_dict["total_iterations"]
+            # NullPaths returns None rather than raising when no checkpoint
+            # exists. Subscription preserves the TypeError fresh-run fallback.
+            x0 = search_internal["x"]
+            # Older checkpoints only recorded the last scipy chunk's nit.
+            # Preserve those checkpoints while recording the cumulative budget
+            # explicitly for all new runs; nit retains its scipy meaning.
+            total_iterations = search_internal.get(
+                "total_iterations", search_internal.nit
+            )
+            if self.should_plot_start_point:
+                fitness.parameters_history_list = list(
+                    search_internal.parameters_history_list
+                )
+                fitness.log_likelihood_history_list = list(
+                    search_internal.log_likelihood_history_list
+                )
 
             self.logger.info(
-                "Resuming LBFGS non-linear search (previous samples found)."
+                f"Resuming {self.method} non-linear search (previous samples found)."
             )
 
         except (FileNotFoundError, TypeError):
@@ -320,6 +334,7 @@ class AbstractBFGS(NonLinearSearch):
                     )
 
                 total_iterations += search_internal.nit
+                search_internal.total_iterations = total_iterations
 
                 search_internal.log_posterior_list = -0.5 * fitness(
                     parameters=search_internal.x
@@ -358,7 +373,7 @@ class AbstractBFGS(NonLinearSearch):
             The scipy ``OptimizeResult``-like object the search stores.
         """
         x0 = search_internal.x
-        total_iterations = search_internal.nit
+        total_iterations = search_internal.get("total_iterations", search_internal.nit)
 
         samples_info = {
             "total_iterations": total_iterations,
