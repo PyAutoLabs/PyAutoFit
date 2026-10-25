@@ -211,9 +211,8 @@ def test_06_assertion():
     assert edge.op == "<"
     assert edge.left == "0.5"
     assert edge.right == "sigma"
-    # `add_assertion(name=)` is silently dropped by `AbstractPriorModel.name`
-    # having no setter (a separately filed bug), so the name is absent.
-    assert edge.name is None
+    # The graph carries the user-supplied assertion label.
+    assert edge.name == "sigma is large"
 
     # Assertions are edges: not in the tree, and not in `model.info`.
     assert [row.name for row in spec.root.rows] == ["centre", "normalization", "sigma"]
