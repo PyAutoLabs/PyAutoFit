@@ -12,7 +12,8 @@ pytestmark = pytest.mark.filterwarnings("ignore::FutureWarning")
 
 def _search_and_fitness(monkeypatch, use_jax=False, number_of_cores=1):
     monkeypatch.delenv("PYAUTO_TEST_MODE", raising=False)
-    search = af.Emcee(number_of_cores=number_of_cores)
+    # Two unseeded draws can have indistinguishable figures of merit on flat data.
+    search = af.Emcee(number_of_cores=number_of_cores, seed=0)
     model = af.Model(af.ex.Gaussian)
     analysis = af.ex.Analysis(data=np.ones(10), noise_map=np.ones(10), use_jax=use_jax)
     return search, model, search.make_fitness(analysis=analysis, model=model)
