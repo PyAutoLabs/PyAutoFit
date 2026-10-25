@@ -2,7 +2,6 @@ import pytest
 
 import autofit as af
 import autofit.graphical as g
-from autonerves.conf import output_path_for_test
 from autofit.graphical.utils import Status
 from test_autofit.graphical.gaussian.model import Analysis
 
@@ -50,7 +49,6 @@ def _test_set_model_identifier(dynesty, prior_model, analysis):
 
 class TestDynesty:
     @pytest.mark.filterwarnings("ignore::RuntimeWarning")
-    @output_path_for_test()
     def test_optimisation(self, factor_model, laplace, dynesty):
         factor_model.optimiser = dynesty
         factor_model.optimise(laplace)
@@ -66,7 +64,6 @@ class TestDynesty:
         assert isinstance(status, Status)
 
     @pytest.mark.filterwarnings("ignore::RuntimeWarning")
-    @output_path_for_test()
     def test_optimise(self, factor_model, dynesty):
         result, status = dynesty.optimise(
             factor_model.mean_field_approximation().factor_approximation(factor_model)
