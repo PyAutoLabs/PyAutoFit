@@ -1828,9 +1828,8 @@ class AbstractPriorModel(AbstractModel):
     @cast_collection(InstanceNameValue)
     def direct_instance_tuples(self):
         """(name, value) tuples for direct float and Constant attributes."""
-        return self.direct_tuples_with_type(float) + self.direct_tuples_with_type(
-            Constant
-        )
+        # Constant subclasses float, so a second pass would duplicate it.
+        return self.direct_tuples_with_type(float)
 
     @property
     @cast_collection(PriorModelNameValue)
