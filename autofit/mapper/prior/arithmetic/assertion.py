@@ -92,6 +92,12 @@ class CompoundAssertion(AbstractPriorModel, Compound):
         self.assertion_2 = assertion_2
         self._name = name
 
+    def __repr__(self):
+        return (
+            f"{type(self).__name__}("
+            f"{self.assertion_1!r}, {self.assertion_2!r})"
+        )
+
     def _instance_for_arguments(
         self,
         arguments,

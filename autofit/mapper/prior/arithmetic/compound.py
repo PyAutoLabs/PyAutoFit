@@ -84,6 +84,9 @@ class CompoundPrior(AbstractPriorModel, ArithmeticMixin, Compound, ABC):
         self.left = left
         self.right = right
 
+    def __str__(self):
+        return f"{type(self).__name__}(left={self.left!r}, right={self.right!r})"
+
     def __repr__(self):
         return str(self)
 
