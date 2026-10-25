@@ -81,15 +81,13 @@ def test__log_posteriors_are_aligned_with_the_thinned_chain(monkeypatch):
         noise_map=np.full(100, 1.0),
     )
 
-    # Test mode 1 runs the real sampler for 10 steps with 20 walkers, so the
-    # auto-correlation `check_size` must be smaller than the chain for the
-    # auto-correlation calculation to have samples to work with.
+    # Test mode runs only 10 steps; keep the default check_size=100 to
+    # exercise unavailable previous autocorrelations on a real short chain.
     search = af.Zeus(
         name="zeus_log_prob_alignment",
         unique_tag="log_prob_alignment_test",
         auto_correlation_settings=af.AutoCorrelationsSettings(
             check_for_convergence=False,
-            check_size=5,
             required_length=2,
         ),
         number_of_cores=1,

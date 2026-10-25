@@ -284,7 +284,7 @@ class Emcee(NonLinearSearch):
 
         else:
             discard = int(3.0 * np.max(auto_correlations.times))
-            thin = int(np.max(auto_correlations.times) / 2.0)
+            thin = max(1, int(np.max(auto_correlations.times) / 2.0))
 
         parameters, log_posterior = ChainPosterior.from_sampler(
             search_internal, label="Emcee"
@@ -311,12 +311,16 @@ class Emcee(NonLinearSearch):
 
         times = search_internal.get_autocorr_time(tol=0)
 
-        previous_auto_correlation_times = emcee.autocorr.integrated_time(
-            x=search_internal.get_chain()[
-                : -self.auto_correlation_settings.check_size, :, :
-            ],
-            tol=0,
-        )
+        previous_chain = search_internal.get_chain()[
+            : -self.auto_correlation_settings.check_size, :, :
+        ]
+        if len(previous_chain) == 0:
+            self.logger.debug("Unable to compute previous auto correlation times.")
+            previous_auto_correlation_times = None
+        else:
+            previous_auto_correlation_times = emcee.autocorr.integrated_time(
+                x=previous_chain, tol=0,
+            )
 
         return AutoCorrelations(
             check_size=self.auto_correlation_settings.check_size,
