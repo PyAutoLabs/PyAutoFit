@@ -11,6 +11,11 @@ class ComparisonAssertion(CompoundPrior, Compound, ABC):
         super().__init__(lower, greater)
         self._name = name
 
+    @property
+    def name(self):
+        """The optional label supplied when this assertion was added."""
+        return self._name
+
     def __gt__(self, other):
         return CompoundAssertion(self, self._left > other)
 
@@ -91,6 +96,11 @@ class CompoundAssertion(AbstractPriorModel, Compound):
         self.assertion_1 = assertion_1
         self.assertion_2 = assertion_2
         self._name = name
+
+    @property
+    def name(self):
+        """The optional label supplied when this assertion was added."""
+        return self._name
 
     def _instance_for_arguments(
         self,

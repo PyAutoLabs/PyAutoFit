@@ -744,7 +744,7 @@ class AbstractPriorModel(AbstractModel):
         if assertion is True:
             return
         try:
-            assertion.name = name
+            assertion._name = name
         except AttributeError:
             pass
         self._assertions.append(assertion)
