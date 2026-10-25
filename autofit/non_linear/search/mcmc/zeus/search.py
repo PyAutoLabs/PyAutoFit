@@ -318,7 +318,7 @@ class Zeus(NonLinearSearch):
 
         else:
             discard = int(3.0 * np.max(auto_correlations.times))
-            thin = int(np.max(auto_correlations.times) / 2.0)
+            thin = max(1, int(np.max(auto_correlations.times) / 2.0))
 
         parameters, log_posterior = ChainPosterior.from_sampler(
             search_internal, label="Zeus"
