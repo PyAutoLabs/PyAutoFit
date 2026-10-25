@@ -1,12 +1,11 @@
-"""
-Eager-versus-jit timing guard for Emcee on a JAX analysis (search-extensibility A2).
+"""Emcee reuses the compiled scalar objective without per-walker retracing.
 
-Emcee declares `jax_use='none'` and evaluates one walker at a time through
-`Fitness.call_wrap`. Before A2 that ran the JAX likelihood eagerly, op by op (7.80 ms
-eager vs 0.29 ms jitted per call on `af.ex.Gaussian`, survey 02 §3.1). Now `call_wrap`
-dispatches to the lazily jitted scalar objective, so the per-call cost Emcee pays must
-stay within 2x the jitted call itself.
+CI checks dispatch and numerical equivalence. The sub-millisecond timing ratio
+is a local profiling diagnostic, opt-in with PYAUTO_PROFILE_EMCEE_JAX=1.
 """
+import os
+from unittest.mock import Mock
+
 import time
 
 import numpy as np
@@ -30,7 +29,7 @@ def _per_call(func, vector, n=200, repeats=5, sync=False):
     return best
 
 
-def test_emcee_call_path_runs_at_jitted_speed(monkeypatch):
+def _fitness_and_vector(monkeypatch):
     pytest.importorskip("jax")
     monkeypatch.delenv("PYAUTO_TEST_MODE", raising=False)
 
@@ -42,12 +41,46 @@ def test_emcee_call_path_runs_at_jitted_speed(monkeypatch):
     fitness = af.Emcee().make_fitness(analysis=analysis, model=model)
     vector = np.array(model.physical_values_from_prior_medians)
 
+    return fitness, vector
+
+
+def test_emcee_call_path_reuses_compiled_objective(monkeypatch):
+    traces = []
+    likelihood = af.ex.Analysis.log_likelihood_function
+
+    def counting_likelihood(self, *args, **kwargs):
+        traces.append(1)
+        return likelihood(self, *args, **kwargs)
+
+    monkeypatch.setattr(af.ex.Analysis, "log_likelihood_function", counting_likelihood)
+    fitness, vector = _fitness_and_vector(monkeypatch)
     jitted = fitness.objective("scalar")
 
     # Emcee's log_prob_fn is `fitness.call_wrap`, which dispatches to the jitted objective.
     assert fitness._call is jitted
     assert hasattr(jitted, "__wrapped__")
 
+    # Warm one shape, then use distinct values and containers without re-tracing.
+    vectors = [vector, vector + 0.01, (vector + 0.02).tolist()]
+    expected = [float(jitted(np.asarray(v, dtype=float))) for v in vectors]
+    assert len(traces) == 1
+    compiled_call = Mock(wraps=jitted)
+    monkeypatch.setattr(fitness, "_call", compiled_call)
+    for i, (v, value) in enumerate(zip(vectors, expected), start=1):
+        assert fitness.call_wrap(v) == pytest.approx(value)
+        assert compiled_call.call_count == i
+        np.testing.assert_array_equal(compiled_call.call_args.args[0], v)
+        assert fitness.objective("scalar") is jitted
+        assert len(traces) == 1
+
+
+@pytest.mark.skipif(
+    os.environ.get("PYAUTO_PROFILE_EMCEE_JAX") != "1",
+    reason="wall-clock comparison is opt-in local profiling, not a CI gate",
+)
+def test_emcee_call_path_runs_at_jitted_speed(monkeypatch):
+    fitness, vector = _fitness_and_vector(monkeypatch)
+    jitted = fitness.objective("scalar")
     jit_per_call = _per_call(jitted, vector, sync=True)
     emcee_per_call = _per_call(fitness.call_wrap, vector)
 
