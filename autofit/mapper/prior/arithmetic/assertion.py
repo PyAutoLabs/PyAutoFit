@@ -86,17 +86,17 @@ class GreaterThanLessThanEqualAssertion(ComparisonAssertion):
 
 
 class CompoundAssertion(AbstractPriorModel, Compound):
-    def __init__(self, assertion_1, assertion_2, name=""):
-        super().__init__()
-        self.assertion_1 = assertion_1
-        self.assertion_2 = assertion_2
-        self._name = name
-
     def __repr__(self):
         return (
             f"{type(self).__name__}("
             f"{self.assertion_1!r}, {self.assertion_2!r})"
         )
+
+    def __init__(self, assertion_1, assertion_2, name=""):
+        super().__init__()
+        self.assertion_1 = assertion_1
+        self.assertion_2 = assertion_2
+        self._name = name
 
     def _instance_for_arguments(
         self,
