@@ -1,19 +1,19 @@
-version: 1
-disable_existing_loggers: false
+version: 1 # Python logging dictionary schema version (1).
+disable_existing_loggers: false # If True, disable existing non-root loggers when configuring logging.
 
 handlers:
   console:
-    class: logging.StreamHandler
-    level: INFO
-    stream: ext://sys.stdout
-    formatter: formatter
+    class: logging.StreamHandler # Python handler class used to emit log records.
+    level: INFO # Minimum logging severity emitted by this handler or logger.
+    stream: ext://sys.stdout # Output stream receiving console log records.
+    formatter: formatter # Name of the formatter applied by this handler.
 
 root:
-  level: INFO
-  handlers: [ console ]
+  level: INFO # Minimum logging severity emitted by this handler or logger.
+  handlers: [ console ] # Names of handlers receiving root logger records.
 
 formatters:
   formatter:
-    format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s' # Python logging format string applied to each log record.
 
 total_files_open : false # Whether to output info on the total number of open files in the system, used for debugging parallelism issues.
