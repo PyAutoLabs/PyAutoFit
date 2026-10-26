@@ -13,18 +13,18 @@
 
 label:
   label:
-    centre: x
-    normalization: norm
-    parameter0: a
-    parameter1: b
-    parameter2: c
-    rate: \lambda
-    sigma: \sigma
+    centre: x # Plot label used for the centre parameter.
+    normalization: norm # Plot label used for the normalization parameter.
+    parameter0: a # Plot label used for the parameter0 parameter.
+    parameter1: b # Plot label used for the parameter1 parameter.
+    parameter2: c # Plot label used for the parameter2 parameter.
+    rate: \lambda # Plot label used for the rate parameter.
+    sigma: \sigma # Plot label used for the sigma parameter.
   superscript:
-    Exponential: e
-    Gaussian: g
-    ModelComponent0: M0
-    ModelComponent1: M1
+    Exponential: e # Class suffix for an unnamed Exponential Model; named components use component paths.
+    Gaussian: g # Class suffix for an unnamed Gaussian Model; named components use component paths.
+    ModelComponent0: M0 # Class suffix for an unnamed ModelComponent0 Model; named components use component paths.
+    ModelComponent1: M1 # Class suffix for an unnamed ModelComponent1 Model; named components use component paths.
 
 # label_format: The format certain parameters are output as in output files like the `model.results` file.
 
@@ -32,10 +32,10 @@ label:
 
 label_format:
   format:
-    centre: '{:.2f}'
-    normalization: '{:.2f}'
-    parameter0: '{:.2f}'
-    parameter1: '{:.2f}'
-    parameter2: '{:.2f}'
-    rate: '{:.2f}'
-    sigma: '{:.2f}'
+    centre: '{:.2f}' # Python format string used for centre in result summaries.
+    normalization: '{:.2f}' # Python format string used for normalization in result summaries.
+    parameter0: '{:.2f}' # Python format string used for parameter0 in result summaries.
+    parameter1: '{:.2f}' # Python format string used for parameter1 in result summaries.
+    parameter2: '{:.2f}' # Python format string used for parameter2 in result summaries.
+    rate: '{:.2f}' # Python format string used for rate in result summaries.
+    sigma: '{:.2f}' # Python format string used for sigma in result summaries.
