@@ -857,6 +857,28 @@ class Nautilus(NonLinearSearch):
 
         return search_internal
 
+    def progress(self, search_internal) -> Optional[Dict]:
+        """
+        The run's progress for the status record (``autofit.non_linear.status``): the
+        sampler's likelihood calls, live points, evidence, live-set fraction and
+        effective sample size; ``fraction`` is the share of ``n_like_max`` spent (none
+        when it is unbounded, since Nautilus stops on ``n_eff`` / ``f_live``).
+        """
+        progress = {
+            "n_like": int(search_internal.n_like),
+            "n_like_max": None,
+            "n_live": int(search_internal.n_live),
+        }
+        for key in ("log_z", "f_live", "n_eff"):
+            try:
+                progress[key] = float(getattr(search_internal, key))
+            except Exception:
+                pass
+        if self.n_like_max is not None and self.n_like_max != float("inf"):
+            progress["n_like_max"] = int(self.n_like_max)
+            progress["fraction"] = min(1.0, progress["n_like"] / self.n_like_max)
+        return progress
+
     def iterations_from(
         self, search_internal, iterations_per_full_update: Optional[float] = None
     ) -> Tuple[int, int]:

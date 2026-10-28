@@ -28,6 +28,7 @@ import numpy as np
 
 from autofit.non_linear.samples.adapter import RawSamples, samples_from_raw
 from autofit.non_linear.search.seed import seed_sequence
+from autofit.non_linear.status import status_notify
 
 
 class UpdateSchedule:
@@ -140,6 +141,10 @@ class FitContext:
         resume_state = self._search.resume_state
         if resume_state is not None:
             resume_state.save(self.paths, internal)
+
+        # The fit's status record takes the search's `progress` and keeps `internal`
+        # for a SIGUSR1 / SIGTERM checkpoint flush (`autofit.non_linear.status`).
+        status_notify(self._search, "update", internal)
 
         return self._search.perform_update(
             model=self.model,

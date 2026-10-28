@@ -139,6 +139,18 @@ class Emcee(NonLinearSearch):
 
         self.logger.debug("Creating Emcee Search")
 
+    def progress(self, search_internal) -> Optional[Dict]:
+        """
+        The run's progress for the status record (``autofit.non_linear.status``): the
+        steps taken of ``nsteps`` (a run that converges early stops before).
+        """
+        iteration = int(search_internal.iteration)
+        return {
+            "n_like": iteration * self.nwalkers,
+            "n_like_max": self.nsteps * self.nwalkers,
+            "fraction": min(1.0, iteration / self.nsteps) if self.nsteps else None,
+        }
+
     def run(self, ctx):
         """
         Run emcee (the ``run(ctx)`` hook; see ``docs/design/run_ctx.md``) and return the

@@ -44,6 +44,7 @@ from autofit.non_linear.search import capabilities as cap
 from autofit.non_linear.search.execution import SearchExecutionMixin, _SearchMeta
 from autofit.non_linear.search.internal_state import SearchInternalStateMixin
 from autofit.non_linear.search.updates import SearchUpdatesMixin
+from autofit.non_linear.status import status_notify, status_recorded
 from autofit.non_linear.search.test_mode_bypass import TestModeBypass, TestModeMixin
 from autofit.non_linear.test_mode import test_mode_level, skip_fit_output
 
@@ -215,6 +216,7 @@ class NonLinearSearch(
         state.pop("_logger", None)
         state.pop("paths", None)
         state.pop("_fit_pools", None)
+        state.pop("_fit_status", None)
         return state
 
     @property
@@ -286,6 +288,11 @@ class NonLinearSearch(
         updated model whose priors represent the beliefs produced by this fit. Raises
         ``AssertionError`` if the model has 0 dimensions.
         """
+        with status_recorded(self):
+            return self._fit_and_output(model=model, analysis=analysis, info=info)
+
+    def _fit_and_output(self, model, analysis, info=None):
+        """The body of ``fit``, inside its status record (``status_recorded``)."""
         self.check_model(model=model)
 
         # Per-fit: set by `start_resume_fit` when the fit's pools are resolved, and read
@@ -394,6 +401,8 @@ class NonLinearSearch(
         if self.paths.has_timer:
             self.timer.start()
 
+        status_notify(self, "start")
+
         mode = test_mode_level()
         if mode >= 2:
             return TestModeBypass(self).run(
@@ -494,6 +503,8 @@ class NonLinearSearch(
 
         self.paths.completed()
 
+        status_notify(self, "completed", search_internal)
+
     def result_via_completed_fit(
         self,
         analysis: Analysis,
@@ -511,6 +522,8 @@ class NonLinearSearch(
         recreates the output files of the model-fit.
 
         """
+        status_notify(self, "skipped")
+
         model.freeze()
         samples_summary = self.paths.load_samples_summary()
         try:

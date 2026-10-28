@@ -7,6 +7,8 @@ hpc:
   hpc_mode: false                   # If True, use HPC mode, which disables GUI visualization, logging to screen and other settings which are not suited to running on a super computer.
   iterations_per_quick_update: 1e99 #  Non-linear search iterations between every quick update, which just displays the maximum likelihood model fit.
   iterations_per_full_update: 1e99  # Non-linear search iterations between every full update, which outputs all visuals and result fits (e.g. model.result, search.summary), this exits the search and can be slow.
+  status: true                      # If True, every fit writes a status record beside its output folder (<output_path>.status.json, at most 2 KB; .status.jsonl attempt history; .traceback.txt on failure) and flushes its checkpoint on SIGUSR1 / SIGTERM. If False, nothing is written and no signal handlers are installed.
+  status_interval_s: 60             # Seconds between the status record's cadence writes while a fit runs (it is also written at start, at every full update, on a signal, on completion and on failure).
 inversion:
   check_reconstruction: true        # If True, the inversion's reconstruction is checked to ensure the solution of a meshs's mapper is not an invalid solution where the values are all the same.
   reconstruction_vmax_factor: 0.5   # Plots of an Inversion's reconstruction use the reconstructed data's bright value multiplied by this factor.
