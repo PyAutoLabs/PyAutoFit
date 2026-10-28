@@ -549,16 +549,17 @@ class NonLinearSearch(
 
     def post_fit_output(self, search_internal, finalize_search_internal: bool = True):
         """
-        Cleans up the output folder after a completed non-linear search: removes the
-        folder of results so only its `.zip` file is left (for supercomputers with a
-        file-count limit), when `remove_files=True` in the `general.yaml` `output`
-        section. ``finalize_search_internal=False`` when the fit just ran, since
+        Archives the output folder of a completed non-linear search into its `.zip`
+        file (always), and then removes the folder so only the `.zip` is left (for
+        supercomputers with a file-count limit) only when `remove_files=True` in the
+        `general.yaml` `output` section; with `remove_files=False` both are kept.
+        ``finalize_search_internal=False`` when the fit just ran, since
         ``start_resume_fit`` finalized the internal state before writing ``.completed``.
         """
         if finalize_search_internal:
             self.finalize_search_internal(search_internal=search_internal)
 
-        if not self.disable_output:
+        if not self.disable_output and getattr(self.paths, "remove_files", False):
             self.logger.info("Removing all files except for .zip file")
 
         self.paths.zip_remove()

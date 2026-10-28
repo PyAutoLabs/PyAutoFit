@@ -285,10 +285,11 @@ def test_max_log_likelihood_differs_from_median(
 
 def test_unresolvable_argument_warns(
     output_path,
-    summary,
+    aggregator,
     load_output,
     caplog,
 ):
+    summary = AggregateCSV(aggregator, strict=False)
     summary.add_variable("does.not.exist")
 
     with caplog.at_level(
