@@ -19,7 +19,7 @@ from autofit.non_linear.samples.samples import Samples
 from autofit.model_figure.config import model_figure_enabled
 from autofit.non_linear.test_mode import skip_visualization
 
-from .abstract import AbstractPaths, _test_mode_segment
+from .abstract import AbstractPaths, _test_mode_segment, zip_is_complete
 from ..checkpoint import load_legacy_search_internal
 
 from ..samples import load_from_table
@@ -204,8 +204,14 @@ class DirectoryPaths(AbstractPaths):
     def is_complete(self) -> bool:
         """
         Has the search been completed?
+
+        True when the output directory holds ``.completed`` or, under
+        ``remove_files`` where only the archive remains, when the result zip
+        holds a ``.completed`` member and passes its CRC check
+        (``zip_is_complete``, cached per zip). ``fit`` still ``restore``-s such a
+        zip first, because ``result_via_completed_fit`` reads extracted files.
         """
-        return self._has_completed_path.exists()
+        return self._has_completed_path.exists() or zip_is_complete(self._zip_path)
 
     def save_search_internal(self, obj):
         """

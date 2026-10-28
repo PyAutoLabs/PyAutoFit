@@ -30,11 +30,17 @@ Every strategy offers ``save``, ``load``, ``exists`` and ``finalize`` and declar
 search's ``paths`` on every call, so one class-level instance serves every copy of a
 search (``copy_with_paths``) and is never serialised with it.
 
+A resume state is probed before a search resumes from it (``resume_state_usable``):
+a file that cannot be opened (a truncated HDF5, a poisoned dill) has its whole
+``search_internal/`` folder moved aside to ``search_internal.failed_<utc>/`` and the
+search starts fresh, instead of failing on the same file at every rerun.
+
 Only ``DirectoryPaths`` stores anything. ``NullPaths`` (no output) and
 ``DatabasePaths`` (results live in the database) make ``save`` a no-op and ``load``
 return ``None``, as their ``save_search_internal`` / ``load_search_internal`` always
 have.
 """
+import datetime as dt
 import logging
 import os
 import pickle
@@ -128,6 +134,73 @@ def load_legacy_search_internal(directory) -> Any:
     return _load_dill(directory / DILL_FILENAME)
 
 
+HDF5_PROBE_ERRORS = (OSError, ValueError, RuntimeError, KeyError)
+"""
+What ``h5py`` raises on a truncated or otherwise unreadable file.
+"""
+
+
+def probe_hdf5(path: Path):
+    """
+    Open the HDF5 file at ``path`` read-only and visit every object in it, raising
+    (one of ``HDF5_PROBE_ERRORS``) if it is truncated or corrupt. Used for files only
+    their backend can load (nautilus's ``checkpoint.hdf5``), where a cheap structural
+    check stands in for loading.
+    """
+    import h5py
+
+    with h5py.File(path, "r") as f:
+        f.visit(lambda name: f[name])
+
+
+def quarantine_search_internal(paths, reason=None) -> Optional[Path]:
+    """
+    Move the ``search_internal/`` folder of ``paths`` aside to
+    ``search_internal.failed_<utc>/`` (next to it, under ``files/``), so the search
+    starts fresh while the state it could not resume from is kept for inspection.
+
+    Returns the folder it was moved to, or ``None`` when there was nothing to move.
+    Logs one warning naming ``reason``.
+    """
+    directory = _directory(paths)
+    if directory is None or not directory.exists():
+        return None
+
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    failed = directory.with_name(f"{directory.name}.failed_{stamp}")
+    suffix = 1
+    while failed.exists():
+        failed = directory.with_name(f"{directory.name}.failed_{stamp}_{suffix}")
+        suffix += 1
+
+    os.replace(directory, failed)
+
+    logger.warning(
+        f"The search's resume state in {directory} could not be used ({reason!r}). "
+        f"It has been moved to {failed} and the search is starting fresh."
+    )
+
+    return failed
+
+
+def resume_state_usable(paths, resume_state: "Checkpointer") -> bool:
+    """
+    Whether the search can resume from ``resume_state``: the file exists and passes
+    ``resume_state.probe``. A file that fails the probe has its ``search_internal/``
+    folder quarantined (``quarantine_search_internal``) and ``False`` is returned, so
+    the caller starts fresh.
+    """
+    if resume_state is None or not resume_state.exists(paths):
+        return False
+
+    error = resume_state.probe(paths)
+    if error is None:
+        return True
+
+    quarantine_search_internal(paths, reason=error)
+    return False
+
+
 class Checkpointer:
     """
     A strategy for one internal-state file of a search (see the module docstring).
@@ -192,6 +265,27 @@ class Checkpointer:
         if path.is_file():
             return self._load(path)
         return load_legacy_search_internal(path.parent)
+
+    def probe(self, paths) -> Optional[Exception]:
+        """
+        Check that this strategy's file can be read back, without raising.
+
+        Returns ``None`` when the file is absent or loads, and the exception
+        otherwise. The default probe is a full ``load``: any failure (a truncated
+        or poisoned dill, an unpicklable class) means the file cannot be resumed
+        from. Used by ``resume_state_usable`` before a search resumes.
+        """
+        path = self.path(paths)
+        if path is None or not path.is_file():
+            return None
+        try:
+            self._probe(path)
+        except Exception as e:
+            return e
+        return None
+
+    def _probe(self, path: Path):
+        self._load(path)
 
     def finalize(self, paths, obj=None):
         """
@@ -319,6 +413,10 @@ class NativeFileCheckpointer(Checkpointer):
         ``loader(path)`` opens the file (for example ``load_emcee_backend``).
     retain_after_completion
         See ``Checkpointer``.
+    probe
+        ``probe(path)`` raises if the file cannot be resumed from; defaults to
+        ``loader``. Given when the file can only be loaded by the backend mid-run
+        (nautilus: ``probe_hdf5``).
     """
 
     kind = "native"
@@ -328,11 +426,19 @@ class NativeFileCheckpointer(Checkpointer):
         filename: str,
         loader: Callable[[Path], Any],
         retain_after_completion: bool = False,
+        probe: Optional[Callable[[Path], Any]] = None,
     ):
         super().__init__(
             filename=filename, retain_after_completion=retain_after_completion
         )
         self.loader = loader
+        self.prober = probe
+
+    def _probe(self, path: Path):
+        if self.prober is not None:
+            self.prober(path)
+        else:
+            self.loader(path)
 
     def save(self, paths, obj):
         """

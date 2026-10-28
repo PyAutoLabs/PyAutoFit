@@ -13,6 +13,7 @@ import warnings
 
 from autofit import exc
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
+from autofit.non_linear.checkpoint import resume_state_usable
 from autofit.non_linear.search.abstract_search import NonLinearSearch
 from autofit.non_linear.search.posterior_kind import WEIGHTED
 from autofit.non_linear.samples.nest import SamplesNest
@@ -300,8 +301,10 @@ class AbstractDynesty(NonLinearSearch, ABC):
         model = ctx.model
         fitness = ctx.fitness
 
+        # A savestate that cannot be restored (e.g. truncated by a killed job) is
+        # moved aside with its search_internal folder and the search starts fresh.
         if ctx.paths.supports_checkpointing:
-            checkpoint_exists = Path(self.checkpoint_file).exists()
+            checkpoint_exists = resume_state_usable(ctx.paths, self.resume_state)
         else:
             checkpoint_exists = False
 

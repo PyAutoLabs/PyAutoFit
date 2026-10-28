@@ -73,15 +73,54 @@ class IntervalCounter:
         return self.count % self.interval == 0
 
 
+STORED_SUFFIXES = frozenset({".png", ".fits", ".hdf", ".hdf5", ".h5"})
+"""
+Suffixes of files that are already compressed (``.png``) or are large binary
+blobs that deflate barely shrinks (``.fits``, HDF5). They are archived
+``ZIP_STORED`` so a reader can seek straight into the member instead of
+inflating it, and so zipping a result does not spend CPU re-compressing them.
+"""
+
+
+def compress_type_for(file_path) -> int:
+    """
+    The ``zipfile`` compression a file is archived with: ``ZIP_STORED`` for the
+    ``STORED_SUFFIXES``, ``ZIP_DEFLATED`` (text: json, csv, logs) otherwise.
+    """
+    if Path(file_path).suffix.lower() in STORED_SUFFIXES:
+        return zipfile.ZIP_STORED
+    return zipfile.ZIP_DEFLATED
+
+
 def zip_directory(source_directory, output=None):
-    output = output or f"{source_directory}.zip"
-    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as f:
-        for root, dirs, files in os.walk(source_directory):
-            for file in files:
-                f.write(
-                    Path(root) / file,
-                    Path(root[len(str(source_directory)):]) / file,
-                )
+    """
+    Archive ``source_directory`` into ``output`` (default ``<source>.zip``).
+
+    The archive is written to a temporary file beside ``output`` and
+    ``os.replace``-d into place only once it is complete, so a zip at ``output``
+    is always whole: a process killed mid-write leaves the previous zip (or no
+    zip) rather than a truncated one, which every later resume would otherwise
+    fail to open. See ``open_atomic`` for why the temporary file lives in the
+    same directory.
+    """
+    output = Path(output or f"{source_directory}.zip")
+
+    tmp = output.with_name(f"{output.name}.{os.getpid()}.tmp")
+
+    try:
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as f:
+            for root, dirs, files in os.walk(source_directory):
+                for file in files:
+                    f.write(
+                        Path(root) / file,
+                        Path(root[len(str(source_directory)):]) / file,
+                        compress_type=compress_type_for(file),
+                    )
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+    os.replace(tmp, output)
 
 
 def open_(filename, *flags):

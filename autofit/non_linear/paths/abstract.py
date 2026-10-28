@@ -1,3 +1,4 @@
+import datetime as dt
 import logging
 import os
 import re
@@ -17,7 +18,7 @@ from autofit.mapper.identifier import Identifier, IdentifierField
 from autofit.non_linear.samples.summary import SamplesSummary
 
 from autofit.text import text_util
-from autofit.tools.util import open_, zip_directory
+from autofit.tools.util import compress_type_for, open_, zip_directory
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,46 @@ def _replace_zip_member(zip_path, arcname: str, file_path):
         raise
 
 
+_zip_complete_cache = {}
+"""
+``zip_is_complete`` results keyed by zip path, each stored with the ``(size,
+mtime)`` it was computed for so a rewritten zip is checked again.
+"""
+
+
+def zip_is_complete(zip_path) -> bool:
+    """
+    Whether the zip at ``zip_path`` holds a completed result: it has a
+    ``.completed`` member and every member passes its CRC check
+    (``ZipFile.testzip``).
+
+    ``testzip`` reads the whole archive, so the answer is cached per path and
+    reused while the zip's size and modification time are unchanged.
+    """
+    zip_path = str(zip_path)
+
+    try:
+        stat = os.stat(zip_path)
+    except OSError:
+        return False
+
+    key = (stat.st_size, stat.st_mtime_ns)
+
+    cached = _zip_complete_cache.get(zip_path)
+    if cached is not None and cached[0] == key:
+        return cached[1]
+
+    try:
+        with zipfile.ZipFile(zip_path, "r") as f:
+            complete = ".completed" in f.namelist() and f.testzip() is None
+    except (zipfile.BadZipFile, OSError):
+        complete = False
+
+    _zip_complete_cache[zip_path] = (key, complete)
+
+    return complete
+
+
 class AbstractPaths(ABC):
     stores_search_internal = True
     """
@@ -113,7 +154,7 @@ class AbstractPaths(ABC):
 
     has_timer = True
     """
-    Whether the search times itself into ``search_internal/`` (``Timer``).
+    Whether the search times itself into ``files/`` (``Timer``, ``timer_path``).
     ``NullPaths`` and ``DatabasePaths`` do not.
     """
 
@@ -368,6 +409,15 @@ class AbstractPaths(ABC):
         return Path(*strings) if strings else Path("")
 
     @property
+    def timer_path(self) -> Path:
+        """
+        The folder the search's ``Timer`` writes ``.start_time`` / ``.time`` to:
+        ``files/``, outside ``search_internal/`` so the timing survives that folder
+        being removed at completion or quarantined on a corrupt checkpoint.
+        """
+        return self._files_path
+
+    @property
     def _files_path(self) -> Path:
         """
         This is private for a reason, use the save_json etc. methods to save and load json
@@ -404,10 +454,11 @@ class AbstractPaths(ABC):
         Add a file (already inside this search's output directory) to the
         search's ``.zip`` archive so it survives the resume cycle.
 
-        ``restore()`` deletes the output directory and re-extracts the zip, so
-        any file written into e.g. ``files/`` *after* a search completed — such
-        as a cache artifact derived from the finished result — would be
-        destroyed by the next resume unless it is also a member of the zip.
+        Under ``remove_files`` the zip is what the next resume extracts
+        (``restore()``), and at completion the output directory is re-archived
+        and removed, so any file written into e.g. ``files/`` *after* a search
+        completed — such as a cache artifact derived from the finished result —
+        would be lost unless it is also a member of the zip.
 
         No-op when the zip does not exist (e.g. the search is still running,
         so the file will be zipped with everything else at completion) and
@@ -445,7 +496,7 @@ class AbstractPaths(ABC):
             try:
                 info = f.getinfo(arcname)
             except KeyError:
-                f.write(file_path, arcname)
+                f.write(file_path, arcname, compress_type=compress_type_for(file_path))
                 info = None
 
             if info is not None and not _matches_archived(info, file_path):
@@ -502,27 +553,139 @@ class AbstractPaths(ABC):
 
     def restore(self):
         """
-        Copy files from the ``.zip`` file to the samples folder.
+        Make a zipped result readable from ``output_path`` again, so a resumed fit
+        (``result_via_completed_fit``) can read its extracted files.
+
+        Non-destructive:
+
+        - an output directory that is already complete (``.completed``) is the
+          search's primary store and is left untouched;
+        - otherwise the zip is extracted into a temporary sibling directory which
+          is then renamed into place, so a reader never sees a half-extracted
+          folder and two processes restoring the same zip both end with a whole
+          one (whichever rename lands second finds the first's complete copy);
+        - the zip is deleted only when the caller owns it (``_owns_zip``):
+          ``remove_files`` is on, so the zip is rebuilt at the end of the fit,
+          and the output path is keyed by this search's identifier. Readers that
+          do not own the result use ``open_result``, which writes nothing.
+
+        A zip that cannot be read (``BadZipFile``, e.g. truncated by a crash
+        before archives were written atomically) is renamed to
+        ``<hash>.zip.corrupt_<utc>`` and logged, and the search continues as not
+        complete, so one corrupt archive no longer fails every rerun.
         """
+        zip_path = Path(self._zip_path)
 
-        if Path(self._zip_path).exists():
-            shutil.rmtree(self.output_path, ignore_errors=True)
+        if not zip_path.exists():
+            return
 
+        output_path = Path(self.output_path)
+
+        if not (output_path / ".completed").exists():
             try:
-                try:
-                    with zipfile.ZipFile(self._zip_path, "r") as f:
-                        f.extractall(self.output_path)
-                except FileExistsError:
-                    pass
+                self._extract_zip(zip_path=zip_path, output_path=output_path)
             except zipfile.BadZipFile as e:
-                raise zipfile.BadZipFile(
-                    f"Unable to restore the zip file at the path {self._zip_path}"
-                ) from e
+                self._quarantine_zip(zip_path=zip_path, error=e)
+                return
+            except FileNotFoundError:
+                # Another process restored the same zip and removed it first.
+                if not (output_path / ".completed").exists():
+                    raise
+                return
 
+        if self._owns_zip:
             try:
-                os.remove(self._zip_path)
+                os.remove(zip_path)
             except FileNotFoundError:
                 pass
+            except OSError as e:
+                # A concurrent reader holds it open (Windows); it is rebuilt at the
+                # end of the fit regardless.
+                logger.debug(f"Could not remove the restored zip {zip_path}: {e}")
+
+    @property
+    def _owns_zip(self) -> bool:
+        """
+        Whether ``restore`` may delete the zip after extracting it: ``remove_files``
+        is on (the search re-archives its output at completion, so the zip is
+        rebuilt) and the output path ends in this search's identifier, so the zip
+        is this search's own rather than one shared by every search written to an
+        identifier-free path.
+        """
+        return bool(self.remove_files) and self.is_identifier_in_paths
+
+    @staticmethod
+    def _extract_zip(zip_path: Path, output_path: Path):
+        """
+        Extract ``zip_path`` into ``output_path`` via a temporary sibling directory
+        and a rename, so ``output_path`` is either the previous directory or the
+        whole extracted archive, never a partial extraction.
+
+        An existing incomplete ``output_path`` (no ``.completed``) is replaced; a
+        complete one that another process renamed into place meanwhile is kept and
+        this process's copy discarded.
+        """
+        pid = os.getpid()
+        tmp = output_path.with_name(f"{output_path.name}.restore.{pid}.tmp")
+        aside = output_path.with_name(f"{output_path.name}.restore.{pid}.old")
+
+        shutil.rmtree(tmp, ignore_errors=True)
+
+        try:
+            with zipfile.ZipFile(zip_path, "r") as f:
+                f.extractall(tmp)
+
+            if output_path.exists() and not (output_path / ".completed").exists():
+                os.replace(output_path, aside)
+
+            try:
+                os.rename(tmp, output_path)
+            except OSError:
+                # Another process put a directory in place first.
+                if not (output_path / ".completed").exists():
+                    raise
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+            shutil.rmtree(aside, ignore_errors=True)
+
+    @staticmethod
+    def _quarantine_zip(zip_path: Path, error: Exception):
+        """
+        Rename an unreadable zip to ``<name>.corrupt_<utc>`` so it is kept for
+        inspection but no longer read, and log why.
+        """
+        stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        corrupt = zip_path.with_name(f"{zip_path.name}.corrupt_{stamp}")
+
+        try:
+            os.replace(zip_path, corrupt)
+        except FileNotFoundError:
+            return
+
+        logger.warning(
+            f"The result zip {zip_path} could not be read ({error}). It has been moved "
+            f"to {corrupt} and the search will run as not complete."
+        )
+
+    def open_result(self):
+        """
+        A read-only view of this search's completed result, for downstream stages
+        that read a result they do not own.
+
+        Returns the output directory (a ``Path``) when it holds a completed result,
+        otherwise a ``zipfile.Path`` into the result zip when that is complete, and
+        ``None`` when neither is. Both support ``/``, ``exists``, ``open`` and
+        ``read_text``. Unlike ``restore``, nothing is extracted, moved or deleted.
+        """
+        output_path = Path(self.output_path)
+
+        if (output_path / ".completed").exists():
+            return output_path
+
+        if zip_is_complete(self._zip_path):
+            return zipfile.Path(self._zip_path)
+
+        return None
 
     def __eq__(self, other):
         return isinstance(other, AbstractPaths) and all(
