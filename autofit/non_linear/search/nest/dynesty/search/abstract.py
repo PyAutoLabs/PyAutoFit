@@ -454,6 +454,24 @@ class AbstractDynesty(NonLinearSearch, ABC):
         """
         return self.resume_state.load(self.paths)
 
+    def progress(self, search_internal) -> Optional[Dict]:
+        """
+        The run's progress for the status record (``autofit.non_linear.status``): the
+        likelihood calls so far, the evidence and, when ``maxcall`` bounds the run, the
+        share of it spent (``fraction``).
+        """
+        progress = {
+            "n_like": self.total_calls_from(search_internal=search_internal),
+            "n_like_max": self.maxcall,
+        }
+        try:
+            progress["log_z"] = float(search_internal.results.logz[-1])
+        except Exception:
+            pass
+        if self.maxcall:
+            progress["fraction"] = min(1.0, progress["n_like"] / self.maxcall)
+        return progress
+
     def iterations_from(
         self, search_internal: "Union[NestedSampler, DynamicNestedSampler]"
     ) -> Tuple[int, int]:

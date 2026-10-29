@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional, TYPE_CHECKING
+from typing import Dict, Optional, TYPE_CHECKING
 
 from autofit import exc
 
@@ -223,6 +223,18 @@ class AbstractBFGS(NonLinearSearch):
         the samples are then the whole optimisation path (``raw_samples_from``).
         """
         return {"store_history": self.should_plot_start_point}
+
+    def progress(self, search_internal) -> Optional[Dict]:
+        """
+        The run's progress for the status record (``autofit.non_linear.status``): the
+        iterations taken of ``maxiter`` (scipy stops earlier once converged).
+        """
+        total = search_internal.get("total_iterations", search_internal.nit)
+        return {
+            "n_like": int(total),
+            "n_like_max": int(self.maxiter),
+            "fraction": min(1.0, total / self.maxiter) if self.maxiter else None,
+        }
 
     def run(self, ctx):
         """
