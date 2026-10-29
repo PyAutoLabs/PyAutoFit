@@ -227,10 +227,13 @@ class NonLinearSearch(
     def timer(self) -> Optional[Timer]:
         """
         The timer of the search (how long the search took, how much parallelization
-        sped it up), or ``None`` in ``NullPaths`` mode (no output written to disk).
+        sped it up), or ``None`` when the paths keep no timer (``has_timer``: ``NullPaths``,
+        ``DatabasePaths``). It writes to ``files/`` (``AbstractPaths.timer_path``).
         """
+        if not getattr(self.paths, "has_timer", False):
+            return None
         try:
-            return Timer(self.paths.search_internal_path)
+            return Timer(self.paths.timer_path)
         except TypeError:
             pass
 
