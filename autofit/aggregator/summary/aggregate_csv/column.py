@@ -169,7 +169,13 @@ class ComputedColumn(AbstractColumn):
 
 
 class LabelColumn(AbstractColumn):
-    def __init__(self, name: str, values: list):
+    def __init__(
+        self,
+        name: str,
+        values,
+        key: Optional[Callable] = None,
+        strict: bool = False,
+    ):
         """
         A column in the summary table that is a label.
 
@@ -177,9 +183,30 @@ class LabelColumn(AbstractColumn):
         ----------
         name
             The name of the column
+        values
+            A dict joined to each row by key, or a list paired with rows by position.
+        key
+            Computes a row's join key from its search output (its ``id`` by default).
+        strict
+            If True a dict with no value for a row's key raises a KeyError; if False
+            the value is left empty.
         """
         super().__init__(name)
         self.values = values
+        self.key = key
+        self.strict = strict
 
     def value(self, row: "Row"):
-        return self.values[row.number]
+        if not isinstance(self.values, dict):
+            return self.values[row.number]
+
+        key = self.key(row.result) if self.key is not None else row.result.id
+        try:
+            return self.values[key]
+        except KeyError:
+            if self.strict:
+                raise KeyError(
+                    f"The label column '{self.name}' has no value for the search "
+                    f"with key {key!r}."
+                )
+            return None
