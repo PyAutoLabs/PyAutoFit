@@ -9,9 +9,12 @@ Campaigns: run many fits on a scheduler from one declaration (hpc-campaign phase
 - ``collector``: accounting joined with status records → ``digest``
   (``digest.json``, a ≤2 KB ``digest.md``, ``tasks.jsonl``, ``failed_<class>.txt``);
 - ``proposals``: resubmit and pending-update proposals (never acted on);
-- ``retro``: the digest of a finished campaign from a ``sacct`` dump alone.
+- ``retro``: the digest of a finished campaign from a ``sacct`` dump alone;
+- ``evidence``: profiling / inference summaries, read and graded per stage;
+- ``plan``: proposed resources, wall time, ETA and disk, every number graded;
+- ``pilot``: a stratified subset of the manifest to measure first.
 
-Command line: ``python -m autofit.campaign {validate,submit,status,resubmit,retro}``;
+Command line: ``python -m autofit.campaign {validate,submit,status,resubmit,retro,plan,pilot}``;
 in Python, ``autofit.campaign.submit.submit(campaign, scheduler)`` and
 ``autofit.campaign.retro.retro(dump, ...)``.
 

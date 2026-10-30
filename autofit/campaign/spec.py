@@ -31,6 +31,14 @@ tasks; inside an array the Slurm task id runs from 0 and the batch script export
 ``CAMPAIGN_INDEX = CAMPAIGN_OFFSET + SLURM_ARRAY_TASK_ID``, so per-index dependencies
 (``aftercorr``) line up between stages chunk by chunk.
 
+``evidence`` names what a stage is, for ``python -m autofit.campaign plan``
+(``autofit.campaign.evidence``): ``keys`` are opaque match keys compared with the
+profiling and inference summaries (``dataset_type``, ``variant``, ``instrument``,
+``regime``, ``setup_id``, ``host_class``, ``model_variant``, ``stage``), ``size_field``
+a manifest field to bin wall times by, ``evals`` the likelihood evaluations a fit of the
+stage takes (to scale a per-call cost), and ``result_names`` the search names of its
+results (for the disk forecast).
+
 ``retry`` is a policy for *proposals* only: the collector proposes resubmits sized
 from the failed tasks' own measurements and a human approves every one.
 """
@@ -57,7 +65,18 @@ CAMPAIGN_FIELDS = {
     "stages",
     "note",
 }
-STAGE_FIELDS = {"script", "env", "resources", "after", "seed", "success", "retry", "note"}
+STAGE_FIELDS = {
+    "script",
+    "env",
+    "resources",
+    "after",
+    "seed",
+    "success",
+    "retry",
+    "evidence",
+    "note",
+}
+EVIDENCE_FIELDS = {"keys", "size_field", "evals", "result_names"}
 RESOURCE_FIELDS = {
     "cpus",
     "mem_per_cpu_mb",
@@ -145,6 +164,7 @@ class Stage:
     seed: Optional[str] = None
     success: Success = field(default_factory=Success)
     retry: Dict[str, Dict] = field(default_factory=dict)
+    evidence: Dict = field(default_factory=dict)
 
 
 class Campaign:
@@ -186,6 +206,7 @@ class Campaign:
                     members=list(success.get("members") or []),
                 ),
                 retry=dict(stage.get("retry") or {}),
+                evidence=dict(stage.get("evidence") or {}),
             )
         self._site = None
         self._manifest = None
@@ -407,6 +428,7 @@ class Campaign:
                         f"{where}.after.{upstream}: {kind!r} is not one of "
                         f"{sorted(DEPENDENCY_KINDS)}"
                     )
+            errors += _evidence_errors(where, raw_stage.get("evidence"))
             for failure, policy in (raw_stage.get("retry") or {}).items():
                 if failure not in RETRY_CLASSES:
                     errors.append(f"{where}.retry: unknown failure class {failure!r}")
@@ -465,3 +487,29 @@ class Campaign:
         if not verdict.ok:
             errors.append(f"{where}.resources.partition: " + "; ".join(verdict.reasons))
         return errors
+
+
+def _evidence_errors(where: str, evidence) -> List[str]:
+    if evidence is None:
+        return []
+    if not isinstance(evidence, dict):
+        return [f"{where}.evidence: must be a mapping"]
+    from autofit.campaign.evidence import KEYS
+
+    errors = []
+    unknown = set(evidence) - EVIDENCE_FIELDS
+    if unknown:
+        errors.append(f"{where}.evidence: unknown keys {sorted(unknown)}")
+    keys = evidence.get("keys") or {}
+    if not isinstance(keys, dict):
+        errors.append(f"{where}.evidence.keys: must be a mapping")
+    else:
+        unknown = set(keys) - set(KEYS)
+        if unknown:
+            errors.append(
+                f"{where}.evidence.keys: unknown keys {sorted(unknown)} (one of {list(KEYS)})"
+            )
+    evals = evidence.get("evals")
+    if evals is not None and (not isinstance(evals, (int, float)) or evals <= 0):
+        errors.append(f"{where}.evidence.evals: must be a positive number")
+    return errors
