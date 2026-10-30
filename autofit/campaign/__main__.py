@@ -5,11 +5,21 @@ Commands
 --------
 validate <campaign.yaml>
     Check the campaign file against its site; print every problem.
-submit <campaign.yaml> [--stage S ...] [--indices SPEC] [--dry-run]
+submit <campaign.yaml> [--stage S ...] [--indices SPEC] [--proposal FILE] [--dry-run]
     Submit the stages (default: all) over the manifest (or ``--indices``, a Slurm
     array spec of campaign indices), chunk by chunk. Every array is linted against
-    the GPU-partition rule first. ``--dry-run`` prints the batch scripts and submits
-    nothing.
+    the GPU-partition rule first. ``--proposal`` submits an approved resubmit proposal
+    (its stage, indices and resources). ``--dry-run`` prints the batch scripts and
+    submits nothing.
+status <campaign.yaml>
+    Collect the campaign (one accounting query, one capacity snapshot, the status
+    records), write the digest files and print ``digest.md``.
+resubmit <campaign.yaml> --stage S --class C
+    Write ``resubmit_<S>_<C>.json``, a proposal sized from the failed tasks' own
+    measurements (from the last ``status``), and print it. Nothing is submitted.
+retro --sacct DUMP [--workdir-prefix DIR ...] [--name-regex RE] [--stage-regex RE]
+      [--other-stage NAME] [--status-root DIR] [--site NAME] [--name NAME] [--output DIR]
+    The digest of a finished campaign from a ``sacct --parsable2`` dump alone.
 """
 import argparse
 import json
@@ -44,12 +54,17 @@ def _submit(arguments) -> int:
     try:
         campaign = Campaign.load(arguments.campaign)
         indices = parse_array_spec(arguments.indices)[0] if arguments.indices else None
+        stages = arguments.stage
+        resources = None
+        if arguments.proposal:
+            stages, indices, resources = _proposal(campaign, arguments.proposal)
         scheduler = None if arguments.dry_run else scheduler_for(campaign)
         entries = submit(
             campaign,
             scheduler,
-            stages=arguments.stage,
+            stages=stages,
             indices=indices,
+            resources=resources,
             dry_run=arguments.dry_run,
         )
     except (CampaignException, PartitionLintError) as exception:
@@ -65,6 +80,90 @@ def _submit(arguments) -> int:
     return 0
 
 
+def _proposal(campaign, path):
+    from autofit.campaign.spec import Resources
+
+    proposal = json.loads(open(path).read())
+    if not proposal.get("indices") or not proposal.get("resources"):
+        raise CampaignException(f"Proposal {path} has nothing to submit: {proposal.get('reason')}")
+    raw = dict(proposal["resources"])
+    resources = Resources(**raw)
+    return [proposal["stage"]], parse_array_spec(proposal["indices"])[0], {proposal["stage"]: resources}
+
+
+def _status(arguments) -> int:
+    from autofit.campaign.collector import collect
+    from autofit.campaign.digest import digest_markdown
+    from autofit.campaign.scheduler import scheduler_for
+
+    try:
+        campaign = Campaign.load(arguments.campaign)
+    except CampaignException as exception:
+        print(exception, file=sys.stderr)
+        return 1
+    digest = collect(campaign, scheduler_for(campaign))
+    print(digest_markdown(digest), end="")
+    return 0
+
+
+def _resubmit(arguments) -> int:
+    from autofit.campaign.digest import read_outcomes
+    from autofit.campaign.proposals import propose_resubmit
+
+    try:
+        campaign = Campaign.load(arguments.campaign)
+    except CampaignException as exception:
+        print(exception, file=sys.stderr)
+        return 1
+    if arguments.stage not in campaign.stages:
+        print(f"Unknown stage {arguments.stage!r}.", file=sys.stderr)
+        return 1
+    tasks = campaign.directory / "tasks.jsonl"
+    if not tasks.exists():
+        print(f"No {tasks}: run `status` first.", file=sys.stderr)
+        return 1
+    proposal = propose_resubmit(
+        campaign.stages[arguments.stage],
+        getattr(arguments, "class"),
+        read_outcomes(tasks),
+        site=campaign.site if campaign.site_name else None,
+    )
+    path = campaign.directory / f"resubmit_{arguments.stage}_{getattr(arguments, 'class')}.json"
+    path.write_text(json.dumps(proposal, indent=1, default=str))
+    print(json.dumps(proposal, indent=1, default=str))
+    if proposal["indices"]:
+        print(
+            f"\nProposal only. To act on it once approved:\n"
+            f"  python -m autofit.campaign submit {arguments.campaign} --proposal {path}"
+        )
+    return 0
+
+
+def _retro(arguments) -> int:
+    from autofit.campaign.digest import digest_markdown, write_digest
+    from autofit.campaign.retro import retro
+
+    site = None
+    if arguments.site:
+        from autonerves.site_config import load_site, site_path
+
+        site = load_site(site_path(arguments.site))
+    digest, outcomes = retro(
+        arguments.sacct,
+        workdir_prefixes=arguments.workdir_prefix or (),
+        name_regex=arguments.name_regex,
+        stage_regex=arguments.stage_regex,
+        status_root=arguments.status_root,
+        site=site,
+        name=arguments.name,
+        other_stage=arguments.other_stage,
+    )
+    if arguments.output:
+        write_digest(arguments.output, digest, outcomes)
+    print(digest_markdown(digest), end="")
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="python -m autofit.campaign")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -77,8 +176,31 @@ def main(argv=None) -> int:
     submit.add_argument("campaign")
     submit.add_argument("--stage", action="append", help="Stage to submit (repeatable).")
     submit.add_argument("--indices", help="Campaign indices, as a Slurm array spec.")
+    submit.add_argument("--proposal", help="Submit an approved resubmit proposal.")
     submit.add_argument("--dry-run", action="store_true", help="Print, do not submit.")
     submit.set_defaults(handler=_submit)
+
+    status = commands.add_parser("status", help="Collect the campaign into its digest.")
+    status.add_argument("campaign")
+    status.set_defaults(handler=_status)
+
+    resubmit = commands.add_parser("resubmit", help="Propose a resubmit (never submits).")
+    resubmit.add_argument("campaign")
+    resubmit.add_argument("--stage", required=True)
+    resubmit.add_argument("--class", required=True, help="timeout, oom, node_fail, ...")
+    resubmit.set_defaults(handler=_resubmit)
+
+    retro = commands.add_parser("retro", help="Digest a finished campaign from sacct.")
+    retro.add_argument("--sacct", required=True, help="A sacct --parsable2 dump.")
+    retro.add_argument("--workdir-prefix", action="append", help="Keep jobs under this WorkDir.")
+    retro.add_argument("--name-regex", help="Keep jobs whose name matches.")
+    retro.add_argument("--stage-regex", help="Stage from job name (group 'stage').")
+    retro.add_argument("--other-stage", help="Stage of jobs the stage regex misses.")
+    retro.add_argument("--status-root", help="Join status records under this directory.")
+    retro.add_argument("--site", help="Site layer (GPU-only partitions).")
+    retro.add_argument("--name", default="retro", help="Campaign name in the digest.")
+    retro.add_argument("--output", help="Write the digest files here.")
+    retro.set_defaults(handler=_retro)
 
     arguments = parser.parse_args(argv)
     return arguments.handler(arguments)
