@@ -245,3 +245,69 @@ def test_begin_hint_picks_the_lowest_window():
     assert hint["now_mean_g_per_kwh"] == 195.0
     assert hint["slurm"] == "--begin=2026-10-30T13:00:00"
     assert begin_hint([], 3600) is None
+
+
+def _site_with_ci(table, basis="regional"):
+    from autonerves.site_config import Site
+
+    return Site(
+        {
+            "name": "toy",
+            "partitions": {"ral": {"gpu_only": False, "tdp_w_per_cpu": {"low": 2.8, "central": 3.5, "high": 4.4}}},
+            "pue": {"low": 1.2, "central": 1.31, "high": 1.45},
+            "ci_basis": basis,
+            "carbon_intensity": table,
+        }
+    )
+
+
+def test_empty_ci_basis_gives_energy_only_never_a_crash():
+    # Review finding 1: a null chosen basis (or an all-null table) used to raise.
+    for table in (
+        {"regional": {"value": None, "unverified": True}, "national": 129},
+        {"regional": {"value": None}, "national": {"value": None}},
+    ):
+        inputs = CarbonInputs.from_site(_site_with_ci(table))
+        assert inputs.ci_g_per_kwh is None
+        assert "'regional'" in inputs.ci_missing_reason
+        result = estimate([_outcome()], inputs)
+        assert result["total"]["kg_co2e"] is None
+        assert "no value for the 'regional'" in result["note"]
+
+    national = CarbonInputs.from_site(
+        _site_with_ci({"regional": {"value": None}, "national": 129}), ci_basis="national"
+    )
+    assert national.ci_g_per_kwh.as_list() == [129, 129, 129]
+
+
+def test_in_progress_work_is_its_own_bucket():
+    # Review finding 3: running / pending tasks are not failed work.
+    inputs = CarbonInputs.from_site(None, **REPORT_INPUTS)
+    done = _outcome(key="a")
+    running = _outcome(key="b", state="running")
+    flushing = _outcome(key="c", state="timeout_pending")
+    result = estimate([done, running, flushing], inputs)
+    total = result["total"]
+    one = estimate([done], inputs)["total"]["kwh"]["central"]
+
+    assert total["in_progress"] == 2
+    assert total["in_progress_kwh"]["central"] == pytest.approx(2 * one, abs=1e-6)
+    assert total["failed_or_repeated_kwh"]["central"] == 0
+    assert total["failed_or_repeated_share"] == 0.0
+
+    only_running = estimate([running], inputs)["total"]
+    assert only_running["failed_or_repeated_share"] is None
+
+    # An earlier attempt of a running task is still repeated work.
+    retried = _outcome(key="d", state="running", attempts=2, cpu_s_all_attempts=2 * 3600 * 8)
+    total = estimate([done, retried], inputs)["total"]
+    assert total["failed_or_repeated_kwh"]["central"] == pytest.approx(one, abs=1e-6)
+    assert total["failed_or_repeated_share"] == pytest.approx(0.5)
+
+
+def test_given_ci_replaces_the_site_bases(ral):
+    # Review finding 4: --ci with a site must not name bases the range no longer uses.
+    inputs = CarbonInputs.from_site(ral, ci=(100, 130, 190))
+    assert inputs.ci_basis == "given"
+    assert inputs.ci_bases == {}
+    assert inputs.ci_g_per_kwh.as_list() == [100, 130, 190]

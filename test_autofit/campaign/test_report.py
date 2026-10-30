@@ -130,3 +130,49 @@ def test_cli_report_from_campaign_file(campaign_file, capsys):
     assert main(["report", str(campaign_file)]) == 0
     assert "regional basis" in capsys.readouterr().out
     assert (campaign.directory / "report.md").exists()
+
+
+def _live_folder(tmp_path, outcomes):
+    folder = tmp_path / "live"
+    write_digest(folder, build_digest("live", outcomes), outcomes)
+    return folder
+
+
+def test_report_with_only_unstarted_or_running_tasks(tmp_path, ral):
+    # Review finding 2: zero finished energy must not crash the report.
+    pending = TaskOutcome(stage="vis_lp", key="1_0", state="pending", cpus=8, partition="ral")
+    report = build_report(_live_folder(tmp_path, [pending]), site=ral)
+    text = report_markdown(report)
+    assert "Failed or repeated work: 0 kWh of 0 central" in text
+    assert "of finished work" not in text
+
+    running = TaskOutcome(
+        stage="vis_lp", key="1_1", state="running", elapsed_s=1800, cpus=8,
+        req_mem_mb=12288.0, total_cpu_s=7200.0, partition="ral", cpu_s_all_attempts=14400.0,
+    )
+    report = build_report(_live_folder(tmp_path / "b", [running]), site=ral)
+    text = report_markdown(report)
+    assert "In progress: 1 unfinished tasks" in text
+    # Review finding 3: never claims running work was wasted.
+    assert "was spent on failed" not in report["paragraph"]
+    assert "still running" in report["paragraph"]
+
+
+def test_paragraph_with_given_ci_names_no_site_bases(tmp_path, ral):
+    from autofit.campaign.carbon import CarbonInputs
+
+    folder = _digest_folder(tmp_path)
+    inputs = CarbonInputs.from_site(ral, ci=(100, 130, 190))
+    paragraph = build_report(folder, site=ral, inputs=inputs)["paragraph"]
+    assert "130 gCO2e/kWh (given; range 100–190)" in paragraph
+    assert "national" not in paragraph and "regional" not in paragraph
+
+
+def test_cli_without_source_is_a_usage_error(capsys):
+    import pytest
+
+    for command in ("report", "carbon"):
+        with pytest.raises(SystemExit) as exit_info:
+            main([command])
+        assert exit_info.value.code == 2
+        assert "give a digest folder or campaign.yaml" in capsys.readouterr().err

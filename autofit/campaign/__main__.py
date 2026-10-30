@@ -400,6 +400,12 @@ def main(argv=None) -> int:
     report.set_defaults(handler=_report)
 
     arguments = parser.parse_args(argv)
+    if (
+        arguments.handler in (_carbon, _report)
+        and arguments.source is None
+        and getattr(arguments, "begin_hint", None) is None
+    ):
+        parser.error(f"{arguments.command}: give a digest folder or campaign.yaml")
     return arguments.handler(arguments)
 
 

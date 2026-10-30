@@ -103,15 +103,17 @@ def paper_paragraph(digest: Dict, carbon: Dict) -> Optional[str]:
     )
     if kg is not None:
         ci = inputs["ci_g_per_kwh"]
-        bases = ", ".join(
-            f"{k} {v:g}" for k, v in inputs["ci_bases"].items() if k != inputs["ci_basis"]
-        )
-        text += (
-            f" and a grid carbon intensity of {ci[1]:g} gCO2e/kWh ({inputs['ci_basis']} "
-            f"basis; range {ci[0]:g}–{ci[2]:g} across bases"
-            + (f": {bases}" if bases else "")
-            + ")"
-        )
+        others = {
+            k: v for k, v in (inputs.get("ci_bases") or {}).items() if k != inputs["ci_basis"]
+        }
+        if others:
+            detail = (
+                f"{inputs['ci_basis']} basis; range {ci[0]:g}–{ci[2]:g} across bases: "
+                + ", ".join(f"{k} {v:g}" for k, v in others.items())
+            )
+        else:
+            detail = f"{inputs['ci_basis']}; range {ci[0]:g}–{ci[2]:g}"
+        text += f" and a grid carbon intensity of {ci[1]:g} gCO2e/kWh ({detail})"
     energy = _scaled(kwh, "kWh", "MWh")
     text += (
         f", we estimate the campaign used ≈{energy['central']} {energy['unit']} "
@@ -132,8 +134,15 @@ def paper_paragraph(digest: Dict, carbon: Dict) -> Optional[str]:
     text += "."
     if share is not None:
         text += (
-            f" About {share:.0%} of the central estimate was spent on failed, "
+            f" About {share:.0%} of the energy of finished work was spent on failed, "
             f"timed-out or repeated runs."
+        )
+    in_progress = (carbon["total"].get("in_progress_kwh") or {}).get("central") or 0
+    if in_progress > 0:
+        text += (
+            f" The campaign was still running: {carbon['total']['in_progress']:,} "
+            f"unfinished tasks account for ≈{_significant(in_progress)} kWh so far, "
+            f"included in the totals but in neither share."
         )
     text += (
         " The upper bound charges every reserved CPU at full use and the requested "
@@ -201,10 +210,8 @@ def report_markdown(report: Dict) -> str:
     if period:
         lines.append(f"- Period: {period.get('first_submit')} → {period.get('last_end')}")
     cpu_all, cpu_ok = totals["cpu_h_all_attempts"], totals["cpu_h_successful"]
-    share = 1 - cpu_ok / cpu_all if cpu_all else 0
     lines.append(
-        f"- CPU-hours allocated: {cpu_all:,.0f}, of which {cpu_ok:,.0f} in completed "
-        f"tasks ({share:.0%} failed, timed-out or repeated)"
+        f"- CPU-hours allocated: {cpu_all:,.0f}, of which {cpu_ok:,.0f} in completed tasks"
     )
     peak = digest.get("peak_cpus")
     if isinstance(peak, dict) and peak.get("cpus"):
@@ -228,11 +235,18 @@ def report_markdown(report: Dict) -> str:
         for case, meaning in carbon["cases"].items():
             lines.append(f"- **{case}**: {meaning}")
         total = carbon["total"]
+        share = total["failed_or_repeated_share"]
         lines.append(
             f"- Failed or repeated work: {_number(total['failed_or_repeated_kwh']['central'])} "
-            f"kWh of {_number(total['kwh']['central'])} central "
-            f"({total['failed_or_repeated_share']:.0%})"
+            f"kWh of {_number(total['kwh']['central'])} central"
+            + (f" ({share:.0%} of finished work)" if share is not None else "")
         )
+        in_progress = (total.get("in_progress_kwh") or {}).get("central") or 0
+        if in_progress > 0:
+            lines.append(
+                f"- In progress: {total['in_progress']:,} unfinished tasks, "
+                f"{_number(in_progress)} kWh so far (in neither share)"
+            )
         rows = ["", "| stage | per completed task, central | failed or repeated share |", "|---|---|---|"]
         for name, stage in carbon["stages"].items():
             per = stage.get("per_completed_task")

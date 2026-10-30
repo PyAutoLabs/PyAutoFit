@@ -119,6 +119,8 @@ class CarbonInputs:
     ci_bases: Dict[str, float] = field(default_factory=dict)
     """The central carbon intensity of every basis the site gives."""
     ci_source: Optional[str] = None
+    ci_missing_reason: Optional[str] = None
+    """Why there is no carbon intensity, when the site has a table but no usable value."""
     unverified: List[str] = field(default_factory=list)
     site: Optional[str] = None
 
@@ -148,20 +150,26 @@ class CarbonInputs:
             inputs.pue = Bounds.of(site.pue)
             table = getattr(site, "carbon_intensity", {}) or {}
             basis = ci_basis or site.ci_basis
-            if table and basis in table:
+            bases = {
+                name: float(value.central)
+                for name, value in table.items()
+                if value.central is not None
+            }
+            if basis in bases:
                 inputs.ci_basis = basis
-                inputs.ci_bases = {
-                    name: float(value.central)
-                    for name, value in table.items()
-                    if value.central is not None
-                }
-                centrals = list(inputs.ci_bases.values())
-                inputs.ci_g_per_kwh = Bounds(
-                    min(centrals), inputs.ci_bases[basis], max(centrals)
-                )
+                inputs.ci_bases = bases
+                centrals = list(bases.values())
+                inputs.ci_g_per_kwh = Bounds(min(centrals), bases[basis], max(centrals))
                 inputs.ci_source = (
                     f"site {site.name}: {basis} basis, bounds the spread of bases "
-                    f"{', '.join(f'{k} {v:g}' for k, v in inputs.ci_bases.items())}"
+                    f"{', '.join(f'{k} {v:g}' for k, v in bases.items())}"
+                )
+            elif table:
+                # The chosen basis has no value: no carbon figure rather than one from
+                # a basis nobody chose.
+                inputs.ci_missing_reason = (
+                    f"site {site.name} gives no value for the {basis!r} "
+                    f"carbon_intensity basis"
                 )
             inputs.unverified = list(site.unverified())
         if pue is not None:
@@ -172,8 +180,10 @@ class CarbonInputs:
             inputs.tdp_w_per_cpu["*"] = bounds
         if ci is not None:
             inputs.ci_g_per_kwh = Bounds.of(ci)
-            inputs.ci_basis = ci_basis or "given"
-            inputs.ci_source = "given on the command line"
+            inputs.ci_basis = "given"
+            inputs.ci_bases = {}
+            inputs.ci_source = "given explicitly"
+            inputs.ci_missing_reason = None
         return inputs
 
     def tdp_for(self, partition: Optional[str]) -> Tuple[Optional[Bounds], bool]:
@@ -220,6 +230,7 @@ class CarbonInputs:
             "ci_basis": self.ci_basis,
             "ci_bases": self.ci_bases,
             "ci_source": self.ci_source,
+            "ci_missing_reason": self.ci_missing_reason,
             "unverified": self.unverified,
             "missing": self.missing(),
         }
@@ -270,18 +281,26 @@ def _empty() -> Dict[str, float]:
     return {case: 0.0 for case in CASES}
 
 
+IN_PROGRESS_STATES = ("pending", "running", str(RunState.TIMEOUT_PENDING))
+"""Tasks not finished yet: their energy so far is neither successful nor wasted."""
+
+BUCKETS = ("successful", "in_progress", "failed_or_repeated")
+
+
 @dataclass
 class _Tally:
     kwh: Dict[str, float] = field(default_factory=_empty)
-    successful_kwh: Dict[str, float] = field(default_factory=_empty)
+    buckets: Dict[str, Dict[str, float]] = field(
+        default_factory=lambda: {bucket: _empty() for bucket in BUCKETS}
+    )
     tasks: int = 0
     completed: int = 0
+    in_progress: int = 0
 
-    def add(self, energy: Dict[str, float], successful: bool):
+    def add(self, energy: Dict[str, float], bucket: str):
         for case in CASES:
             self.kwh[case] += energy[case]
-            if successful:
-                self.successful_kwh[case] += energy[case]
+            self.buckets[bucket][case] += energy[case]
 
 
 def _usage(outcome: TaskOutcome) -> Optional[float]:
@@ -325,17 +344,22 @@ def _round_cases(values: Optional[Dict[str, float]], digits=6):
 
 
 def _summary(tally: _Tally, ci: Optional[Bounds]) -> Dict:
-    failed = {case: tally.kwh[case] - tally.successful_kwh[case] for case in CASES}
-    central = tally.kwh["central"]
+    successful = tally.buckets["successful"]
+    failed = tally.buckets["failed_or_repeated"]
+    # The share of *finished* work that was failed or repeated: energy of tasks still
+    # in progress is neither, so it is left out of both sides.
+    finished = successful["central"] + failed["central"]
     summary = {
         "tasks": tally.tasks,
         "completed": tally.completed,
+        "in_progress": tally.in_progress,
         "kwh": _round_cases(tally.kwh),
         "kg_co2e": _round_cases(_carbon(tally.kwh, ci)),
-        "successful_kwh": _round_cases(tally.successful_kwh),
+        "successful_kwh": _round_cases(successful),
+        "in_progress_kwh": _round_cases(tally.buckets["in_progress"]),
         "failed_or_repeated_kwh": _round_cases(failed),
-        "failed_or_repeated_share": round(failed["central"] / central, 3)
-        if central
+        "failed_or_repeated_share": round(failed["central"] / finished, 3)
+        if finished > 0
         else None,
     }
     if tally.completed:
@@ -360,8 +384,10 @@ def estimate(
     """
     The energy and carbon of a campaign's tasks (live or retrospective), per stage and
     in total, in the four cases (module docstring), split into successful work (the
-    final attempt of each completed task) and failed or repeated work (every other
-    attempt and every task that did not complete).
+    final attempt of each completed task), work in progress (the latest attempt of a
+    pending, running or ``timeout_pending`` task, so far) and failed or repeated work
+    (every earlier attempt and every finished task that did not complete).
+    ``failed_or_repeated_share`` is of finished work only.
 
     Earlier attempts of a task are known only by their allocated CPU time; they are
     charged with the final attempt's CPUs, memory and usage. A task with no CPU time
@@ -403,9 +429,13 @@ def estimate(
         tally.tasks += 1
         total.tasks += 1
         completed = outcome.state == str(RunState.COMPLETED)
+        in_progress = outcome.state in IN_PROGRESS_STATES
         if completed:
             tally.completed += 1
             total.completed += 1
+        if in_progress:
+            tally.in_progress += 1
+            total.in_progress += 1
         cpus = outcome.cpus or 0
         if not cpus or outcome.elapsed_s is None:
             counts["no_time"] += 1
@@ -430,15 +460,21 @@ def estimate(
 
         # The final attempt, then any earlier ones (known by allocated CPU time only).
         earlier_cpu_s = (outcome.cpu_s_all_attempts or 0.0) - outcome.elapsed_s * cpus
-        attempts = [(outcome.elapsed_s / 3600.0, completed and outcome.success is not False)]
+        if completed and outcome.success is not False:
+            final = "successful"
+        elif in_progress:
+            final = "in_progress"
+        else:
+            final = "failed_or_repeated"
+        attempts = [(outcome.elapsed_s / 3600.0, final)]
         if earlier_cpu_s > 1e-6:
-            attempts.append((earlier_cpu_s / cpus / 3600.0, False))
-        for hours, successful in attempts:
+            attempts.append((earlier_cpu_s / cpus / 3600.0, "failed_or_repeated"))
+        for hours, bucket in attempts:
             energy = _attempt_energy(
                 hours, cpus, usage, requested_gb, peak_gb, gpus, tdp, gpu, inputs.pue
             )
-            tally.add(energy, successful)
-            total.add(energy, successful)
+            tally.add(energy, bucket)
+            total.add(energy, bucket)
 
     result["total"] = _summary(total, ci)
     result["stages"] = {name: _summary(t, ci) for name, t in sorted(stages.items())}
@@ -454,9 +490,10 @@ def estimate(
         }
     result["assumptions"] = counts
     if ci is None:
+        reason = inputs.ci_missing_reason or "the site gives no carbon_intensity"
         result["note"] = (
-            "energy only: the site gives no carbon_intensity, so no carbon figure "
-            "(pass --ci; no world-average default is used)"
+            f"energy only: {reason}, so no carbon figure "
+            f"(pass --ci; no world-average default is used)"
         )
     return result
 
