@@ -1,3 +1,4 @@
+import io
 import json
 from abc import abstractmethod, ABC
 from pathlib import Path
@@ -33,7 +34,8 @@ class FileOutput(ABC):
             The name of the output file. This is the path to the file from the root output directory
             separated by '.' and without a suffix. e.g. output/directory/info.json -> directory.info
         path
-            The path to the output file
+            The path to the output file: a ``Path``, or a ``ZipMember`` when the
+            output is read from inside a zip.
         """
         self.name = name
         self.path = path
@@ -56,7 +58,8 @@ class ArrayOutput(FileOutput):
         """
         The array stored in the csv file
         """
-        return np.loadtxt(self.path, delimiter=",")
+        with self.path.open() as f:
+            return np.loadtxt(f, delimiter=",")
 
 
 class JSONOutput(FileOutput):
@@ -65,7 +68,7 @@ class JSONOutput(FileOutput):
         """
         The dictionary stored in the json file
         """
-        with open(self.path) as f:
+        with self.path.open() as f:
             return json.load(f)
 
     @property
@@ -88,7 +91,7 @@ class PickleOutput(FileOutput):
         """
         The object stored in the pickle file
         """
-        with open(self.path, "rb") as f:
+        with self.path.open("rb") as f:
             return dill.load(f)
 
 
@@ -100,4 +103,7 @@ class FITSOutput(FileOutput):
         """
         from astropy.io import fits
 
-        return fits.open(self.path)
+        if isinstance(self.path, Path):
+            return fits.open(self.path)
+        # A member of a zip (``ZipMember``): read into memory, nothing extracted.
+        return fits.open(io.BytesIO(self.path.read_bytes()))
