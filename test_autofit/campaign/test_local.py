@@ -1,4 +1,3 @@
-import sys
 import textwrap
 
 from autofit.campaign import Campaign
