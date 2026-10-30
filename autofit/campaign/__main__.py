@@ -20,6 +20,14 @@ resubmit <campaign.yaml> --stage S --class C
 retro --sacct DUMP [--workdir-prefix DIR ...] [--name-regex RE] [--stage-regex RE]
       [--other-stage NAME] [--status-root DIR] [--site NAME] [--name NAME] [--output DIR]
     The digest of a finished campaign from a ``sacct --parsable2`` dump alone.
+plan <campaign.yaml> [--evidence SRC ...] [--pilot TASKS] [--decisions YAML]
+     [--idle-cpus [PARTITION=]N ...] [--capacity-source TEXT] [--results-index DIR] [--output DIR]
+    Propose each stage's resources, wall time, ETA and disk from a pilot and the
+    profiling / inference summaries, every number graded (``autofit.campaign.plan``).
+pilot <campaign.yaml> [--fraction F] [--size-field NAME | --size-path TEMPLATE] [--bins N]
+      [--seed S] [--output DIR]
+    Write ``pilot.json``: a stratified subset of the manifest to measure first. Nothing
+    is submitted.
 """
 import argparse
 import json
@@ -164,6 +172,61 @@ def _retro(arguments) -> int:
     return 0
 
 
+def _idle_cpus(values, source):
+    from autofit.campaign.plan import graded
+
+    idle = {}
+    for value in values or ():
+        partition, _, number = value.rpartition("=")
+        idle[partition or "*"] = graded(int(number), "estimated", [source or "stated on the command line"])
+    return idle
+
+
+def _plan(arguments) -> int:
+    from autofit.campaign.evidence import read_designations, read_evidence
+    from autofit.campaign.plan import build_plan, plan_markdown, read_pilot, read_results_index, write_plan
+
+    try:
+        campaign = Campaign.load(arguments.campaign)
+    except CampaignException as exception:
+        print(exception, file=sys.stderr)
+        return 1
+    plan = build_plan(
+        campaign,
+        evidence=[read_evidence(source) for source in arguments.evidence or ()],
+        pilot=read_pilot(arguments.pilot) if arguments.pilot else None,
+        pilot_source=arguments.pilot,
+        designations=read_designations(arguments.decisions),
+        idle_cpus=_idle_cpus(arguments.idle_cpus, arguments.capacity_source),
+        results_index=read_results_index(arguments.results_index) if arguments.results_index else None,
+        decisions_source=arguments.decisions,
+    )
+    write_plan(arguments.output or campaign.directory, plan)
+    print(plan_markdown(plan), end="")
+    return 0
+
+
+def _pilot(arguments) -> int:
+    from autofit.campaign.pilot import pilot_indices, write_pilot
+
+    try:
+        campaign = Campaign.load(arguments.campaign)
+    except CampaignException as exception:
+        print(exception, file=sys.stderr)
+        return 1
+    pilot = pilot_indices(
+        campaign,
+        fraction=arguments.fraction,
+        size_field=arguments.size_field,
+        size_path=arguments.size_path,
+        bins=arguments.bins,
+        seed=arguments.seed,
+    )
+    path = write_pilot(arguments.output or campaign.directory, campaign, pilot, arguments.campaign)
+    print(path.read_text())
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="python -m autofit.campaign")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -201,6 +264,27 @@ def main(argv=None) -> int:
     retro.add_argument("--name", default="retro", help="Campaign name in the digest.")
     retro.add_argument("--output", help="Write the digest files here.")
     retro.set_defaults(handler=_retro)
+
+    plan = commands.add_parser("plan", help="Propose resources from evidence (never submits).")
+    plan.add_argument("campaign")
+    plan.add_argument("--evidence", action="append", help="A profiling / inference summary (path or URL).")
+    plan.add_argument("--pilot", help="Pilot outcomes: a tasks.jsonl or the directory holding one.")
+    plan.add_argument("--decisions", help="PyAutoPulse decisions.yaml (designations).")
+    plan.add_argument("--idle-cpus", action="append", help="[PARTITION=]N idle CPUs (repeatable).")
+    plan.add_argument("--capacity-source", help="Where the idle-CPU figure comes from.")
+    plan.add_argument("--results-index", help="A results index, for the disk forecast.")
+    plan.add_argument("--output", help="Write plan.json / plan.md here.")
+    plan.set_defaults(handler=_plan)
+
+    pilot = commands.add_parser("pilot", help="Choose a stratified pilot (never submits).")
+    pilot.add_argument("campaign")
+    pilot.add_argument("--fraction", type=float, default=0.02)
+    pilot.add_argument("--size-field", help="Manifest field holding each object's size.")
+    pilot.add_argument("--size-path", help="Path template whose file size is the object's size.")
+    pilot.add_argument("--bins", type=int, default=5)
+    pilot.add_argument("--seed", type=int, default=0)
+    pilot.add_argument("--output", help="Write pilot.json here.")
+    pilot.set_defaults(handler=_pilot)
 
     arguments = parser.parse_args(argv)
     return arguments.handler(arguments)
