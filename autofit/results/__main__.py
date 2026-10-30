@@ -45,7 +45,8 @@ def command_index(arguments) -> int:
     print(
         f"indexed {counts['scanned']} results in {elapsed:.1f} s: "
         f"{counts['new']} new, {counts['changed']} changed, "
-        f"{counts['unchanged']} unchanged, {counts['removed']} removed "
+        f"{counts['unchanged']} unchanged, {counts['removed']} removed, "
+        f"{counts['unreadable']} unreadable (retried next time) "
         f"(index: {index.index_dir})"
     )
     return 0

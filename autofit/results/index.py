@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple, Union
 
 from autofit.non_linear.status.states import Product, ResultState
-from autofit.results.classify import classify, stat_fingerprint
+from autofit.results.classify import UnreadableResult, classify, stat_fingerprint
 from autofit.results.record import SCHEMA, ResultRecord, record_key
 from autofit.tools.util import open_atomic
 
@@ -187,8 +187,10 @@ class ResultsIndex:
 
         Returns
         -------
-        Counts of ``scanned``, ``new``, ``changed``, ``unchanged`` and ``removed``
-        results.
+        Counts of ``scanned``, ``new``, ``changed``, ``unchanged``, ``removed`` and
+        ``unreadable`` results; an unreadable result (an I/O error, e.g. a transient
+        network-filesystem failure) keeps its previous record, or gets none, and is
+        retried by the next ``update``.
         """
         os.makedirs(self.records_dir, exist_ok=True)
         existing = self.load()
@@ -218,7 +220,11 @@ class ResultsIndex:
                         stale_after_s=self.stale_after_s,
                     )
                 except Exception as exception:
+                    # Unknown, not corrupt: keep what was known and try next time.
                     logger.warning(f"Could not index {output_path}: {exception}")
+                    counts["unreadable"] += 1
+                    if record is not None:
+                        found[key] = record
                     continue
                 counts["new" if record is None else "changed"] += 1
                 found[key] = record_new
@@ -239,7 +245,14 @@ class ResultsIndex:
 
         return {
             name: counts[name]
-            for name in ("scanned", "new", "changed", "unchanged", "removed")
+            for name in (
+                "scanned",
+                "new",
+                "changed",
+                "unchanged",
+                "removed",
+                "unreadable",
+            )
         }
 
     def _mark_superseded(self, records: Iterable[ResultRecord]) -> List[ResultRecord]:

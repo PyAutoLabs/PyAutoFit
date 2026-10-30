@@ -29,7 +29,19 @@ from typing import Dict, Iterable, List, Optional
 from autofit.non_linear.status.states import Product, ResultState
 from autofit.results.record import ResultRecord
 
-ZIP_READ_ERRORS = (zipfile.BadZipFile, EOFError, zlib.error, OSError)
+ZIP_CONTENT_ERRORS = (zipfile.BadZipFile, EOFError, zlib.error)
+"""
+What a damaged zip raises. An ``OSError`` is not among them: reading a healthy zip
+over a network or WSL filesystem can fail transiently (``ENOMEM``, ``EIO``), and such
+a result is not corrupt but unreadable this time (``UnreadableResult``).
+"""
+
+
+class UnreadableResult(OSError):
+    """
+    A result could not be read because of an I/O error that persisted after a retry;
+    its state is unknown, not corrupt.
+    """
 
 RUNNING_STATES = ("running", "pending", "timeout_pending")
 
@@ -228,6 +240,42 @@ def _probe_search_internal(files_path: Path) -> Optional[ResultState]:
     return None
 
 
+def _read_zip(zip_path: Path, verify: bool):
+    """
+    The member names, the small JSON / marker members and the ``.completed`` time of
+    the zip at ``zip_path``; raises one of ``ZIP_CONTENT_ERRORS`` if it is damaged.
+    """
+    with zipfile.ZipFile(zip_path) as f:
+        names = f.namelist()
+        small = {}
+        for name in names:
+            if name.startswith("files/search_internal"):
+                continue
+            if f.getinfo(name).file_size <= 1 << 20 and (
+                name in (".identifier", ".completed") or name.endswith(".json")
+            ):
+                small[name] = f.read(name)
+        completed_at = None
+        if ".completed" in names:
+            if verify and f.testzip() is not None:
+                raise zipfile.BadZipFile("a member fails its CRC check")
+            completed_at = datetime(*f.getinfo(".completed").date_time).isoformat()
+    return names, small, completed_at
+
+
+def _read_zip_with_retry(zip_path: Path, verify: bool, attempts: int = 2):
+    for attempt in range(attempts):
+        try:
+            return _read_zip(zip_path, verify)
+        except ZIP_CONTENT_ERRORS:
+            raise
+        except OSError as error:
+            if attempt == attempts - 1:
+                raise UnreadableResult(
+                    f"{zip_path}: {type(error).__name__}: {error}"
+                ) from error
+
+
 def classify(
     output_path,
     root,
@@ -279,28 +327,13 @@ def classify(
     if record.has_zip:
         record.bytes = zip_path.stat().st_size
         try:
-            with zipfile.ZipFile(zip_path) as f:
-                names = f.namelist()
-                small = {}
-                for name in names:
-                    if name.startswith("files/search_internal"):
-                        continue
-                    info = f.getinfo(name)
-                    if info.file_size <= 1 << 20 and (
-                        name in (".identifier", ".completed")
-                        or name.endswith(".json")
-                    ):
-                        small[name] = f.read(name)
-                if ".completed" in names:
-                    if verify and f.testzip() is not None:
-                        raise zipfile.BadZipFile("a member fails its CRC check")
-                    state = ResultState.COMPLETED
-                    record.completed_at = datetime(
-                        *f.getinfo(".completed").date_time
-                    ).isoformat()
-                    record.completed_at_source = "zip_member"
+            names, small, completed_at = _read_zip_with_retry(zip_path, verify)
+            if completed_at is not None:
+                state = ResultState.COMPLETED
+                record.completed_at = completed_at
+                record.completed_at_source = "zip_member"
             contents = _Contents(names, small.__getitem__)
-        except ZIP_READ_ERRORS as error:
+        except ZIP_CONTENT_ERRORS as error:
             state = ResultState.CORRUPT_ZIP
             record.reason = f"{type(error).__name__}: {error}"
         if state is None and contents is not None and not record.has_dir:

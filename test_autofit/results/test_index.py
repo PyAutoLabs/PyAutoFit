@@ -158,6 +158,7 @@ def test_reindex_only_opens_new_and_changed_results(results_root, monkeypatch):
         "changed": 0,
         "unchanged": 30,
         "removed": 0,
+        "unreadable": 0,
     }
     assert len(opened) == 10
 
@@ -249,3 +250,24 @@ def test_cli_index_status_count(results_root, tmp_path, capsys):
 
     main(["status", str(results_root), "--index-dir", index_dir, "--json"])
     assert json.loads(capsys.readouterr().out)["completed"] == 1
+
+
+def test_io_error_is_unreadable_not_corrupt(results_root, monkeypatch):
+    output_path = write_zip(results_root)
+    index = ResultsIndex(results_root)
+    index.update()
+
+    import sys
+
+    classify_module = sys.modules["autofit.results.classify"]
+
+    def failing(zip_path, verify):
+        raise OSError(12, "Cannot allocate memory")
+
+    monkeypatch.setattr(classify_module, "_read_zip", failing)
+    Path(f"{output_path}.zip").touch()
+    counts = index.update()
+
+    assert counts["unreadable"] == 1
+    # The previous record is kept, not replaced by a corrupt one.
+    assert [r.state for r in index.records()] == ["completed"]
