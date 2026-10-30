@@ -383,7 +383,15 @@ def grade_of(
 def _current_grade(record: EvidenceRecord, designations: Sequence[Dict]) -> str:
     if record.schema != "profiling-summary":
         return "measured-current"
-    if record.decision_id and any(d.get("id") == record.decision_id for d in designations):
+    # The record's decision must be the current (not superseded) designation for the
+    # record's own likelihood, regime and hardware class, and name its setup.
+    designation = designation_for(record.keys, designations) if record.decision_id else None
+    if (
+        designation is not None
+        and designation.get("id") == record.decision_id
+        and record.record_class == "optimal"
+        and designation.get("optimal") == record.keys.get("setup_id")
+    ):
         return "measured-current"
     return "provisional"
 

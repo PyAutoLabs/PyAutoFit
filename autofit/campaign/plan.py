@@ -132,7 +132,28 @@ def pilot_stats(outcomes: List[TaskOutcome], stage: str, source: str) -> Optiona
         "by_index": {
             o.index: o.elapsed_s for o in finished if o.index is not None and o.elapsed_s
         },
+        "limit_by_index": {
+            o.index: o.time_limit_s
+            for o in timeouts
+            if o.index is not None and o.time_limit_s
+        },
     }
+
+
+def _best_group(found):
+    """
+    The matches sharing the best grade of ``found`` (best first), in a deterministic
+    order: by record id.
+    """
+    if not found:
+        return []
+    return sorted((m for m in found if m.grade == found[0].grade), key=lambda m: m.record.id)
+
+
+def _spread(values) -> Optional[Dict]:
+    if len(values) < 2:
+        return None
+    return {"n": len(values), "min": min(values), "max": max(values)}
 
 
 def evidence_stats(
@@ -167,37 +188,59 @@ def evidence_stats(
     else:
         stats["per_call_s"] = unsupported("no profiling runtime record matches the stage keys")
 
-    memory = matches(evidence, keys, "memory_host", designations)
-    if memory and memory[0].record.values:
-        best = memory[0]
-        note(best)
-        value = next(iter(best.record.values.values()))
-        mb = value * 1.048576 if (best.record.unit or "").lower() == "mib" else value
-        stats["host_peak_rss_mb"] = graded(round(mb), best.grade, [best.record.id])
-    elif runtime and runtime[0].record.extra.get("peak_rss_gb"):
-        # A runtime record's own resources block (sacct MaxRSS of the profiling leg).
-        best = runtime[0]
+    # Memory and stage wall time: several records may match (seeds, legs). The plan
+    # takes the largest of those sharing the best grade, deterministically, and keeps
+    # every contributing id and the spread.
+    memory = _best_group(
+        [m for m in matches(evidence, keys, "memory_host", designations) if m.record.values]
+    )
+    fallback = _best_group([m for m in runtime if m.record.extra.get("peak_rss_gb")])
+    if memory:
+        for match in memory:
+            note(match)
+
+        def mb(record):
+            value = next(iter(record.values.values()))
+            return value * 1.048576 if (record.unit or "").lower() == "mib" else value
+
+        values = [mb(m.record) for m in memory]
         stats["host_peak_rss_mb"] = graded(
-            round(best.record.extra["peak_rss_gb"] * 1024), best.grade, [best.record.id],
-            "peak RSS recorded with the runtime measurement",
+            round(max(values)), memory[0].grade, [m.record.id for m in memory],
+            _spread_note(values, "MB"),
+        )
+    elif fallback:
+        # A runtime record's own resources block (sacct MaxRSS of the profiling leg).
+        values = [m.record.extra["peak_rss_gb"] * 1024 for m in fallback]
+        stats["host_peak_rss_mb"] = graded(
+            round(max(values)), fallback[0].grade, [m.record.id for m in fallback],
+            "; ".join(
+                filter(None, ["peak RSS recorded with the runtime measurement", _spread_note(values, "MB")])
+            ),
         )
     else:
         stats["host_peak_rss_mb"] = unsupported("no profiling memory record matches")
 
-    walltime = [
-        m for m in matches(evidence, keys, "stage_walltime", designations) if m.record.values.get("wall_s")
-    ]
+    walltime = _best_group(
+        [m for m in matches(evidence, keys, "stage_walltime", designations) if m.record.values.get("wall_s")]
+    )
     if walltime:
-        best = walltime[0]
-        note(best)
-        values = best.record.values
-        stats["stage_wall_s"] = graded(values["wall_s"], best.grade, [best.record.id])
+        for match in walltime:
+            note(match)
+        chosen = max(walltime, key=lambda m: (m.record.values["wall_s"], m.record.id))
+        ids = [m.record.id for m in walltime]
+        walls = [m.record.values["wall_s"] for m in walltime]
+        values = chosen.record.values
+        stats["stage_wall_s"] = graded(values["wall_s"], chosen.grade, ids, _spread_note(walls, "s"))
+        if values.get("cores"):
+            stats["stage_wall_s"]["cores"] = int(values["cores"])
         stats["likelihood_evals"] = graded(
-            values.get("likelihood_evals"), best.grade, [best.record.id]
+            max((m.record.values.get("likelihood_evals") or 0 for m in walltime)) or None,
+            chosen.grade, ids,
         )
-        stats["implied_s_per_eval"] = graded(
-            values.get("implied_s_per_eval"), best.grade, [best.record.id]
-        )
+        implied = [m.record.values["implied_s_per_eval"] for m in walltime if m.record.values.get("implied_s_per_eval")]
+        stats["implied_s_per_eval"] = graded(max(implied) if implied else None, chosen.grade, ids)
+        if values.get("cores"):
+            stats["implied_s_per_eval"]["cores"] = int(values["cores"])
     else:
         stats["stage_wall_s"] = unsupported("no walltime-validation record matches the stage")
 
@@ -207,7 +250,8 @@ def evidence_stats(
         if evals
         else stats.get("likelihood_evals")
     )
-    cost = stats.get("implied_s_per_eval") or stats["per_call_s"]
+    implied = stats.get("implied_s_per_eval")
+    cost = implied if implied and implied.get("value") is not None else stats["per_call_s"]
     if n_evals and n_evals.get("value") and cost.get("value"):
         stats["scaled_wall_s"] = graded(
             n_evals["value"] * cost["value"],
@@ -215,6 +259,8 @@ def evidence_stats(
             n_evals["sources"] + cost["sources"],
             "likelihood evaluations × cost per evaluation",
         )
+        if cost.get("cores"):
+            stats["scaled_wall_s"]["cores"] = cost["cores"]
     else:
         stats["scaled_wall_s"] = unsupported("needs both a number of evaluations and a cost per evaluation")
 
@@ -226,6 +272,16 @@ def evidence_stats(
     )
     stats["records"] = used
     return stats
+
+
+def _spread_note(values, unit: str) -> Optional[str]:
+    spread = _spread(values)
+    if spread is None:
+        return None
+    return (
+        f"largest of {spread['n']} matching records "
+        f"({spread['min']:.0f}–{spread['max']:.0f} {unit})"
+    )
 
 
 def _size_bins(campaign, stage, pilot, n_bins: int = SIZE_BINS) -> Optional[List[Dict]]:
@@ -250,9 +306,13 @@ def _size_bins(campaign, stage, pilot, n_bins: int = SIZE_BINS) -> Optional[List
 
     for index, size in sizes.items():
         population[bin_of(size)] += 1
+    limits = defaultdict(list)
     for index, wall in pilot["by_index"].items():
         if index in sizes:
             bins[bin_of(sizes[index])].append(wall)
+    for index, limit in pilot.get("limit_by_index", {}).items():
+        if index in sizes:
+            limits[bin_of(sizes[index])].append(limit)
     lows = [ordered[0]] + edges
     highs = edges + [ordered[-1]]
     result = []
@@ -266,6 +326,9 @@ def _size_bins(campaign, stage, pilot, n_bins: int = SIZE_BINS) -> Optional[List
                 "objects": population.get(number, 0),
                 "pilot_tasks": len(walls),
                 "wall_p95_s": p95,
+                # As in ``pilot_stats``: timeouts are kept at their limit, so a p95 at
+                # or above the bin's smallest limit is a lower bound.
+                "censored": bool(p95 and limits.get(number) and p95 >= min(limits[number])),
             }
         )
     return result
@@ -337,13 +400,17 @@ def propose(stage, pilot: Optional[Dict], evidence: Dict, site=None, idle_cpus: 
             note += "; censored: the p95 is at the old time limit, so the real p95 is higher — re-pilot at the new limit"
         proposal["time_s"] = graded(seconds, "estimated", pilot_source, note)
     else:
-        basis = evidence["stage_wall_s"] if evidence["stage_wall_s"]["value"] else evidence["scaled_wall_s"]
+        basis = evidence_wall(evidence, cpus)
         if basis["value"]:
             seconds = _proposed_time(basis["value"], max_time)
             proposal["time_s"] = graded(
                 seconds, worst(basis["grade"], "estimated"), basis["sources"],
-                "one measured stage + margin: no spread is known, so re-pilot",
+                "; ".join(
+                    filter(None, ["measured stage wall + margin: no spread is known, so re-pilot", basis.get("note")])
+                ),
             )
+            if basis.get("limitations"):
+                proposal["time_s"]["limitations"] = basis["limitations"]
         else:
             proposal["time_s"] = graded(request.time_s, "unsupported", [], "the stage's own request")
     if max_time and proposal["time_s"]["value"] and proposal["time_s"]["value"] >= max_time:
@@ -365,23 +432,58 @@ def propose(stage, pilot: Optional[Dict], evidence: Dict, site=None, idle_cpus: 
     return proposal
 
 
+def evidence_wall(evidence: Dict, cpus: int) -> Dict:
+    """
+    The evidence's stage wall time (a measured stage, else evaluations × cost) for a
+    task of ``cpus`` CPUs. A wall time measured on another number of cores is scaled by
+    cores / cpus — perfect scaling, which is optimistic when ``cpus`` is the smaller —
+    graded ``estimated`` and marked with a ``cores_mismatch`` limitation.
+    """
+    basis = evidence["stage_wall_s"] if evidence["stage_wall_s"]["value"] else evidence["scaled_wall_s"]
+    cores = basis.get("cores")
+    if not basis["value"] or not cores or not cpus or cores == cpus:
+        return basis
+    limitation = (
+        f"cores_mismatch: measured at {cores} cores, requested {cpus}; "
+        f"wall scaled by {cores}/{cpus} assuming perfect scaling"
+        + (" (optimistic)" if cpus < cores else "")
+    )
+    return dict(
+        basis,
+        value=basis["value"] * cores / cpus,
+        grade=worst(basis["grade"], "estimated"),
+        note=limitation,
+        limitations=[limitation],
+        measured_wall_s=basis["value"],
+    )
+
+
 def _eta(n_tasks, pilot, evidence, proposal) -> Dict:
-    if pilot and pilot["wall_s"]["p50"]:
-        wall = graded(pilot["wall_s"]["p50"], "estimated", [pilot["source"]])
-    elif evidence["stage_wall_s"]["value"]:
-        wall = evidence["stage_wall_s"]
-    else:
-        wall = evidence["scaled_wall_s"]
     cpus = proposal["cpus"]["value"]
     rerun = (pilot or {}).get("rerun_factor") or 1.0
+    core_s = None
+    if pilot and pilot["wall_s"]["p50"]:
+        wall = graded(pilot["wall_s"]["p50"], "estimated", [pilot["source"]])
+    else:
+        wall = evidence_wall(evidence, cpus)
+        if wall.get("cores") and wall["value"]:
+            # CPU-hours from what was measured (wall × the cores it ran on), not from
+            # a scaled wall time.
+            core_s = wall.get("measured_wall_s", wall["value"]) * wall["cores"]
     if not wall["value"] or not cpus:
         return {"cpu_h": unsupported("no wall time"), "eta_s": unsupported("no wall time")}
-    cpu_h = n_tasks * wall["value"] * cpus * rerun / 3600
     sources = wall["sources"]
+    if core_s is not None:
+        cpu_h = n_tasks * core_s * rerun / 3600
+        how = f"{n_tasks} tasks × measured wall × {wall['cores']} measured cores × rerun factor {rerun:.2f}"
+    else:
+        cpu_h = n_tasks * wall["value"] * cpus * rerun / 3600
+        how = f"{n_tasks} tasks × p50 wall × {cpus} CPUs × rerun factor {rerun:.2f}"
     result = {
-        "cpu_h": graded(round(cpu_h, 1), worst(wall["grade"], "estimated"), sources,
-                        f"{n_tasks} tasks × p50 wall × {cpus} CPUs × rerun factor {rerun:.2f}"),
+        "cpu_h": graded(round(cpu_h, 1), worst(wall["grade"], "estimated"), sources, how),
     }
+    if wall.get("limitations"):
+        result["cpu_h"]["limitations"] = wall["limitations"]
     throttle = proposal["throttle"]
     if throttle["value"]:
         concurrent = throttle["value"] * cpus
@@ -469,16 +571,37 @@ def build_plan(
         proposal = propose(stage, stage_pilot, ev, site=site, idle_cpus=idle_cpus)
         eta = _eta(n_tasks, stage_pilot, ev, proposal)
         bins = _size_bins(campaign, stage, stage_pilot)
+        flags = []
         if bins:
             max_time = _max_time(stage, site)
+            wrapped = []
             for entry in bins:
                 if entry["wall_p95_s"]:
-                    entry["time"] = graded(
+                    time = graded(
                         format_time(_proposed_time(entry["wall_p95_s"], max_time)),
                         "estimated", [stage_pilot["source"]],
+                        "censored: a lower bound — re-pilot at a longer limit" if entry["censored"] else None,
                     )
                 else:
-                    entry["time"] = unsupported("no pilot task in this bin")
+                    time = unsupported("no pilot task in this bin")
+                if entry["censored"]:
+                    flags.append(f"censored wall time in size bin {entry['bin']}")
+                wrapped.append(
+                    {
+                        "measured": graded(
+                            entry, "estimated", [stage_pilot["source"]],
+                            "pilot tasks per size bin; sizes and object counts from the manifest",
+                        ),
+                        "time": time,
+                    }
+                )
+            bins = wrapped
+        if stage_pilot and stage_pilot["wall_censored"]:
+            flags.append("censored wall time: the pilot p95 is at the old time limit")
+        for entry in (proposal["time_s"], eta["cpu_h"]):
+            for limitation in entry.get("limitations") or []:
+                if limitation not in flags:
+                    flags.append(limitation)
         cpu_h = eta["cpu_h"]
         mem = proposal["mem_mb"]["value"]
         energy = {
@@ -502,7 +625,17 @@ def build_plan(
                 "partition": stage.resources.partition,
                 "throttle": stage.resources.throttle,
             },
-            "pilot": {k: v for k, v in (stage_pilot or {}).items() if k != "by_index"} or None,
+            "pilot": graded(
+                {
+                    k: v
+                    for k, v in stage_pilot.items()
+                    if k not in ("by_index", "limit_by_index", "source")
+                },
+                "estimated", [stage_pilot["source"]], "pilot measurements",
+            )
+            if stage_pilot
+            else None,
+            "flags": flags,
             "evidence": {k: v for k, v in ev.items() if k != "records"},
             "proposal": proposal,
             "size_bins": bins,
@@ -627,6 +760,8 @@ def plan_markdown(plan: Dict) -> str:
             f"stage wall {_cell(ev['stage_wall_s'], _hours)}, "
             f"scaled wall {_cell(ev['scaled_wall_s'], _hours)}"
         )
+        for flag in stage.get("flags") or []:
+            lines.append(f"- **flag** {flag}")
         if ev["designation"]:
             lines.append(
                 f"- optimal setup per Pulse decision {ev['designation']['decision']}: "
@@ -638,8 +773,9 @@ def plan_markdown(plan: Dict) -> str:
             lines.append(
                 "- by size: "
                 + "; ".join(
-                    f"{b['size_range'][0]:g}–{b['size_range'][1]:g} ({b['objects']} objects): {_cell(b['time'])}"
+                    f"{m['size_range'][0]:g}–{m['size_range'][1]:g} ({m['objects']} objects): {_cell(b['time'])}"
                     for b in stage["size_bins"]
+                    for m in [b["measured"]["value"]]
                 )
             )
         disk = stage["disk"]

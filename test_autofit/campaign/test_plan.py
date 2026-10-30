@@ -475,8 +475,11 @@ def test_size_bins(repack):
     plan = build_plan(campaign, pilot=outcomes, pilot_source="pilot")
     bins = plan["stages"]["vis_pix"]["size_bins"]
     assert len(bins) == 3
-    assert sum(b["objects"] for b in bins) == 200
-    assert bins[0]["pilot_tasks"] == 40 and bins[0]["time"]["grade"] == "estimated"
+    measured = [b["measured"]["value"] for b in bins]
+    assert all(b["measured"]["grade"] == "estimated" for b in bins)
+    assert sum(m["objects"] for m in measured) == 200
+    assert measured[0]["pilot_tasks"] == 40 and bins[0]["time"]["grade"] == "estimated"
+    assert not measured[0]["censored"]
     assert bins[2]["time"]["grade"] == "unsupported"
 
 
@@ -537,3 +540,186 @@ def test_host_memory_falls_back_to_the_runtime_record(tmp_path):
         "sources": ["lifecycle/euclid-mge-current"],
         "note": "peak RSS recorded with the runtime measurement",
     }
+
+
+# --- review findings -------------------------------------------------------------
+
+DELAUNAY_KEYS = {
+    "dataset_type": "imaging",
+    "variant": "delaunay",
+    "instrument": "hst",
+    "setup_id": "numba_cpu_sparse_fp64",
+    "host_class": "hpc_ral_cpu",
+    "stage": "mass_total[1]",
+}
+
+
+def _walltime_seed(seed, wall, evals, cores=8):
+    return {
+        "id": f"imaging/delaunay/hst/default/numba_cpu_sparse_fp64/hpc_ral_cpu/nautilus:mass_total[1]/seed_{seed}",
+        "likelihood": {"dataset_type": "imaging", "variant": "delaunay"},
+        "instrument": "hst",
+        "setup_id": "numba_cpu_sparse_fp64",
+        "host_class": "hpc_ral_cpu",
+        "model_variant": "default",
+        "stage": "mass_total[1]",
+        "wall_s": wall,
+        "likelihood_evals": evals,
+        "implied_s_per_eval": wall / evals,
+        "cores": cores,
+    }
+
+
+@pytest.fixture(name="seeds")
+def make_seeds(tmp_path):
+    document = {
+        "schema": "walltime-validation",
+        "version": 1,
+        # File order puts the faster seed first: the plan must not depend on it.
+        "records": [_walltime_seed(2, 4564.0, 20000), _walltime_seed(1, 8648.0, 38660)],
+    }
+    return [read_evidence(_write(tmp_path, "w.json", document))]
+
+
+def _one_stage_campaign(tmp_path, ral, cpus):
+    root = tmp_path / "one"
+    text = REPACK_CAMPAIGN.split("  vis_pix:")[0].replace(
+        "resources: {{cpus: 8, mem_mb: 65536", f"resources: {{{{cpus: {cpus}, mem_mb: 8192"
+    )
+    write_campaign(root, text, n=10)
+    campaign = Campaign.load(root / "campaign.yaml", site=ral)
+    campaign.stages["vis_lp"].evidence = {"keys": DELAUNAY_KEYS}
+    return campaign
+
+
+def test_review_1_cores_mismatch_scales_wall_and_cpu_hours(tmp_path, ral, seeds):
+    campaign = _one_stage_campaign(tmp_path, ral, cpus=1)
+    plan = build_plan(campaign, evidence=seeds)
+    stage = plan["stages"]["vis_lp"]
+    time = stage["proposal"]["time_s"]
+    # 8648 s measured at 8 cores, requested 1: scaled ×8 (perfect scaling), + 25 %.
+    assert time["value"] == -(-8648 * 8 * 1.25 // 900) * 900
+    assert time["grade"] == "estimated"
+    assert time["limitations"] == [
+        "cores_mismatch: measured at 8 cores, requested 1; wall scaled by 8/1 assuming perfect scaling (optimistic)"
+    ]
+    # CPU-hours from measured core-seconds: 10 × 8648 s × 8 cores.
+    assert stage["eta"]["cpu_h"]["value"] == round(10 * 8648 * 8 / 3600, 1)
+    assert any(f.startswith("cores_mismatch") for f in stage["flags"])
+    assert "**flag** cores_mismatch: measured at 8 cores, requested 1" in plan_markdown(plan)
+
+    same = build_plan(_one_stage_campaign(tmp_path / "b", ral, cpus=8), evidence=seeds)
+    assert "limitations" not in same["stages"]["vis_lp"]["proposal"]["time_s"]
+    assert same["stages"]["vis_lp"]["flags"] == []
+
+
+def test_review_2_largest_of_the_best_grade_with_every_id_and_spread(seeds):
+    from autofit.campaign.plan import evidence_stats
+
+    stats = evidence_stats(DELAUNAY_KEYS, seeds)
+    wall = stats["stage_wall_s"]
+    assert wall["value"] == 8648.0
+    assert wall["grade"] == "measured-current"
+    assert sorted(wall["sources"]) == sorted(r["id"] for r in [_walltime_seed(1, 1, 1), _walltime_seed(2, 1, 1)])
+    assert wall["note"] == "largest of 2 matching records (4564–8648 s)"
+    assert stats["likelihood_evals"]["value"] == 38660
+    # Same answer whatever the file order.
+    seeds[0].records.reverse()
+    assert evidence_stats(DELAUNAY_KEYS, seeds)["stage_wall_s"] == wall
+
+
+def test_review_3_cost_falls_back_to_per_call_when_implied_is_missing(tmp_path):
+    from autofit.campaign.plan import evidence_stats
+
+    walltime = {"schema": "walltime-validation", "version": 1, "records": [
+        dict(WALLTIME["records"][0], instrument="euclid", implied_s_per_eval=None),
+    ]}
+    evidence = [
+        read_evidence(_write(tmp_path, "p.json", PROFILING)),
+        read_evidence(_write(tmp_path, "w.json", walltime)),
+    ]
+    stats = evidence_stats(dict(KEYS, stage="source_lp[1]"), evidence)
+    assert stats["implied_s_per_eval"]["value"] is None
+    # 40000 evaluations × the profiling per-call cost (0.05 s).
+    assert stats["scaled_wall_s"]["value"] == pytest.approx(40000 * 0.05)
+
+
+def test_review_4_every_number_in_plan_json_is_graded(repack, evidence, tmp_path):
+    campaign, pilot_dir = repack
+    campaign.stages["vis_lp"].evidence = {"keys": KEYS}
+    campaign.stages["vis_pix"].evidence = {"size_field": "pixels"}
+    outcomes = read_pilot(pilot_dir)
+    for outcome in outcomes:
+        outcome.index = int(outcome.key.split("_")[1])
+    plan = build_plan(
+        campaign, evidence=evidence, pilot=outcomes, pilot_source="pilot",
+        idle_cpus={"*": {"value": 100, "grade": "estimated", "sources": ["x"]}},
+    )
+    write_plan(tmp_path / "out", plan)
+    document = json.loads((tmp_path / "out" / "plan.json").read_text())
+
+    bare = []
+
+    def walk(node, path, inside):
+        if isinstance(node, dict):
+            inside = inside or ("grade" in node and "value" in node)
+            for key, value in node.items():
+                walk(value, f"{path}.{key}", inside)
+        elif isinstance(node, list):
+            for number, value in enumerate(node):
+                walk(value, f"{path}[{number}]", inside)
+        elif isinstance(node, (int, float)) and not isinstance(node, bool) and not inside:
+            bare.append(path)
+
+    for name, stage in document["stages"].items():
+        # The stage's own request is the campaign file's declaration, not evidence.
+        walk({k: v for k, v in stage.items() if k != "request"}, f"stages.{name}", False)
+    walk(document["totals"], "totals", False)
+    assert bare == []
+
+
+def test_review_4_censored_size_bin(repack):
+    from autofit.campaign.digest import TaskOutcome
+
+    campaign, _ = repack
+    campaign.stages["sed"].evidence = {"size_field": "pixels"}
+    outcomes = [
+        TaskOutcome(stage="sed", key=f"1_{i}", index=i, state="completed", elapsed_s=600, cpus=8,
+                    max_rss_mb=3000, total_cpu_s=600 * 8 * 0.7, cpu_s_all_attempts=600 * 8)
+        for i in range(5)
+    ] + [
+        TaskOutcome(stage="sed", key=f"1_{i}", index=i, state="timeout", elapsed_s=10800,
+                    time_limit_s=10800, cpus=8, cpu_s_all_attempts=10800 * 8)
+        for i in range(5, 10)
+    ]
+    plan = build_plan(campaign, pilot=outcomes, pilot_source="pilot")
+    first = plan["stages"]["sed"]["size_bins"][0]
+    assert first["measured"]["value"]["censored"]
+    assert "censored" in first["time"]["note"]
+    assert "censored wall time in size bin 0" in plan["stages"]["sed"]["flags"]
+
+
+def test_designation_must_cover_the_record_and_be_current(tmp_path, evidence):
+    text = DESIGNATIONS + """
+- id: imaging-mge-standard-cpu-v2
+  kind: designation
+  likelihood: imaging/mge
+  regime: standard
+  hardware_class: cpu_many_core
+  optimal: jax_cpu_dense_fp64
+  secondary: []
+  evidence: [lifecycle/euclid-mge-current]
+  rule: one sentence
+  supersedes: imaging-mge-standard-cpu
+"""
+    designations = read_designations(_write_text(tmp_path, "decisions.yaml", text))
+    record = evidence[0].records[0]
+    record.record_class = "optimal"
+    # Citing the superseded decision is not enough.
+    record.decision_id = "imaging-mge-standard-cpu"
+    assert grade_of(record, KEYS, designations).grade == "provisional"
+    record.decision_id = "imaging-mge-standard-cpu-v2"
+    assert grade_of(record, KEYS, designations).grade == "measured-current"
+    # A designation for another hardware class does not cover this record.
+    record.keys["host_class"] = "hpc_a100"
+    assert grade_of(record, dict(KEYS, host_class="hpc_a100"), designations).grade == "provisional"
