@@ -12,9 +12,11 @@ Campaigns: run many fits on a scheduler from one declaration (hpc-campaign phase
 - ``retro``: the digest of a finished campaign from a ``sacct`` dump alone;
 - ``evidence``: profiling / inference summaries, read and graded per stage;
 - ``plan``: proposed resources, wall time, ETA and disk, every number graded;
-- ``pilot``: a stratified subset of the manifest to measure first.
+- ``pilot``: a stratified subset of the manifest to measure first;
+- ``carbon``: the energy and carbon estimate (Green Algorithms; four cases);
+- ``report``: the end-of-campaign report, with a paragraph for a paper.
 
-Command line: ``python -m autofit.campaign {validate,submit,status,resubmit,retro,plan,pilot}``;
+Command line: ``python -m autofit.campaign {validate,submit,status,resubmit,retro,plan,pilot,carbon,report}``;
 in Python, ``autofit.campaign.submit.submit(campaign, scheduler)`` and
 ``autofit.campaign.retro.retro(dump, ...)``.
 

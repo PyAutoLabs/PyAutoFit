@@ -28,6 +28,15 @@ pilot <campaign.yaml> [--fraction F] [--size-field NAME | --size-path TEMPLATE] 
       [--seed S] [--output DIR]
     Write ``pilot.json``: a stratified subset of the manifest to measure first. Nothing
     is submitted.
+carbon SOURCE [--site NAME] [--objects N] [--ci-basis B] [--pue ...] [--tdp ...] [--ci ...]
+       [--neso [--neso-region ID]] [--begin-hint HOURS]
+    The energy and carbon estimate (Green Algorithms) of a digest folder or
+    ``campaign.yaml``. ``--neso`` fetches the grid's recorded intensity for the
+    campaign's period (network, cached); ``--begin-hint`` suggests a start time for a
+    short, deferrable array from the 48 h forecast (network). Offline otherwise.
+report SOURCE [--site NAME] [--objects N] [--results-index DIR] [--output DIR] [carbon options]
+    Write ``report.md`` + ``report.json``: compute, energy and carbon, failure census,
+    stage tables, results counts and a paragraph for a paper.
 """
 import argparse
 import json
@@ -227,6 +236,100 @@ def _pilot(arguments) -> int:
     return 0
 
 
+def _carbon_inputs(arguments):
+    """
+    The digest folder, site and carbon inputs a ``carbon`` / ``report`` call names.
+    """
+    from pathlib import Path
+
+    from autofit.campaign.carbon import CarbonInputs, apply_neso, neso_intensity, period_of
+    from autofit.campaign.digest import read_outcomes
+
+    def bounds(text):
+        if text is None:
+            return None
+        values = [float(v) for v in text.split(",")]
+        return values[0] if len(values) == 1 else tuple(values)
+
+    source = Path(arguments.source)
+    site = None
+    if source.suffix in (".yaml", ".yml"):
+        campaign = Campaign.load(source)
+        directory = campaign.directory
+        site = campaign.site if campaign.site_name else None
+    else:
+        directory = source
+    if arguments.site:
+        from autonerves.site_config import load_site, site_path
+
+        site = load_site(site_path(arguments.site))
+    inputs = CarbonInputs.from_site(
+        site,
+        ci_basis=arguments.ci_basis,
+        pue=bounds(arguments.pue),
+        tdp_w_per_cpu=bounds(arguments.tdp),
+        ci=bounds(arguments.ci),
+    )
+    if arguments.neso:
+        period = period_of(read_outcomes(Path(directory) / "tasks.jsonl"))
+        if period is None:
+            raise CampaignException("No task start/end times: cannot fetch NESO intensity.")
+        inputs = apply_neso(inputs, neso_intensity(*period, region_id=arguments.neso_region))
+    return directory, site, inputs
+
+
+def _carbon(arguments) -> int:
+    from pathlib import Path
+
+    from autofit.campaign.carbon import begin_hint, estimate, neso_forecast
+    from autofit.campaign.digest import read_outcomes
+
+    if arguments.begin_hint is not None:
+        hint = begin_hint(neso_forecast(arguments.neso_region), arguments.begin_hint * 3600)
+        print(json.dumps(hint, indent=1))
+        return 0
+    try:
+        directory, _, inputs = _carbon_inputs(arguments)
+    except CampaignException as exception:
+        print(exception, file=sys.stderr)
+        return 1
+    result = estimate(read_outcomes(Path(directory) / "tasks.jsonl"), inputs, objects=arguments.objects)
+    print(json.dumps(result, indent=1, default=str))
+    return 1 if "error" in result else 0
+
+
+def _report(arguments) -> int:
+    from autofit.campaign.report import build_report, report_markdown, write_report
+
+    try:
+        directory, site, inputs = _carbon_inputs(arguments)
+    except CampaignException as exception:
+        print(exception, file=sys.stderr)
+        return 1
+    report = build_report(
+        directory,
+        site=site,
+        inputs=inputs,
+        objects=arguments.objects,
+        results_index=arguments.results_index,
+    )
+    write_report(directory, report, output=arguments.output)
+    print(report_markdown(report), end="")
+    return 0
+
+
+def _add_carbon_options(command):
+    command.add_argument("source", nargs="?", help="A digest folder or campaign.yaml.")
+    command.add_argument("--site", help="Site layer (autonerves site file).")
+    command.add_argument("--objects", type=int, help="Objects analysed, for per-object values.")
+    command.add_argument("--ci-basis", help="carbon_intensity basis to use centrally.")
+    command.add_argument("--pue", help="PUE: value, low,high or low,central,high.")
+    command.add_argument("--tdp", help="W per scheduler CPU: value, low,high or low,central,high.")
+    command.add_argument("--ci", help="gCO2e/kWh: value, low,high or low,central,high.")
+    command.add_argument("--neso", action="store_true", help="Fetch the period's grid intensity (network).")
+    command.add_argument("--neso-region", type=int, help="NESO region id (12: South England).")
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="python -m autofit.campaign")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -285,6 +388,16 @@ def main(argv=None) -> int:
     pilot.add_argument("--seed", type=int, default=0)
     pilot.add_argument("--output", help="Write pilot.json here.")
     pilot.set_defaults(handler=_pilot)
+    carbon = commands.add_parser("carbon", help="Energy and carbon estimate of a campaign.")
+    _add_carbon_options(carbon)
+    carbon.add_argument("--begin-hint", type=float, help="Hours of a deferrable job (network).")
+    carbon.set_defaults(handler=_carbon)
+
+    report = commands.add_parser("report", help="End-of-campaign report.")
+    _add_carbon_options(report)
+    report.add_argument("--results-index", help="A results index folder (autofit.results).")
+    report.add_argument("--output", help="Write report.md / report.json here.")
+    report.set_defaults(handler=_report)
 
     arguments = parser.parse_args(argv)
     return arguments.handler(arguments)
