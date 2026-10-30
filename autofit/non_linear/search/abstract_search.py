@@ -44,7 +44,11 @@ from autofit.non_linear.search import capabilities as cap
 from autofit.non_linear.search.execution import SearchExecutionMixin, _SearchMeta
 from autofit.non_linear.search.internal_state import SearchInternalStateMixin
 from autofit.non_linear.search.updates import SearchUpdatesMixin
-from autofit.non_linear.status import status_notify, status_recorded
+from autofit.non_linear.status import (
+    status_notify,
+    status_recorded,
+    write_dataset_identity,
+)
 from autofit.non_linear.search.test_mode_bypass import TestModeBypass, TestModeMixin
 from autofit.non_linear.test_mode import test_mode_level, skip_fit_output
 
@@ -405,6 +409,7 @@ class NonLinearSearch(
             self.timer.start()
 
         status_notify(self, "start")
+        write_dataset_identity(self, analysis)
 
         mode = test_mode_level()
         if mode >= 2:

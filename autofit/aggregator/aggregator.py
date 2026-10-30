@@ -596,6 +596,61 @@ class Aggregator:
             errors=self.errors,
         )
 
+    def latest_per(
+        self,
+        key: Tuple[str, ...] = ("path_prefix", "unique_tag", "name"),
+        by: str = "completed_at",
+    ) -> "Aggregator":
+        """
+        Keep, for each value of ``key``, only the search output with the greatest
+        ``by``: the latest of several fits of the same search to the same object
+        (sibling hashes, e.g. a rerun after a model or search setting changed).
+
+        ``completed_at`` comes from the status record or the ``.completed`` member of
+        the result's zip, never the zip's modification time, which copying or
+        re-zipping resets. Outputs with no ``by`` value lose to any that have one;
+        remaining ties go to the greater path, so the choice is the same on every
+        machine.
+
+        Parameters
+        ----------
+        key
+            Attributes of a search output that together name one fit of one object.
+            The default suits both layouts in use: the object in ``path_prefix``
+            (``unique_tag`` shared) or in ``unique_tag`` (``path_prefix`` shared).
+        by
+            The attribute that orders the outputs within a key.
+        """
+
+        def value_of(search_output, attribute):
+            value = getattr(search_output, attribute, None)
+            return None if value is None else str(value)
+
+        latest = {}
+        for search_output in self.search_outputs:
+            group = tuple(value_of(search_output, k) for k in key)
+            order = (
+                value_of(search_output, by) is not None,
+                value_of(search_output, by) or "",
+                str(search_output.directory),
+            )
+            if group not in latest or order > latest[group][0]:
+                latest[group] = (order, search_output)
+
+        search_outputs = sorted(
+            (search_output for _, search_output in latest.values()),
+            key=lambda output: str(output.directory),
+        )
+        logger.info(
+            f"latest_per kept {len(search_outputs)} of {len(self.search_outputs)} "
+            f"search outputs."
+        )
+        return Aggregator(
+            search_outputs=search_outputs,
+            grid_search_outputs=self.grid_search_outputs,
+            errors=self.errors,
+        )
+
     def values(self, name: str, parser=lambda o: o) -> Iterator:
         """
         Get values from outputs with a given name.

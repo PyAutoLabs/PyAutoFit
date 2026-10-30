@@ -279,6 +279,19 @@ class Analysis(ABC):
     def save_attributes(self, paths: AbstractPaths):
         pass
 
+    def dataset_identity(self) -> Optional[Dict]:
+        """
+        What this analysis fits, for the fit's ``files/dataset_identity.json``
+        (``autofit.non_linear.status.identity``).
+
+        Override to return a dict with any of ``object_id`` (a stable name for the
+        object, e.g. a catalogue id), ``external_ids`` (a dict of other ids),
+        ``inputs`` (a dict of name to the path of each input file, which are hashed)
+        and ``centre`` (a sequence of numbers, e.g. a cutout centre). The default,
+        ``None``, records only the search's ``unique_tag`` as the ``object_id``.
+        """
+        return None
+
     def save_results(self, paths: AbstractPaths, result: Result):
         pass
 

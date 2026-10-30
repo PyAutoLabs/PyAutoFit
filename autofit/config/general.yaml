@@ -13,6 +13,8 @@ inversion:
   check_reconstruction: true        # If True, the inversion's reconstruction is checked to ensure the solution of a meshs's mapper is not an invalid solution where the values are all the same.
   reconstruction_vmax_factor: 0.5   # Plots of an Inversion's reconstruction use the reconstructed data's bright value multiplied by this factor.
 output:
+  dataset_identity: true            # If True, every fit writes files/dataset_identity.json at start: its object id, the paths of its inputs (from Analysis.dataset_identity) and, with dataset_identity_sha256, their SHA256, so the results index can find duplicate and wrong-input fits.
+  dataset_identity_sha256: true     # If True, dataset_identity.json records the SHA256 of each input file (reads every input once at fit start). If False, only paths and sizes are recorded.
   force_pickle_overwrite: false     # If True pickle files output by a search (e.g. samples.pickle) are recreated when a new model-fit is performed.
   force_visualize_overwrite: false  # If True, visualization images output by a search (e.g. subplots of the fit) are recreated when a new model-fit is performed.
   info_whitespace_length: 80        # Length of whitespace between the parameter names and values in the model.info / result.info
