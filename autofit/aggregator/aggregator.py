@@ -475,6 +475,66 @@ class Aggregator:
             errors=errors,
         )
 
+    @classmethod
+    def from_index(
+        cls,
+        roots: Union[str, os.PathLike, List[Union[str, os.PathLike]]],
+        index_dir: Optional[Union[str, os.PathLike]] = None,
+        states: Tuple[str, ...] = ("completed",),
+        reference: Optional[dict] = None,
+        update: bool = True,
+    ) -> "Aggregator":
+        """
+        Aggregate the results a results index (``autofit.results.ResultsIndex``) lists,
+        reading zipped results in place: nothing is extracted to disk.
+
+        Parameters
+        ----------
+        roots
+            The directory (or directories) holding the results.
+        index_dir
+            Where the index is kept (default ``<root>/.autofit_index``; required with
+            several roots or a read-only tree).
+        states
+            The result states to include. The default, ``("completed",)``, leaves out
+            superseded results (an older sibling of a newer completed fit); add
+            ``"superseded"`` to keep them.
+        reference
+            A dictionary mapping paths to types to be used when loading models from disk.
+        update
+            Bring the index up to date first (only new or changed results are opened).
+            ``False`` uses the index as it stands.
+        """
+        from autofit.results import ResultsIndex
+
+        index = ResultsIndex(roots, index_dir=index_dir)
+        if update:
+            index.update()
+
+        states = {str(state) for state in states}
+        search_outputs = []
+        for record in index.records():
+            if record.state not in states:
+                continue
+            output_path = Path(record.output_path)
+            if record.has_zip and record.state != "corrupt_zip":
+                search_outputs.append(
+                    SearchOutput.from_zip(f"{output_path}.zip", reference=reference)
+                )
+            elif record.has_dir:
+                search_outputs.append(SearchOutput(output_path, reference=reference))
+
+        logger.info(
+            f"Aggregator.from_index: {len(search_outputs)} search outputs in states "
+            f"{sorted(states)}."
+        )
+        if not search_outputs:
+            logger.warning(
+                f"Aggregator.from_index found no search outputs in states "
+                f"{sorted(states)} (index: {index.index_dir}, counts: {index.counts()})."
+            )
+        return cls(search_outputs, [])
+
     def add_directory(
         self,
         directory: Union[str, Path],

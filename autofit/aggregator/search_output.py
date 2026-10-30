@@ -24,6 +24,7 @@ from autofit.aggregator.file_output import (
     JSONOutput,
     FileOutput,
 )
+from autofit.aggregator.zip_member import ZipMember
 from autofit.mapper.identifier import Identifier
 from autofit.non_linear.samples.sample import samples_from_iterator
 from autonerves.dictable import from_dict
@@ -52,6 +53,13 @@ def _create_file_handle(*args, **kwargs):
 
 
 dill._dill._create_filehandle = _create_file_handle
+
+_KINDS = (".json", ".pickle", ".csv", ".fits")
+"""
+The file kinds ``value`` loads, in the order a bare name resolves them.
+"""
+
+_warned_ambiguous = set()
 
 
 class TemporaryExtraction:
@@ -117,7 +125,7 @@ class AbstractSearchOutput(ABC):
         """
         When the search completed (ISO 8601), or ``None`` if it has not.
 
-        Taken from the status record beside the output (``<directory>.status.json``)
+        Taken from the status record beside the output (``<output_path>.status.json``)
         when it says ``completed``, else from the ``.completed`` member of the zip
         beside the output, else from the ``.completed`` file's modification time. The
         zip's own modification time is never used: copying or re-zipping resets it.
@@ -125,21 +133,28 @@ class AbstractSearchOutput(ABC):
         ``.completed`` time is the extraction time; index the tree
         (``python -m autofit.results index``) to compare such outputs.
         """
-        directory = Path(self.directory)
+        if isinstance(self.directory, ZipMember):
+            zip_path = self.directory.zip_path
+            output_path = zip_path.with_name(zip_path.name[: -len(".zip")])
+        else:
+            output_path = Path(self.directory)
+            zip_path = Path(f"{output_path}.zip")
         try:
-            with open(f"{directory}.status.json") as f:
+            with open(f"{output_path}.status.json") as f:
                 status = json.load(f)
             if status.get("state") == "completed" and status.get("updated"):
                 return status["updated"]
         except (OSError, ValueError, AttributeError):
             pass
         try:
-            with zipfile.ZipFile(f"{directory}.zip") as f:
+            with zipfile.ZipFile(zip_path) as f:
                 return datetime(*f.getinfo(".completed").date_time).isoformat()
         except (OSError, KeyError, zipfile.BadZipFile):
             pass
+        if isinstance(self.directory, ZipMember):
+            return None
         try:
-            mtime = (directory / ".completed").stat().st_mtime
+            mtime = (output_path / ".completed").stat().st_mtime
         except OSError:
             return None
         return datetime.fromtimestamp(mtime, timezone.utc).isoformat(
@@ -241,9 +256,24 @@ class AbstractSearchOutput(ABC):
         -------
         The loaded image
         """
-        return Image.open(self.directory / "image" / f"{name}.png")
+        return Image.open((self.directory / "image" / f"{name}.png").open("rb"))
 
-    def value(self, name: str):
+    def open_member(self, path: str, mode: str = "rb"):
+        """
+        Open a file of this output by its path relative to the output (e.g.
+        ``"files/tracer.fits"`` or ``"image/fit.png"``), whether the output is a folder
+        or a zip read in place.
+
+        Parameters
+        ----------
+        path
+            The file's path inside the output, with ``/`` separators.
+        mode
+            ``"rb"`` (the default) or ``"r"``.
+        """
+        return (self.directory / path).open(mode)
+
+    def value(self, name: str, kind: Optional[str] = None):
         """
         Load the value of some object in the files directory for the search.
 
@@ -258,19 +288,47 @@ class AbstractSearchOutput(ABC):
         ----------
         name
             The name of the file to load without a file suffix.
+        kind
+            Which file to load when several share ``name``: ``"json"``, ``"pickle"``,
+            ``"csv"`` or ``"fits"``. Without it a JSON file wins, then pickle, csv and
+            fits, and a warning names the files ``name`` could mean (e.g.
+            ``tracer.json`` and ``tracer.fits``), so pass ``kind`` to be explicit.
 
         Returns
         -------
         The loaded object
         """
-        for item in self.jsons:
-            if item.name == name:
-                return item.value_using_reference(self._reference)
-        for item in self.pickles + self.arrays + self.fits:
-            if item.name == name:
-                return item.value
+        if kind is not None:
+            suffix = f".{kind.lstrip('.')}"
+            if suffix not in _KINDS:
+                raise ValueError(
+                    f"kind must be one of {sorted(k[1:] for k in _KINDS)}, not {kind!r}."
+                )
+            for item in self._outputs_by_suffix[suffix]:
+                if item.name == name:
+                    if suffix == ".json":
+                        return item.value_using_reference(self._reference)
+                    return item.value
+            return None
 
-        return None
+        matches = [
+            item
+            for suffix in _KINDS
+            for item in self._outputs_by_suffix[suffix]
+            if item.name == name
+        ]
+        if not matches:
+            return None
+        if len(matches) > 1 and name not in _warned_ambiguous:
+            _warned_ambiguous.add(name)
+            logging.warning(
+                f"'{name}' names several files ({', '.join(m.path.name for m in matches)}); "
+                f"the {matches[0].path.suffix} file is loaded. Pass kind= to choose."
+            )
+        item = matches[0]
+        if isinstance(item, JSONOutput):
+            return item.value_using_reference(self._reference)
+        return item.value
 
 
 class SearchOutput(AbstractSearchOutput, fit_interface.Fit):
@@ -307,6 +365,14 @@ class SearchOutput(AbstractSearchOutput, fit_interface.Fit):
         self.__latent_summary = None
 
         self.directory = directory
+
+    @classmethod
+    def from_zip(cls, zip_path, reference: Optional[dict] = None) -> "SearchOutput":
+        """
+        The output archived in the zip at ``zip_path``, read in place: every file is
+        read straight out of the zip when it is needed and nothing is extracted.
+        """
+        return cls(ZipMember(zip_path), reference=reference)
 
     @property
     def samples_summary(self) -> SamplesSummary:
@@ -421,7 +487,7 @@ class SearchOutput(AbstractSearchOutput, fit_interface.Fit):
         try:
             info_json = JSONOutput("info", directory / "samples_info.json").dict
 
-            with open(directory / "samples.csv") as f:
+            with (directory / "samples.csv").open() as f:
                 sample_list = samples_from_iterator(csv.reader(f))
 
             if model is None:
@@ -469,14 +535,14 @@ class SearchOutput(AbstractSearchOutput, fit_interface.Fit):
         """
         A list of child analyses loaded from the analyses directory
         """
-        return list(map(SearchOutput, Path(self.directory).glob("analyses/*")))
+        return list(map(SearchOutput, self.directory.glob("analyses/*")))
 
     @property
     def model_results(self) -> str:
         """
         Reads the model.results file
         """
-        with open(self.directory / "model.results") as f:
+        with (self.directory / "model.results").open() as f:
             return f.read()
 
     @property
@@ -484,7 +550,7 @@ class SearchOutput(AbstractSearchOutput, fit_interface.Fit):
         """
         A pickled mask object
         """
-        with open(self.files_path / "mask.pickle", "rb") as f:
+        with (self.files_path / "mask.pickle").open("rb") as f:
             return dill.load(f)
 
     @property
@@ -503,11 +569,11 @@ class SearchOutput(AbstractSearchOutput, fit_interface.Fit):
         """
         if self.__search is None:
             try:
-                with open(self.files_path / "search.json") as f:
+                with (self.files_path / "search.json").open() as f:
                     self.__search = from_dict(json.load(f))
             except (FileNotFoundError, ModuleNotFoundError):
                 try:
-                    with open(self.files_path / "search.pickle", "rb") as f:
+                    with (self.files_path / "search.pickle").open("rb") as f:
                         self.__search = pickle.load(f)
                 except (FileNotFoundError, ModuleNotFoundError):
                     logging.warning("Could not load search")
@@ -548,7 +614,7 @@ class SearchOutput(AbstractSearchOutput, fit_interface.Fit):
         """
         search_path = self.directory / "files" / "search.json"
         try:
-            with open(search_path) as f:
+            with search_path.open() as f:
                 class_path = json.load(f)["class_path"]
         except (FileNotFoundError, KeyError, json.JSONDecodeError):
             pass
