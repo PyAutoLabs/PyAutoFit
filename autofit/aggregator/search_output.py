@@ -4,7 +4,9 @@ import logging
 import pickle
 import tempfile
 import weakref
+import zipfile
 from abc import ABC
+from datetime import datetime, timezone
 from hashlib import md5
 from pathlib import Path
 from shutil import rmtree
@@ -109,6 +111,40 @@ class AbstractSearchOutput(ABC):
         Whether the search has completed
         """
         return (self.directory / ".completed").exists()
+
+    @cached_property
+    def completed_at(self) -> Optional[str]:
+        """
+        When the search completed (ISO 8601), or ``None`` if it has not.
+
+        Taken from the status record beside the output (``<directory>.status.json``)
+        when it says ``completed``, else from the ``.completed`` member of the zip
+        beside the output, else from the ``.completed`` file's modification time. The
+        zip's own modification time is never used: copying or re-zipping resets it.
+        An output extracted to a temporary directory has neither sibling, so its
+        ``.completed`` time is the extraction time; index the tree
+        (``python -m autofit.results index``) to compare such outputs.
+        """
+        directory = Path(self.directory)
+        try:
+            with open(f"{directory}.status.json") as f:
+                status = json.load(f)
+            if status.get("state") == "completed" and status.get("updated"):
+                return status["updated"]
+        except (OSError, ValueError, AttributeError):
+            pass
+        try:
+            with zipfile.ZipFile(f"{directory}.zip") as f:
+                return datetime(*f.getinfo(".completed").date_time).isoformat()
+        except (OSError, KeyError, zipfile.BadZipFile):
+            pass
+        try:
+            mtime = (directory / ".completed").stat().st_mtime
+        except OSError:
+            return None
+        return datetime.fromtimestamp(mtime, timezone.utc).isoformat(
+            timespec="seconds"
+        )
 
     @property
     def parent_identifier(self) -> Optional[str]:

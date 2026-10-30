@@ -76,6 +76,39 @@ class FailureClass(str, Enum):
         return self.value
 
 
+class ResultState(str, Enum):
+    """
+    The state of one result on disk, as the results index (``autofit.results``)
+    classifies it after the fact. Where a ``RunState`` is what a running fit says about
+    itself, a ``ResultState`` is what its output says once read back: it is assigned
+    from the status record when one exists and from the output folder or zip otherwise.
+    """
+
+    COMPLETED = "completed"
+    """The output (folder or zip) carries ``.completed`` and reads back cleanly."""
+    RUNNING = "running"
+    """The status record says the fit is running and was written recently."""
+    INTERRUPTED_VALID_CKPT = "interrupted_valid_ckpt"
+    """The fit stopped before completing and left a checkpoint it can resume from."""
+    CORRUPT_CKPT = "corrupt_ckpt"
+    """The fit stopped before completing and its checkpoint cannot be read (or was
+    quarantined to ``search_internal.failed_<utc>/`` with nothing written since)."""
+    CORRUPT_ZIP = "corrupt_zip"
+    """The output zip cannot be read, or fails its CRC check."""
+    FAILED = "failed"
+    """The status record says a Python exception ended the fit."""
+    SUPERSEDED = "superseded"
+    """A completed result that a newer completed result of the same key replaces
+    (``Aggregator.latest_per``)."""
+    NEVER_STARTED = "never_started"
+    """An output folder with no checkpoint and no status record, so a rerun starts the
+    search from scratch; with a declared grid (results-library phase 2), also an
+    expected result with no output at all."""
+
+    def __str__(self):
+        return self.value
+
+
 class Product(str, Enum):
     """
     The files a fit's status record names, relative to its ``output_path``.

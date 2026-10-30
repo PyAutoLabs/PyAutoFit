@@ -15,7 +15,8 @@ a dict of whichever of ``n_like``, ``n_like_max``, ``n_live``, ``log_z``,
 ``None``. It is called at each full update (``FitContext.update``); the record adds
 ``eta_s`` from the fraction's rate.
 
-``states`` is the single vocabulary of run states, failure classes and product names.
+``states`` is the single vocabulary of run states, result states, failure classes and
+product names. ``identity`` writes ``dataset_identity.json`` (results-library phase 1).
 """
 from autofit.non_linear.status.states import (
     COLLECTOR_STATES,
@@ -23,6 +24,7 @@ from autofit.non_linear.status.states import (
     WRITTEN_STATES,
     FailureClass,
     Product,
+    ResultState,
     RunState,
     failure_class_of,
 )
@@ -33,4 +35,8 @@ from autofit.non_linear.status.record import (
     status_notify,
     status_recorded,
     status_interval_s,
+)
+from autofit.non_linear.status.identity import (
+    dataset_identity_enabled,
+    write_dataset_identity,
 )
