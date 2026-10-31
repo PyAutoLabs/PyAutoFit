@@ -131,6 +131,19 @@ def test_nested_and_custom_layouts_are_found(results_root):
     assert all("files" not in Path(p).parts for p in found)
 
 
+def test_campaign_task_records_are_not_results(results_root):
+    write_zip(results_root / "lens_1", prefix="fit")
+    tasks = results_root / ".campaign_tasks" / "demo" / "source_lp"
+    tasks.mkdir(parents=True)
+    write_status(tasks / "0", "failed", failure_class="bad_input")
+    write_status(tasks / "1", "pending")
+
+    found = list(find_results(results_root))
+
+    assert len(found) == 1
+    assert ".campaign_tasks" not in found[0].parts
+
+
 def test_reindex_only_opens_new_and_changed_results(results_root, monkeypatch):
     for seed in range(30):
         write_zip(results_root, prefix=f"dataset_{seed}", seed=seed)
