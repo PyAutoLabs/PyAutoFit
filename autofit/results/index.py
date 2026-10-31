@@ -43,7 +43,13 @@ object (``path_prefix`` / ``unique_tag``). Different identifiers under one key a
 reruns of that fit with another model or search setting (sibling hashes).
 """
 
-_SKIP_DIRS = {"files", "image", INDEX_DIRNAME}
+#: Batch-side task records (``<campaign>/<stage>/<index>.status.json``) a campaign's
+#: stage entry writes before its fit starts, so a task that fails before Python runs is
+#: still counted. They are the campaign collector's (``autofit.campaign.collector``
+#: walks for them itself), never results.
+CAMPAIGN_TASKS_DIRNAME = ".campaign_tasks"
+
+_SKIP_DIRS = {"files", "image", INDEX_DIRNAME, CAMPAIGN_TASKS_DIRNAME}
 
 _STATUS_SUFFIX = str(Product.STATUS)
 _ZIP_SUFFIX = str(Product.ZIP)

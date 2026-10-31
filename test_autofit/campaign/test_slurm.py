@@ -78,6 +78,63 @@ def test_sbatch_script():
     assert "--gres" not in script
 
 
+def _run_generated_script(tmp_path, fit_body, signal_usr1):
+    """Run the generated batch script under bash, with a stand-in fit."""
+    import os
+    import shutil
+    import signal
+    import time
+
+    if shutil.which("bash") is None:
+        pytest.skip("needs bash")
+    ready = tmp_path / "ready"
+    fit = tmp_path / "fit.py"
+    fit.write_text(
+        "import os, signal, sys, time\n"
+        "got = []\n"
+        "signal.signal(signal.SIGUSR1, lambda *_: got.append(1))\n"
+        f"open({str(ready)!r}, 'w').close()\n" + fit_body
+    )
+    request = _request(cpus=1)
+    request.script = str(fit)
+    request.project_root = str(tmp_path)
+    request.env = {}
+    script = tmp_path / "job.sh"
+    script.write_text(sbatch_script(request))
+    # The script runs `python <script>`; point that name at this interpreter.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "python").symlink_to(sys.executable)
+    process = subprocess.Popen(
+        ["bash", str(script)],
+        env={**os.environ, "SLURM_ARRAY_TASK_ID": "0", "PATH": f"{bin_dir}:{os.environ['PATH']}"},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    deadline = time.time() + 30
+    while not ready.exists() and time.time() < deadline:
+        time.sleep(0.05)
+    if signal_usr1:
+        process.send_signal(signal.SIGUSR1)
+    process.communicate(timeout=60)
+    return process.returncode
+
+
+def test_sbatch_script_fit_that_checkpoints_on_usr1_then_finishes_exits_0(tmp_path):
+    """The pre-timeout USR1 interrupts the batch shell's wait; the fit's own exit 0 must win."""
+    body = (
+        "while not got:\n"
+        "    time.sleep(0.05)\n"
+        "time.sleep(0.2)  # the checkpoint flush, after the first wait returned\n"
+        "sys.exit(0)\n"
+    )
+    assert _run_generated_script(tmp_path, body, signal_usr1=True) == 0
+
+
+def test_sbatch_script_exits_with_the_fits_failure(tmp_path):
+    assert _run_generated_script(tmp_path, "sys.exit(3)\n", signal_usr1=False) == 3
+
+
 def test_sbatch_script_passes_its_own_lint(ral):
     from autofit.campaign.lint import check_sbatch
 

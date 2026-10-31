@@ -107,9 +107,12 @@ def sbatch_script(request: SubmitRequest) -> str:
         "child=$!",
         "trap 'kill -USR1 \"$child\" 2>/dev/null || true' USR1",
         "trap 'kill -TERM \"$child\" 2>/dev/null || true' TERM",
-        "status=0",
-        'until wait "$child"; do',
-        "    status=$?",
+        # A trapped signal ends `wait` early (128 + signal); wait again until the fit
+        # itself has exited and keep only its own status, so a fit that checkpoints on
+        # USR1 and then finishes cleanly exits 0, not 138.
+        "while true; do",
+        "    status=0",
+        '    wait "$child" || status=$?',
         '    kill -0 "$child" 2>/dev/null || break',
         "done",
         'exit "$status"',
