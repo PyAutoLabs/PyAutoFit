@@ -111,12 +111,18 @@ def _run_generated_script(tmp_path, fit_body, signal_usr1):
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
-    deadline = time.time() + 30
-    while not ready.exists() and time.time() < deadline:
-        time.sleep(0.05)
-    if signal_usr1:
-        process.send_signal(signal.SIGUSR1)
-    process.communicate(timeout=60)
+    try:
+        deadline = time.time() + 30
+        while not ready.exists() and time.time() < deadline:
+            time.sleep(0.05)
+        assert ready.exists(), "the stand-in fit never started"
+        if signal_usr1:
+            process.send_signal(signal.SIGUSR1)
+        process.communicate(timeout=60)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.communicate()
     return process.returncode
 
 
