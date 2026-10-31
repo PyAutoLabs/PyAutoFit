@@ -450,6 +450,30 @@ def test__draw_randomly_via_pdf():
     assert instance.mock_class_1.four == 24.0
 
 
+def test__draw_randomly_via_pdf__weights_not_summing_to_one():
+    parameters = [
+        [0.0, 1.0, 2.0, 3.0],
+        [21.0, 22.0, 23.0, 24.0],
+    ]
+
+    model = af.ModelMapper(mock_class_1=af.m.MockClassx4)
+
+    samples_x2 = af.m.MockSamples(
+        model=model,
+        sample_list=af.Sample.from_lists(
+            model=model,
+            parameter_lists=parameters,
+            log_likelihood_list=[1.0, 2.0],
+            log_prior_list=2 * [0.0],
+            weight_list=[0.0, 1.875],
+        ),
+    )
+
+    vector = samples_x2.draw_randomly_via_pdf(as_instance=False)
+
+    assert vector == [21.0, 22.0, 23.0, 24.0]
+
+
 @pytest.fixture(name="make_samples")
 def make_samples_fixture():
     def make_samples(parameters, weight_list=None):

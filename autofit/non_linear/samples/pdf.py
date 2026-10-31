@@ -333,10 +333,12 @@ class SamplesPDF(Samples):
 
         last_error = None
 
+        # Normalize weights to sum to 1
+        weights = np.asarray(self.weight_list, dtype=float)
+        weights /= weights.sum()
+
         for attempt in range(VALID_INSTANCE_MAX_ATTEMPTS):
-            sample_index = np.random.choice(
-                a=range(len(self.sample_list)), p=self.weight_list
-            )
+            sample_index = np.random.choice(a=range(len(self.sample_list)), p=weights)
             vector = self.parameter_lists[sample_index][:]
 
             if as_dict:
