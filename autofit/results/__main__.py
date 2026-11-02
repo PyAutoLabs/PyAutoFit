@@ -7,6 +7,7 @@
     python -m autofit.results check library.yaml [--no-update] [--output-dir DIR]
     python -m autofit.results enrich output/ --fn module:function --name NAME \
         [--index-dir DIR] [--shard i/N] [--overwrite]
+    python -m autofit.results merge summary.csv summary.part*.csv [--key id] [--sort-by id]
 
 ``index`` brings the index up to date (only new or changed results are opened);
 ``status`` prints one line per result state, or with ``--state`` the results in that
@@ -18,6 +19,7 @@ never open a result; run ``index`` first.
 exits 1 when anything expected is not done. ``enrich`` adds the product
 ``function(search_output)`` returns to every completed result as ``files/<NAME>``
 (``autofit.results.enrich``); ``--shard i/N`` takes one of N disjoint parts.
+``merge`` joins CSV parts exported in shards (``AggregateCSV.save(shard=...)``).
 """
 import argparse
 import importlib
@@ -172,6 +174,23 @@ def command_enrich(arguments) -> int:
     return 1 if report.errors else 0
 
 
+def command_merge(arguments) -> int:
+    from autofit.aggregator.summary.aggregate_csv.merge import (
+        MergeException,
+        merge_csv,
+    )
+
+    try:
+        n = merge_csv(
+            arguments.parts, arguments.output, key=arguments.key, sort_by=arguments.sort_by
+        )
+    except (MergeException, OSError) as exception:
+        print(f"merge failed: {exception}", file=sys.stderr)
+        return 2
+    print(f"merged {len(arguments.parts)} parts into {arguments.output}: {n} rows")
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m autofit.results",
@@ -242,6 +261,13 @@ def main(argv=None) -> int:
         action="store_true",
         help="Rewrite the product where a result already holds it.",
     )
+
+    merge = commands.add_parser("merge", help="Merge CSV parts exported in shards.")
+    merge.add_argument("output", help="The merged CSV.")
+    merge.add_argument("parts", nargs="+", help="The CSV parts.")
+    merge.add_argument("--key", default="id", help="The column naming a row.")
+    merge.add_argument("--sort-by", default=None, help="Sort column (default: --key).")
+    merge.set_defaults(function=command_merge)
 
     arguments = parser.parse_args(argv)
     return arguments.function(arguments)

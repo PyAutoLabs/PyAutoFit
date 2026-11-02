@@ -71,6 +71,18 @@ def test_list_of_names(summary, output_directory):
     ])
 
 
+def test_skip_errors(summary, tmp_path):
+    hdus = [FITSFit.ModelData]
+    with pytest.raises(IndexError):
+        summary.output_to_folder(tmp_path / "a", ["one"], hdus)
+
+    errors = summary.output_to_folder(tmp_path / "b", ["one"], hdus, skip_errors=True)
+
+    assert len(errors) == 1
+    assert isinstance(errors[0][1], IndexError)
+    assert [path.name for path in (tmp_path / "b").glob("*")] == ["one.fits"]
+
+
 def test_extract_fits_closes_files(summary):
     """
     Each source fits file is opened once per result and closed deterministically —
