@@ -98,6 +98,51 @@ class TemporaryExtraction:
         self._finalizer()
 
 
+def plain(document):
+    """
+    ``document`` (JSON written by autonerves ``to_dict``) with every type tag resolved
+    to plain Python: ``instance`` (or any other typed object with ``arguments``, e.g.
+    a model) → its arguments plus ``class_path`` when it has one; ``dict`` →
+    its arguments; ``list`` / ``tuple`` → a list; ``ndarray`` → a (nested) list;
+    ``np.number`` → its value; ``path`` → a string; ``type`` / ``function`` → its
+    class path; ``compound_dict`` → a list of ``[key, value]`` pairs.
+    """
+    if isinstance(document, list):
+        return [plain(item) for item in document]
+    if not isinstance(document, dict):
+        return document
+    kind = document.get("type")
+    if kind == "instance":
+        return {
+            "class_path": document.get("class_path"),
+            **{k: plain(v) for k, v in (document.get("arguments") or {}).items()},
+        }
+    if kind == "dict":
+        return {k: plain(v) for k, v in (document.get("arguments") or {}).items()}
+    if kind in ("list", "tuple"):
+        return [plain(item) for item in document.get("values") or []]
+    if kind == "ndarray":
+        return document.get("array")
+    if kind == "np.number":
+        return document.get("value")
+    if kind == "path":
+        return document.get("path")
+    if kind in ("type", "function"):
+        return document.get("class_path")
+    if kind == "compound_dict":
+        return [
+            [plain(item.get("key")), plain(item.get("value"))]
+            for item in document.get("arguments") or []
+        ]
+    if kind is not None and isinstance(document.get("arguments"), dict):
+        # Any other typed object (a model, collection, prior ...): its arguments.
+        plain_document = {k: plain(v) for k, v in document["arguments"].items()}
+        if "class_path" in document:
+            plain_document = {"class_path": document["class_path"], **plain_document}
+        return plain_document
+    return {k: plain(v) for k, v in document.items()}
+
+
 class AbstractSearchOutput(ABC):
     def __init__(
         self,
@@ -272,6 +317,23 @@ class AbstractSearchOutput(ABC):
             ``"rb"`` (the default) or ``"r"``.
         """
         return (self.directory / path).open(mode)
+
+    def plain(self, name: str):
+        """
+        The JSON file ``files/<name>.json`` as plain Python (dicts, lists, numbers,
+        strings), without reconstructing the classes it was saved from: an object saved
+        with its type (autonerves ``to_dict``) becomes the dict of its arguments plus
+        its ``class_path``, an array a (nested) list, a path a string.
+
+        Use it to read a typed product (e.g. a ``wcs.json``) where its classes are not
+        importable or not wanted, such as when exporting a catalogue. Returns ``None``
+        when the file does not exist.
+        """
+        member = self.directory / "files" / f"{name}.json"
+        if not member.exists():
+            return None
+        with member.open("r") as f:
+            return plain(json.load(f))
 
     def value(self, name: str, kind: Optional[str] = None):
         """

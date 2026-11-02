@@ -1,3 +1,4 @@
+import logging
 import re
 from enum import Enum
 from typing import Dict, List, Union
@@ -6,6 +7,9 @@ from pathlib import Path
 
 from autofit.aggregator.search_output import SearchOutput
 from autofit.aggregator import Aggregator
+
+
+logger = logging.getLogger(__name__)
 
 
 def subplot_filename(subplot: Enum) -> str:
@@ -172,9 +176,13 @@ class AggregateFITS:
         folder: Path,
         name: Union[str, List[str]],
         hdus: List[Enum],
+        skip_errors: bool = False,
     ):
         """
         Output the fits files for every search in the aggregator to a folder.
+
+        Each file is written atomically: an interrupted run never leaves a truncated
+        ``.fits``.
 
         Only include HDUs specific in the hdus argument.
 
@@ -184,26 +192,39 @@ class AggregateFITS:
             The folder to output the fits files to.
         hdus
             The HDUs to output.
+        skip_errors
+            Log a search whose fits cannot be written and go on to the next, instead of
+            stopping. The skipped ``(search_output, exception)`` pairs are returned.
         name
             The name of the fits file. This is the attribute of the search output that is used to name the file.
             OR a list of names for each HDU.
         """
         from astropy.io import fits
 
+        from autofit.tools.util import open_atomic
+
         folder.mkdir(parents=True, exist_ok=True)
 
+        errors = []
         for i, result in enumerate(self.aggregator):
-            if isinstance(name, str):
-                output_name = getattr(result, name)
-            else:
-                output_name = name[i]
+            try:
+                if isinstance(name, str):
+                    output_name = getattr(result, name)
+                else:
+                    output_name = name[i]
 
-            hdu_list = fits.HDUList(
-                [fits.PrimaryHDU()]
-                + self._hdus(
-                    result,
-                    hdus,
+                hdu_list = fits.HDUList(
+                    [fits.PrimaryHDU()]
+                    + self._hdus(
+                        result,
+                        hdus,
+                    )
                 )
-            )
-            with open(folder / f"{output_name}.fits", "wb") as file:
-                hdu_list.writeto(file)
+                with open_atomic(folder / f"{output_name}.fits", "wb") as file:
+                    hdu_list.writeto(file)
+            except Exception as exception:
+                if not skip_errors:
+                    raise
+                logger.warning(f"Could not output the fits of {result}: {exception}")
+                errors.append((result, exception))
+        return errors

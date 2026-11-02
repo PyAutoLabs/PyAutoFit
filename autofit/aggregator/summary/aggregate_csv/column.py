@@ -1,4 +1,5 @@
 import logging
+import math
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Optional, Callable
@@ -22,6 +23,19 @@ class AbstractColumn(ABC):
     def value(self, row: "Row"):
         pass
 
+    def spec(self) -> list:
+        """
+        What the column computes, for the row cache key: a change to it invalidates
+        cached rows.
+        """
+        return [type(self).__name__, self.name]
+
+    def describe(self, field: str) -> dict:
+        """
+        The ``columns.json`` entry of the output field ``field`` this column writes.
+        """
+        return {"source": None, "kind": "derived"}
+
 
 class ValueType(Enum):
     """
@@ -41,6 +55,8 @@ class Column(AbstractColumn):
         name: Optional[str] = None,
         value_types: list[ValueType] = (ValueType.Median,),
         strict: bool = False,
+        unit: Optional[str] = None,
+        prior_edge: bool = False,
     ):
         """
         A column in the summary table.
@@ -57,6 +73,12 @@ class Column(AbstractColumn):
             If True an argument matching neither the samples_summary nor the
             latent_summary raises a KeyError. If False (the default) a warning
             is logged once for the column and the values are left empty.
+        unit
+            The unit of the values, recorded in ``columns.json``.
+        prior_edge
+            Add a ``<name>_at_prior_edge`` column: whether the median lies within 1% of
+            the prior's width from one of its limits, measured in log space for a log
+            prior (empty for a prior without two finite limits, e.g. a latent).
         """
         super().__init__(
             name
@@ -68,7 +90,76 @@ class Column(AbstractColumn):
         self.argument = argument
         self.value_types = value_types
         self.strict = strict
+        self.unit = unit
+        self.prior_edge = prior_edge
+        self.kind = None
         self._has_warned = False
+
+    def spec(self) -> list:
+        return super().spec() + [
+            self.argument,
+            [value_type.name for value_type in self.value_types],
+            self.strict,
+            self.unit,
+            self.prior_edge,
+        ]
+
+    _BOUNDS = {
+        "": ("median", None),
+        "max_lh": ("max_log_likelihood", None),
+        "lower_1_sigma": ("lower", "quantile_1sigma"),
+        "upper_1_sigma": ("upper", "quantile_1sigma"),
+        "lower_3_sigma": ("lower", "quantile_3sigma"),
+        "upper_3_sigma": ("upper", "quantile_3sigma"),
+        "at_prior_edge": ("flag", None),
+    }
+
+    def fields(self) -> list:
+        """
+        The CSV fields this column writes, in order.
+        """
+        suffixes = []
+        if ValueType.Median in self.value_types:
+            suffixes.append("")
+        if ValueType.MaxLogLikelihood in self.value_types:
+            suffixes.append("max_lh")
+        if ValueType.ValuesAt1Sigma in self.value_types:
+            suffixes += ["lower_1_sigma", "upper_1_sigma"]
+        if ValueType.ValuesAt3Sigma in self.value_types:
+            suffixes += ["lower_3_sigma", "upper_3_sigma"]
+        if self.prior_edge:
+            suffixes.append("at_prior_edge")
+        return [f"{self.name}_{suffix}" if suffix else self.name for suffix in suffixes]
+
+    def describe(self, field: str) -> dict:
+        suffix = "" if field == self.name else field[len(self.name) + 1 :]
+        statistic, bound = self._BOUNDS.get(suffix, (None, None))
+        return {
+            "source": self.argument,
+            "kind": "flag" if suffix == "at_prior_edge" else (self.kind or "parameter"),
+            "statistic": statistic,
+            "bound": bound,
+            "unit": None if suffix == "at_prior_edge" else self.unit,
+        }
+
+    def _at_prior_edge(self, row: "Row", value) -> Optional[bool]:
+        if value is None:
+            return None
+        try:
+            prior = row.result.model.object_for_path(self.path)
+            lower = float(prior.lower_limit)
+            upper = float(prior.upper_limit)
+        except Exception:
+            return None
+        if type(prior).__name__.startswith("Log"):
+            # A log prior's width is in log space: 50 is mid-way in LogUniform(1e-4, 1e4).
+            if lower <= 0 or value <= 0:
+                return None
+            lower, upper, value = math.log10(lower), math.log10(upper), math.log10(value)
+        width = upper - lower
+        if not (width > 0 and width != float("inf")):
+            return None
+        return bool(min(value - lower, upper - value) < 0.01 * width)
 
     def _check_argument(self, row: "Row"):
         """
@@ -100,6 +191,16 @@ class Column(AbstractColumn):
 
     def value(self, row: "Row"):
         self._check_argument(row)
+        if self.path in row.parameter_paths:
+            self.kind = "parameter"
+        elif self.path in row.known_paths:
+            self.kind = "latent"
+        else:
+            row.reasons.append(
+                "missing_latent_summary"
+                if row.latent_summary is None
+                else f"missing_value:{self.argument}"
+            )
 
         result = {}
 
@@ -133,6 +234,10 @@ class Column(AbstractColumn):
                 result["lower_3_sigma"] = None
                 result["upper_3_sigma"] = None
 
+        if self.prior_edge:
+            median = row.median_pdf_sample_kwargs.get(self.path)
+            result["at_prior_edge"] = self._at_prior_edge(row, median)
+
         return result
 
     @property
@@ -157,6 +262,14 @@ class ComputedColumn(AbstractColumn):
         """
         super().__init__(name)
         self.compute = compute
+
+    def spec(self) -> list:
+        from autofit.aggregator.summary.aggregate_csv.cache import function_digest
+
+        return super().spec() + [function_digest(self.compute)]
+
+    def describe(self, field: str) -> dict:
+        return {"source": getattr(self.compute, "__qualname__", None), "kind": "derived"}
 
     def value(self, row: "Row"):
 
@@ -195,6 +308,9 @@ class LabelColumn(AbstractColumn):
         self.values = values
         self.key = key
         self.strict = strict
+
+    def describe(self, field: str) -> dict:
+        return {"source": None, "kind": "label"}
 
     def value(self, row: "Row"):
         if not isinstance(self.values, dict):

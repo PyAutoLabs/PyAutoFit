@@ -23,6 +23,8 @@ class Row:
         self.result = result
         self._columns = columns
         self.number = number
+        self.reasons = []
+        """Why values of this row are missing (``status_reason``), filled by columns."""
 
     def _all_paths(self, path: Tuple[str, ...]):
         model = self.result.model
@@ -38,8 +40,22 @@ class Row:
         }
 
     @cached_property
-    def _latent_summary(self):
+    def latent_summary(self):
         return self.result.value("latent.latent_summary")
+
+    @property
+    def _latent_summary(self):
+        return self.latent_summary
+
+    @cached_property
+    def parameter_paths(self) -> set:
+        """
+        The argument paths of the model's parameters (from the samples_summary only).
+        """
+        samples_summary = self.result.samples_summary
+        return set(self._sample_kwargs(samples_summary.median_pdf_sample)) | set(
+            self._sample_kwargs(samples_summary.max_log_likelihood_sample)
+        )
 
     def _sample_kwargs(self, sample) -> dict:
         """
@@ -131,12 +147,13 @@ class Row:
             | set(self.values_at_sigma_3_kwargs)
         )
 
-    def dict(self) -> dict:
+    def dict(self, columns=None) -> dict:
         """
-        The row as a dictionary including an id and one entry for each column.
+        The row as a dictionary including an id and one entry for each column (of
+        ``columns``, default all).
         """
         row = {"id": self.result.id}
-        for column in self._columns:
+        for column in self._columns if columns is None else columns:
             value = column.value(self)
             if isinstance(value, dict):
                 for key, item in value.items():
