@@ -39,6 +39,7 @@ from .aggregator.summary.aggregate_images import AggregateImages
 from .aggregator.summary.aggregate_fits import AggregateFITS
 from autofit.aggregator.fit_interface import Fit
 from .aggregator.search_output import SearchOutput
+from .results.library import ResultsLibrary
 from .mapper import prior
 from .mapper.model import AbstractModel
 from .mapper.model import ModelInstance

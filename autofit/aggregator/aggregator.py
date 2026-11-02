@@ -711,6 +711,42 @@ class Aggregator:
             errors=self.errors,
         )
 
+    def enrich(
+        self,
+        fn,
+        name: str,
+        overwrite: bool = False,
+        shard=None,
+    ):
+        """
+        Add a product computed from each saved result to the result itself, written to
+        ``files/<name>`` atomically, without rerunning any fit
+        (``autofit.results.enrich``).
+
+        Parameters
+        ----------
+        fn
+            ``fn(search_output)`` returns the product: a ``dict`` / ``list`` (JSON),
+            ``str``, ``bytes``, a path to a file, or ``None`` to skip that result.
+        name
+            The product's name (``files/<name>``; ``.json`` is added for JSON content
+            when it has no suffix).
+        overwrite
+            Rewrite the product where a result already holds it.
+        shard
+            ``"i/N"`` or ``(i, N)``: only shard ``i`` of ``N`` disjoint shards, so the
+            pass can be split between Slurm array tasks or processes.
+
+        Returns
+        -------
+        An ``EnrichReport``: what was written, already there, declined or failed.
+        """
+        from autofit.results.enrich import enrich
+
+        return enrich(
+            self.search_outputs, fn, name=name, overwrite=overwrite, shard=shard
+        )
+
     def values(self, name: str, parser=lambda o: o) -> Iterator:
         """
         Get values from outputs with a given name.
