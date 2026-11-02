@@ -3,6 +3,7 @@
 over their outputs.
 """
 import json
+from datetime import datetime, timedelta
 import zipfile
 from pathlib import Path
 
@@ -127,12 +128,20 @@ def test_index_reads_identity_from_a_real_fit(output, tmp_path):
 
 
 def test_latest_per_keeps_the_latest_sibling(output):
-    _fit(_analysis(), name="search", unique_tag="dataset_0", total_draws=5)
+    first = _fit(_analysis(), name="search", unique_tag="dataset_0", total_draws=5)
     second = _fit(_analysis(), name="search", unique_tag="dataset_0", total_draws=6)
     _fit(_analysis(), name="search", unique_tag="dataset_1", total_draws=5)
     second_completed = json.loads(
         Path(f"{second.paths.output_path}.status.json").read_text()
     )["updated"]
+    # Status times have one-second resolution, and two fits this small often finish
+    # within the same second — a tie latest_per breaks by path, not by order. Put the
+    # first fit a minute earlier so the second is unambiguously the later sibling.
+    first_status = Path(f"{first.paths.output_path}.status.json")
+    status = json.loads(first_status.read_text())
+    earlier = datetime.strptime(second_completed, "%Y-%m-%dT%H:%M:%SZ") - timedelta(minutes=1)
+    status["updated"] = earlier.strftime("%Y-%m-%dT%H:%M:%SZ")
+    first_status.write_text(json.dumps(status))
 
     aggregator = Aggregator.from_directory(output)
     assert len(aggregator) == 3
