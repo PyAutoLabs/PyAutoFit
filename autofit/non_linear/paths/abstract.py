@@ -18,7 +18,12 @@ from autofit.mapper.identifier import Identifier, IdentifierField
 from autofit.non_linear.samples.summary import SamplesSummary
 
 from autofit.text import text_util
-from autofit.tools.util import compress_type_for, open_, zip_directory
+from autofit.tools.util import (
+    compress_type_for,
+    open_,
+    write_zip_member,
+    zip_directory,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -61,47 +66,13 @@ def _matches_archived(info: zipfile.ZipInfo, file_path) -> bool:
 def _replace_zip_member(zip_path, arcname: str, file_path):
     """
     Replace the member ``arcname`` of the zip at ``zip_path`` with the file at
-    ``file_path``.
-
-    ``zipfile`` cannot overwrite a member in place, so every other member is
-    streamed into a new archive alongside the replacement. The new archive is
-    written next to the original (same directory, so the final ``os.replace``
-    is atomic on one filesystem) and only swapped in once complete: an error
-    part-way leaves the original archive untouched.
+    ``file_path``, atomically (``write_zip_member``), keeping its compression.
 
     Rebuilding the archive from the output directory instead (as the search
     itself does at completion) is not an option here, because with
     ``remove_files`` the directory holds only the file just written.
     """
-    zip_path = Path(zip_path)
-    temporary_path = zip_path.with_name(f"{zip_path.name}.replace.tmp")
-
-    try:
-        with zipfile.ZipFile(zip_path, "r") as source:
-            replaced = source.getinfo(arcname)
-
-            with zipfile.ZipFile(temporary_path, "w") as destination:
-                for info in source.infolist():
-                    if info.filename == arcname:
-                        continue
-
-                    with source.open(info) as member:
-                        with destination.open(info, "w") as target:
-                            shutil.copyfileobj(member, target)
-
-                destination.write(
-                    file_path,
-                    arcname,
-                    compress_type=replaced.compress_type,
-                )
-
-        os.replace(temporary_path, zip_path)
-    except BaseException:
-        try:
-            os.remove(temporary_path)
-        except FileNotFoundError:
-            pass
-        raise
+    write_zip_member(zip_path, arcname, file_path=file_path)
 
 
 _zip_complete_cache = {}

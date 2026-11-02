@@ -1,12 +1,13 @@
 import inspect
 import json
 import os
+import shutil
 import sys
 import zipfile
 from contextlib import contextmanager
 from functools import wraps
 from pathlib import Path
-from typing import Union
+from typing import Optional, Union
 
 import numpy as np
 
@@ -121,6 +122,65 @@ def zip_directory(source_directory, output=None):
         raise
 
     os.replace(tmp, output)
+
+
+def write_zip_member(
+    zip_path,
+    arcname: str,
+    data: Optional[bytes] = None,
+    file_path=None,
+    compress_type: Optional[int] = None,
+):
+    """
+    Add the member ``arcname`` to the zip at ``zip_path``, or replace it if the zip
+    already holds one, from ``data`` or from the file at ``file_path``.
+
+    ``zipfile`` can neither overwrite a member in place nor append without risk: a
+    process killed during an append leaves a zip whose central directory is gone,
+    which no later read can open. So every other member is streamed into a new
+    archive written next to the original (same directory, so the final
+    ``os.replace`` is atomic on one filesystem), and the new archive is only swapped
+    in once complete. Every other member keeps its name, compression and content; a
+    failure part-way leaves the original zip untouched.
+
+    Parameters
+    ----------
+    compress_type
+        How the member is stored; by default the replaced member's compression, or
+        for a new member ``compress_type_for(arcname)``.
+    """
+    if (data is None) == (file_path is None):
+        raise ValueError("Pass exactly one of data or file_path.")
+
+    zip_path = Path(zip_path)
+    tmp = zip_path.with_name(f"{zip_path.name}.{os.getpid()}.tmp")
+
+    try:
+        with zipfile.ZipFile(zip_path, "r") as source:
+            if compress_type is None:
+                try:
+                    compress_type = source.getinfo(arcname).compress_type
+                except KeyError:
+                    compress_type = compress_type_for(arcname)
+
+            with zipfile.ZipFile(tmp, "w") as destination:
+                for info in source.infolist():
+                    if info.filename == arcname:
+                        continue
+
+                    with source.open(info) as member:
+                        with destination.open(info, "w") as target:
+                            shutil.copyfileobj(member, target)
+
+                if file_path is not None:
+                    destination.write(file_path, arcname, compress_type=compress_type)
+                else:
+                    destination.writestr(arcname, data, compress_type=compress_type)
+
+        os.replace(tmp, zip_path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def open_(filename, *flags):

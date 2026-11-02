@@ -524,7 +524,7 @@ class NonLinearSearch(
 
         Optional tasks update the results on hard-disk depending on the `general.yaml` config file's `output`
         section: `force_visualize_overwrite=True` performs the visualization again, and `force_pickle_overwrite=True`
-        recreates the output files of the model-fit.
+        recreates the output files (to add a product to finished results, use `Aggregator.enrich`).
 
         """
         status_notify(self, "skipped")
