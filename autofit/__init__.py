@@ -41,6 +41,7 @@ from .aggregator.summary.aggregate_fits import AggregateFITS
 from autofit.aggregator.fit_interface import Fit
 from .aggregator.search_output import SearchOutput
 from .results.library import ResultsLibrary
+from . import export
 from .mapper import prior
 from .mapper.model import AbstractModel
 from .mapper.model import ModelInstance
