@@ -366,3 +366,71 @@ def test__visualize__raising_latent_conversion_is_logged_not_raised(
 
     updater._plot_results.assert_called_once_with(samples=samples)
     assert "latent parameters could not be computed" in caplog.text
+
+
+def _visualize(updater, during_analysis, samples):
+    analysis = MagicMock()
+    analysis.should_visualize.return_value = True
+    updater.visualize(
+        model=MagicMock(),
+        analysis=analysis,
+        during_analysis=during_analysis,
+        samples_summary=MagicMock(),
+        samples=samples,
+    )
+
+
+def test__visualize__posterior_plots_wait_for_the_end_of_the_fit():
+    """
+    A search whose plots summarise the posterior (corner plots: nested
+    sampling, MCMC) makes them once the fit is complete, not at every
+    ``iterations_per_full_update``: they need converged samples and are the
+    slowest plots a search makes.
+    """
+    updater = SearchUpdater(
+        paths=MagicMock(),
+        timer=MagicMock(),
+        search_logger=logging.getLogger("test_updater"),
+        plot_results_func=MagicMock(),
+        samples_from_func=MagicMock(),
+        disable_output=False,
+        iterations_per_full_update=1.0,
+        plot_results_during_fit=False,
+    )
+    samples = MagicMock()
+
+    _visualize(updater, during_analysis=True, samples=samples)
+    updater._plot_results.assert_not_called()
+    updater._samples_from.assert_not_called()  # nothing to plot, nothing converted
+
+    _visualize(updater, during_analysis=False, samples=samples)
+    updater._plot_results.assert_called_once_with(samples=samples)
+
+
+def test__visualize__progress_plots_are_made_during_the_fit():
+    updater = _make_updater()
+    samples = MagicMock()
+
+    _visualize(updater, during_analysis=True, samples=samples)
+
+    updater._plot_results.assert_called_once_with(samples=samples)
+
+
+def test__plots_during_fit__by_posterior_kind():
+    from autofit.non_linear.search.posterior_kind import (
+        ChainDefaults,
+        PointDefaults,
+        WeightedDefaults,
+    )
+
+    assert WeightedDefaults.plots_during_fit is False
+    assert ChainDefaults.plots_during_fit is False
+    assert PointDefaults.plots_during_fit is True
+
+
+def test__search_passes_its_kind_rule_to_the_updater():
+    search = af.Nautilus()
+    assert search._updater._plot_results_during_fit is False
+
+    search = af.LBFGS()
+    assert search._updater._plot_results_during_fit is True
