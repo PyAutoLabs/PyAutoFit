@@ -91,3 +91,31 @@ def test__plot_kwargs_error__is_importable_from_the_public_plot_module():
 
     assert aplt.PlotKwargsError is PlotKwargsError
     assert issubclass(aplt.PlotKwargsError, TypeError)
+
+
+def test__output_figure__png_renders_the_figure_once(tmp_path, monkeypatch):
+    # ``plt.savefig`` follows the save with ``canvas.draw_idle()``, which on Agg
+    # is a second full render; for a big corner plot that is 10+ s wasted.
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+
+    from autofit.non_linear.plot.plot_util import output_figure
+
+    renders = []
+    real_draw = FigureCanvasAgg.draw
+
+    def counting_draw(self, *args, **kwargs):
+        renders.append(1)
+        return real_draw(self, *args, **kwargs)
+
+    monkeypatch.setattr(FigureCanvasAgg, "draw", counting_draw)
+
+    plt.figure()
+    plt.plot([0, 1], [0, 1])
+    output_figure(path=tmp_path, filename="line", format="png")
+
+    assert (tmp_path / "line.png").exists()
+    assert len(renders) == 1

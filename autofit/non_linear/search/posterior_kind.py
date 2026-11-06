@@ -34,6 +34,12 @@ logger = logging.getLogger(__name__)
 class PosteriorDefaults:
     kind: PosteriorKind = None
     plots_section: str = None
+    # Whether ``plot_results`` runs at every ``iterations_per_full_update`` as
+    # well as once the fit is complete. Progress plots (a point search's
+    # likelihood against iteration) are worth watching live; a posterior's
+    # corner plot is not -- it needs converged samples and is the slowest plot
+    # a search makes -- so the chain and weighted kinds draw theirs at the end.
+    plots_during_fit: bool = True
 
     def initializer_for(self, initializer=None):
         """The search's initializer: ``initializer``, or this kind's default."""
@@ -68,6 +74,7 @@ class PosteriorDefaults:
 class ChainDefaults(PosteriorDefaults):
     kind = PosteriorKind.CHAIN
     plots_section = "mcmc"
+    plots_during_fit = False
 
     def default_initializer(self):
         from autofit.non_linear.initializer import InitializerBall
@@ -107,6 +114,7 @@ class ChainDefaults(PosteriorDefaults):
 class WeightedDefaults(PosteriorDefaults):
     kind = PosteriorKind.WEIGHTED
     plots_section = "nest"
+    plots_during_fit = False
 
     def default_initializer(self):
         from autofit.non_linear.initializer import InitializerPrior
@@ -136,7 +144,14 @@ class WeightedDefaults(PosteriorDefaults):
 
             corner = self.should_plot("corner_anesthetic")
 
-            if corner:
+            if corner and self._too_many_parameters_for_full_corner(samples):
+                logger.info(
+                    "Skipping the full corner_anesthetic plot: the model has more "
+                    "free parameters than corner_anesthetic.max_parameters_search "
+                    "(visualize/plots_settings). The per-component corner plots "
+                    "are still made."
+                )
+            elif corner:
                 corner_anesthetic(samples=samples, path=path, format="png")
 
             # An older config without the key: the per-component plots follow
@@ -148,6 +163,27 @@ class WeightedDefaults(PosteriorDefaults):
                     path,
                     groups=samples.model.parameter_indices_by_component,
                 )
+
+    @staticmethod
+    def _too_many_parameters_for_full_corner(samples) -> bool:
+        """
+        Whether the model is too big for one corner plot of every parameter,
+        per ``corner_anesthetic.max_parameters_search`` (30 for an older config
+        without the key). Past that the full plot is large and slow to draw,
+        and the per-component plots are the readable ones anyway.
+        """
+        total = getattr(samples.model, "total_free_parameters", None)
+        if not isinstance(total, int):
+            return False
+
+        try:
+            limit = conf.instance["visualize"]["plots_settings"]["corner_anesthetic"][
+                "max_parameters_search"
+            ]
+        except KeyError:
+            limit = 30
+
+        return total > limit
 
     def plot_latent_results(self, search, samples):
         """
