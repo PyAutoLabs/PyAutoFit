@@ -673,3 +673,35 @@ def test_too_many_parameters_for_full_corner_older_config_defaults_to_30(monkeyp
 
     assert not posterior_kind.WeightedDefaults._too_many_parameters_for_full_corner(small)
     assert posterior_kind.WeightedDefaults._too_many_parameters_for_full_corner(big)
+
+
+@pytest.mark.parametrize(
+    "many_components, expected",
+    [
+        (True, "per-component corner plots are still made"),
+        (False, "No corner plot is made"),
+    ],
+)
+def test_skipped_full_corner_logs_what_is_actually_made(
+    monkeypatch, tmp_path, caplog, many_components, expected
+):
+    # A single-component model has no per-component plots to fall back on, so
+    # the log must not promise them.
+    import logging
+    from autofit.non_linear.search.posterior_kind import WeightedDefaults
+
+    monkeypatch.setattr(
+        WeightedDefaults,
+        "_too_many_parameters_for_full_corner",
+        staticmethod(lambda samples: True),
+    )
+    # Built here, not at collection: component grouping reads the test config.
+    model = (
+        _lens_like_model()
+        if many_components
+        else af.Model(af.m.MockClassx2NoSuperScript)
+    )
+    with caplog.at_level(logging.INFO):
+        _weighted_plot_calls(model, monkeypatch, tmp_path)
+
+    assert expected in caplog.text

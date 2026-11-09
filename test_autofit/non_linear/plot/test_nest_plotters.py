@@ -224,12 +224,16 @@ def test__corner_anesthetic__caller_style_wins_over_the_compact_default(
 
 
 def _label_state(fig):
+    # Limits as well as labels: the 1D curves sit on twin axes whose x range
+    # must match their panel's, or the curve is drawn against the wrong ticks.
     return [
         (
             ax.xaxis.label.get_visible(),
             ax.yaxis.label.get_visible(),
             [label.get_visible() for label in ax.get_xticklabels()],
             [label.get_visible() for label in ax.get_yticklabels()],
+            tuple(np.round(ax.get_xlim(), 10)),
+            tuple(np.round(ax.get_ylim(), 10)),
         )
         for ax in fig.axes
     ]
@@ -249,11 +253,12 @@ def _draw(samples, deferred):
         labels=samples.model.parameter_labels_with_superscripts_latex,
     )
     fig, axes = make_2d_axes(columns, labels=nested.get_labels_map())
+    np.random.seed(0)  # anesthetic's KDE compression draws random numbers
     if deferred:
         with nest_plotters._deferred_shared_axes():
-            nested.plot_2d(axes, kinds="hist")
+            nested.plot_2d(axes)
     else:
-        nested.plot_2d(axes, kinds="hist")
+        nested.plot_2d(axes)
     fig.canvas.draw()
     state = _label_state(fig)
     plt.close(fig)

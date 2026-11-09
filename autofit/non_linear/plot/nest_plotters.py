@@ -38,7 +38,11 @@ def _deferred_shared_axes():
     parameters makes about n^2/2 such calls over about n^2 axes, so the label
     pass costs n^4 -- the bulk of a 20-parameter plot's 40+ minutes. The pass is
     idempotent, so deferring it and replaying each distinct call once after the
-    last panel gives the same figure for a fraction of the cost.
+    last panel gives the same figure for a fraction of the cost: pixel-identical
+    for the styles ``corner_anesthetic`` draws (checked against per-panel
+    passes for the default, compact, subset and latent plots). A caller's own
+    ``kinds`` can still differ slightly in axis padding (``hist_1d`` diagonals
+    on two parameters), never in where the posterior is drawn.
 
     ``handle_shared_axes`` is private to pandas: if it is missing, or is ever
     called in a form this does not recognise, the plot just runs unpatched.
@@ -78,6 +82,17 @@ def _deferred_shared_axes():
 
     for kwargs in pending.values():
         original(**kwargs)
+
+        # A diagonal panel draws its 1D curve on a twin of the panel's axes,
+        # which must span the same x range as the panel and its column. Run per
+        # panel, the label pass settled each twin's limits as it went; run once
+        # at the end, the last twin settles on its own curve's range and the
+        # curve is drawn shifted against the tick labels. Re-impose the
+        # parent's range, leaving every autoscale setting as it was.
+        for ax in kwargs.get("axarr", ()):
+            twin = getattr(ax, "twin", None)
+            if twin is not None and twin is not ax:
+                twin.set_xlim(ax.get_xlim(), auto=None)
 
 
 @skip_in_test_mode

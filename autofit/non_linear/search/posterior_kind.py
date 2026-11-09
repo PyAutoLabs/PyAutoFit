@@ -144,24 +144,31 @@ class WeightedDefaults(PosteriorDefaults):
 
             corner = self.should_plot("corner_anesthetic")
 
+            # An older config without the key: the per-component plots follow
+            # the full one, so switching that off switches them off too.
+            components = self.should_plot(
+                "corner_anesthetic_components", default=corner
+            )
+            groups = samples.model.parameter_indices_by_component if components else {}
+
             if corner and self._too_many_parameters_for_full_corner(samples):
                 logger.info(
                     "Skipping the full corner_anesthetic plot: the model has more "
                     "free parameters than corner_anesthetic.max_parameters_search "
-                    "(visualize/plots_settings). The per-component corner plots "
-                    "are still made."
+                    "(visualize/plots_settings). "
+                    + (
+                        "The per-component corner plots are still made."
+                        if len(groups) >= 2
+                        else "No corner plot is made; plot a subset with "
+                        "corner_anesthetic(samples, parameter_indices=...)."
+                    )
                 )
             elif corner:
                 corner_anesthetic(samples=samples, path=path, format="png")
 
-            # An older config without the key: the per-component plots follow
-            # the full one, so switching that off switches them off too.
-            if self.should_plot("corner_anesthetic_components", default=corner):
+            if components:
                 self._corner_per_component(
-                    corner_anesthetic,
-                    samples,
-                    path,
-                    groups=samples.model.parameter_indices_by_component,
+                    corner_anesthetic, samples, path, groups=groups
                 )
 
     @staticmethod
@@ -176,14 +183,10 @@ class WeightedDefaults(PosteriorDefaults):
         if not isinstance(total, int):
             return False
 
-        try:
-            limit = conf.instance["visualize"]["plots_settings"]["corner_anesthetic"][
-                "max_parameters_search"
-            ]
-        except KeyError:
-            limit = 30
+        from autofit.non_linear.plot.nest_plotters import _setting
 
-        return total > limit
+        settings = conf.instance["visualize"]["plots_settings"]["corner_anesthetic"]
+        return total > _setting(settings, "max_parameters_search", 30)
 
     def plot_latent_results(self, search, samples):
         """
