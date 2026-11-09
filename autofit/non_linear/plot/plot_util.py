@@ -148,5 +148,9 @@ def output_figure(path=None, filename="figure", format="show"):
     elif format in ("png", "pdf"):
         if path is not None:
             os.makedirs(path, exist_ok=True)
-            plt.savefig(Path(path) / f"{filename}.{format}")
+            # ``fig.savefig``, not ``plt.savefig``: pyplot's version follows the
+            # save with ``canvas.draw_idle()``, which on the non-interactive Agg
+            # canvas renders the whole figure a second time -- 10+ s for a
+            # many-parameter corner plot, for a figure about to be closed.
+            plt.gcf().savefig(Path(path) / f"{filename}.{format}")
     plt.close()

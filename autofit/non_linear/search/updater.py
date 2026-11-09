@@ -77,11 +77,16 @@ class SearchUpdater:
         iterations_per_full_update: float,
         visualization_enabled: bool = True,
         plot_latent_results_func: Optional[Callable[[Samples], None]] = None,
+        plot_results_during_fit: bool = True,
     ):
         self._paths = paths
         self._timer = timer
         self._logger = search_logger
         self._plot_results = plot_results_func
+        # False for searches whose plots summarise the posterior (corner plots):
+        # those need converged samples, so they are made once the fit is
+        # complete rather than at every ``iterations_per_full_update``.
+        self._plot_results_during_fit = plot_results_during_fit
         # The plots of the latent parameters, made with the other latent output
         # (``latent.csv``): after the fit, and during it only when
         # ``output.yaml``'s ``latent_during_fit`` is on. None plots nothing.
@@ -178,7 +183,9 @@ class SearchUpdater:
         Perform visualization of the non-linear search's model-fitting results.
 
         Delegates to the analysis object for model-specific plots and to the
-        search's ``plot_results`` for search-specific plots. The search's
+        search's ``plot_results`` for search-specific plots -- at every update
+        for a search whose plots show progress, once the fit is complete for one
+        whose plots summarise the posterior (``plot_results_during_fit``). The search's
         ``plot_latent_results`` follows the latent-output rule rather than the
         ``iterations_per_full_update`` cadence: once the fit is complete, and
         during it only if ``output.yaml``'s ``latent_during_fit`` is on. ``update`` passes the
@@ -218,8 +225,15 @@ class SearchUpdater:
                 during_analysis=during_analysis,
             )
 
-        if plot_search and analysis.should_visualize(
-            paths=paths, during_analysis=during_analysis
+        plot_results = not during_analysis or self._plot_results_during_fit
+        plot_latent = self._plot_latent_results is not None and (
+            not during_analysis or conf.instance["output"]["latent_during_fit"]
+        )
+
+        if (
+            plot_search
+            and (plot_results or plot_latent)
+            and analysis.should_visualize(paths=paths, during_analysis=during_analysis)
         ):
             if not isinstance(paths, NullPaths):
                 try:
@@ -229,12 +243,10 @@ class SearchUpdater:
                             search_internal,
                         )
 
-                    self._plot_results(samples=samples)
+                    if plot_results:
+                        self._plot_results(samples=samples)
 
-                    if self._plot_latent_results is not None and (
-                        not during_analysis
-                        or conf.instance["output"]["latent_during_fit"]
-                    ):
+                    if plot_latent:
                         self._plot_latent_results(samples=samples)
                 except FileNotFoundError:
                     pass

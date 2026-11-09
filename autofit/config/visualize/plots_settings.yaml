@@ -3,5 +3,7 @@ corner_anesthetic:
   fontsize: 20               # The size of the font of the tick values and parameter labels on the x and y axis of the corner plot.
   facecolor: white           # The facecolor of the corner plot.
   alpha: 0.9                 # The alpha value of the corner plot.
+  max_detailed_parameters: 10  # Above this many plotted parameters the corner plot is compact: 2D histograms instead of KDE contours (about a second per panel) and no upper triangle.
+  max_parameters_search: 30  # A search skips its full corner plot of a model with more free parameters than this (the per-component plots are still made).
 corner_cornerpy:
   fontsize: 14               # The size of the font of the tick values and parameter labels on the x and y axis of the corner plot.

@@ -611,3 +611,97 @@ def test_weighted_plot_latent_results_skipped_in_test_mode(monkeypatch, tmp_path
     )
 
     assert not any(call.get("latent") for call in calls)
+
+
+def test_weighted_plot_results_skips_full_corner_of_a_very_big_model(
+    monkeypatch, tmp_path
+):
+    # Past corner_anesthetic.max_parameters_search the full plot is large and
+    # slow; the per-component plots are still made.
+    from autofit.non_linear.search.posterior_kind import WeightedDefaults
+
+    monkeypatch.setattr(
+        WeightedDefaults,
+        "_too_many_parameters_for_full_corner",
+        staticmethod(lambda samples: True),
+    )
+    calls = _weighted_plot_calls(_lens_like_model(), monkeypatch, tmp_path)
+
+    assert [call.get("filename", "corner_anesthetic") for call in calls] == [
+        "corner_anesthetic_lens",
+        "corner_anesthetic_source",
+    ]
+
+
+@pytest.mark.parametrize("limit, expected", [(3, True), (4, False)])
+def test_too_many_parameters_for_full_corner_reads_config(monkeypatch, limit, expected):
+    from types import SimpleNamespace
+    from autofit.non_linear.search import posterior_kind
+
+    monkeypatch.setattr(
+        posterior_kind,
+        "conf",
+        SimpleNamespace(
+            instance={
+                "visualize": {
+                    "plots_settings": {
+                        "corner_anesthetic": {"max_parameters_search": limit}
+                    }
+                }
+            }
+        ),
+    )
+    samples = SimpleNamespace(model=_lens_like_model())
+
+    assert (
+        posterior_kind.WeightedDefaults._too_many_parameters_for_full_corner(samples)
+        is expected
+    )
+
+
+def test_too_many_parameters_for_full_corner_older_config_defaults_to_30(monkeypatch):
+    from types import SimpleNamespace
+    from autofit.non_linear.search import posterior_kind
+
+    monkeypatch.setattr(
+        posterior_kind,
+        "conf",
+        SimpleNamespace(instance={"visualize": {"plots_settings": {"corner_anesthetic": {}}}}),
+    )
+    small = SimpleNamespace(model=SimpleNamespace(total_free_parameters=30))
+    big = SimpleNamespace(model=SimpleNamespace(total_free_parameters=31))
+
+    assert not posterior_kind.WeightedDefaults._too_many_parameters_for_full_corner(small)
+    assert posterior_kind.WeightedDefaults._too_many_parameters_for_full_corner(big)
+
+
+@pytest.mark.parametrize(
+    "many_components, expected",
+    [
+        (True, "per-component corner plots are still made"),
+        (False, "No corner plot is made"),
+    ],
+)
+def test_skipped_full_corner_logs_what_is_actually_made(
+    monkeypatch, tmp_path, caplog, many_components, expected
+):
+    # A single-component model has no per-component plots to fall back on, so
+    # the log must not promise them.
+    import logging
+    from autofit.non_linear.search.posterior_kind import WeightedDefaults
+
+    monkeypatch.setattr(
+        WeightedDefaults,
+        "_too_many_parameters_for_full_corner",
+        staticmethod(lambda samples: True),
+    )
+    # Built here, not at collection: component grouping reads the test config.
+    model = (
+        _lens_like_model()
+        if many_components
+        else af.Model(af.m.MockClassx2NoSuperScript)
+    )
+    with caplog.at_level(logging.INFO):
+        _weighted_plot_calls(model, monkeypatch, tmp_path)
+
+    assert expected in caplog.text

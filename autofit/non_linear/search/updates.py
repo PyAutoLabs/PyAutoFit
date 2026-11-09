@@ -124,6 +124,7 @@ class SearchUpdatesMixin:
                 timer=self.timer,
                 search_logger=self.logger,
                 plot_results_func=self.plot_results,
+                plot_results_during_fit=self.plots_results_during_fit,
                 plot_latent_results_func=self.plot_latent_results,
                 samples_from_func=self.samples_from,
                 disable_output=self.disable_output,
@@ -196,6 +197,18 @@ class SearchUpdatesMixin:
         if defaults is None:
             raise NotImplementedError
         defaults.plot_results(self, samples)
+
+    @property
+    def plots_results_during_fit(self) -> bool:
+        """
+        Whether ``plot_results`` runs at every ``iterations_per_full_update`` or
+        only once the fit is complete, by the search's ``posterior_kind``
+        (``PosteriorDefaults.plots_during_fit``).
+        """
+        from autofit.non_linear.search.posterior_kind import defaults_for
+
+        defaults = defaults_for(type(self).posterior_kind)
+        return True if defaults is None else defaults.plots_during_fit
 
     def plot_latent_results(self, samples):
         """
