@@ -685,7 +685,8 @@ def _fast_ellipsoid_bound_cls():
 
 
 @requires_nautilus
-def test__d100_fit_writes_a_checkpoint_that_nautilus_resumes(tmp_path, monkeypatch):
+@pytest.mark.parametrize("checkpoint_interval", [1, 5])
+def test__d100_fit_writes_a_checkpoint_that_nautilus_resumes(tmp_path, monkeypatch, checkpoint_interval):
     """
     A D = 100 fit reaches its first checkpoint write after an ellipsoid bound
     (nautilus-sampler 1.0.5 raised ``object header message is too large`` there),
@@ -711,6 +712,7 @@ def test__d100_fit_writes_a_checkpoint_that_nautilus_resumes(tmp_path, monkeypat
 
     search = af.Nautilus(
         name="nautilus_d100_checkpoint",
+        checkpoint_interval_batches=checkpoint_interval,
         n_live=101,
         n_networks=1,
         n_batch=101,

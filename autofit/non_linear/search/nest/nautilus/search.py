@@ -346,6 +346,7 @@ class Nautilus(NonLinearSearch):
         session: Optional[sa.orm.Session] = None,
         use_jax_vmap: Optional[bool] = None,
         checkpoint: bool = True,
+        checkpoint_interval_batches: int = 1,
         **kwargs,
     ):
         """
@@ -414,7 +415,24 @@ class Nautilus(NonLinearSearch):
             normally: the search writes the file in the HDF5 1.8 format, because
             nautilus 1.0.5's default format cannot store their bounds
             (``_large_attribute_hdf5``).
+        checkpoint_interval_batches
+            Experimental persistence policy. The default 1 keeps native Nautilus
+            checkpointing. Larger positive integers batch shell updates into
+            complete atomic snapshots, retaining native full-write points and
+            flushing on normal run returns. An interruption can lose recent
+            batches plus work in flight. Requires checkpoint=True and Nautilus
+            1.0.5; does not change sampling settings or the search identifier.
         """
+
+        from numbers import Integral
+
+        if (isinstance(checkpoint_interval_batches, bool)
+                or not isinstance(checkpoint_interval_batches, Integral)
+                or checkpoint_interval_batches < 1):
+            raise ValueError("checkpoint_interval_batches must be a positive integer")
+        if not checkpoint and checkpoint_interval_batches != 1:
+            raise ValueError("checkpoint_interval_batches > 1 requires checkpoint=True")
+        self.checkpoint_interval_batches = int(checkpoint_interval_batches)
 
         super().__init__(
             name=name,
@@ -586,6 +604,14 @@ class Nautilus(NonLinearSearch):
         try:
             from nautilus import Sampler
 
+            if getattr(self, "checkpoint_interval_batches", 1) > 1:
+                from functools import partial
+                from .checkpoint_policy import BatchedCheckpointSampler
+
+                return partial(
+                    BatchedCheckpointSampler,
+                    checkpoint_interval_batches=self.checkpoint_interval_batches,
+                )
             return Sampler
         except ModuleNotFoundError:
             raise ModuleNotFoundError(
