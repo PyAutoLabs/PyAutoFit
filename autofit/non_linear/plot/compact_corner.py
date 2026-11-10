@@ -64,6 +64,10 @@ def prepare(data, weights, axes_settings, plot_settings):
     common = {k: v for k, v in plot_settings.items() if k in COMMON}
     # Samples.plot_2d gives common kwargs precedence over panel kwargs.
     lower, diagonal = {**lower, **common}, {**diagonal, **common}
+    # Pandas substitutes series names / stringifies None for non-string labels.
+    # Leave those conventions to the original dispatcher.
+    if any("label" in opts and not isinstance(opts["label"], str) for opts in (lower, diagonal)):
+        return None
     from matplotlib.colors import is_color_like
 
     if any("color" in opts and not is_color_like(opts["color"]) for opts in (lower, diagonal)):

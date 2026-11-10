@@ -74,7 +74,7 @@ def test_real_runtime_exact_parity(monkeypatch, options):
     np.testing.assert_array_equal(actual, original)
 
 
-@pytest.mark.parametrize("mutation", ["nan", "float32", "constant", "negative", "version", "style"])
+@pytest.mark.parametrize("mutation", ["nan", "float32", "constant", "negative", "version", "style", "label_none"])
 def test_unsupported_inputs_fall_back_before_drawing(monkeypatch, mutation):
     samples = _samples_with(3, n_samples=80)
     options = {}
@@ -105,6 +105,8 @@ def test_unsupported_inputs_fall_back_before_drawing(monkeypatch, mutation):
         return
     elif mutation == "version":
         monkeypatch.setattr(compact_corner, "version", lambda p: "unvalidated")
+    elif mutation == "label_none":
+        options["label"] = None
     else:
         options["diagonal_kwargs"] = {"linewidth": 2}
     monkeypatch.setattr(compact_corner, "draw", lambda *a: pytest.fail("fallback drew partially"))
