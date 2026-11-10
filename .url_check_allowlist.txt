@@ -7,7 +7,6 @@
 # To accept new breakage: append the URL here. To force a fix: leave it out.
 
 # Code of Conduct boilerplate
-http://geekfeminism.wikia.com/wiki/Conference_anti-harassment/Policy  # CODE_OF_CONDUCT.md:306
 
 # GitHub refs (workspaces / removed tutorials)
 https://github.com/PyAutoLabs/autofit_workspace/blob/main/notebooks/features/database.ipynb  # docs/api/database.rst:12
@@ -18,7 +17,6 @@ https://github.com/PyAutoLabs/autofit_workspace/tree/main/projects/astro  # docs
 https://pyautofit.readthedocs.io/en/latest/cookbooks/database.html  # autofit/aggregator/aggregator.py:121
 https://pyautofit.readthedocs.io/en/latest/features/database.html  # docs/api/database.rst:11
 https://pyautofit.readthedocs.io/en/latest/general/adding_a_model_component.html  # autofit/mapper/prior/width_modifier.py:69
-https://pyautofit.readthedocs.io/en/latest/general/installation.html#forking-cloning  # CONTRIBUTING.md:96
 https://pyautofit.readthedocs.io/en/latest/general/installation.html#installation-with-pip  # docs/general/workspace.md:7
 
 # Internal image refs missing from main
