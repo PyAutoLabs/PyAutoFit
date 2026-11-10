@@ -10,6 +10,7 @@ from autofit.non_linear.plot.plot_util import (
     output_figure,
     accepted_kwarg_names,
     checked_kwargs,
+    PlotKwargsError,
 )
 
 # Above this many plotted parameters a corner plot is drawn in a compact style
@@ -129,8 +130,18 @@ def corner_anesthetic(
         component's declared conversion is applied to the samples (a shear's
         components become its magnitude and angle, say) and parameters without
         one pass through; see ``AbstractPriorModel.latent_parameters_from``.
+    compact_backend
+        Optional keyword: ``"anesthetic"`` (default) or experimental ``"array"``.
+        The array backend reuses weighted histogram ranges on finite float64
+        compact plots. Unsupported styles, data and dependency versions use
+        the established anesthetic backend; no samples are thinned.
     """
     config_dict = conf.instance["visualize"]["plots_settings"]["corner_anesthetic"]
+    compact_backend = kwargs.pop(
+        "compact_backend", _setting(config_dict, "compact_backend", "anesthetic")
+    )
+    if compact_backend not in ("anesthetic", "array"):
+        raise PlotKwargsError("compact_backend must be 'anesthetic' or 'array'")
 
     from anesthetic.samples import NestedSamples
     from anesthetic import make_2d_axes
@@ -238,6 +249,14 @@ def corner_anesthetic(
         {key: value for key, value in kwargs.items() if key not in axes_names}
     )
 
+    prepared = None
+    if compact_backend == "array":
+        from autofit.non_linear.plot import compact_corner
+
+        prepared = compact_corner.prepare(
+            parameter_array, samples.weight_list, axes_settings, plot_settings
+        )
+
     fig, axes = make_2d_axes(
         columns,
         labels=labels_map,
@@ -247,11 +266,11 @@ def corner_anesthetic(
     if SettingWithCopyWarning is not None:
         warnings.filterwarnings("default", category=SettingWithCopyWarning)
 
-    with _deferred_shared_axes():
-        nested_samples.plot_2d(
-            axes,
-            **plot_settings,
-        )
+    if prepared is not None:
+        compact_corner.draw(axes, prepared)
+    else:
+        with _deferred_shared_axes():
+            nested_samples.plot_2d(axes, **plot_settings)
     axes.set_labels(labels_map)
     axes.iloc[-1, 0].legend(
         bbox_to_anchor=(len(axes) / 2, len(axes)),

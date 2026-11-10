@@ -1,4 +1,5 @@
 corner_anesthetic:
+  compact_backend: anesthetic  # Opt-in 'array' accelerates supported compact plots; other styles/versions fall back.
   figsize_per_parammeter: 4   # The figsize of the matplotlib figure is given as the number of parameters times this value, for exmaple with 3 free parameters and a value 4 the figsize will be 3*4 = 12.
   fontsize: 20               # The size of the font of the tick values and parameter labels on the x and y axis of the corner plot.
   facecolor: white           # The facecolor of the corner plot.
