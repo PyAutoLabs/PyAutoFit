@@ -1,120 +1,65 @@
 # PyAutoFit: Scientific Inference with Natural Language
 
-[![Project Status: Active](https://www.repostatus.org/badges/latest/active.svg)](https://www.repostatus.org/#active)
-[![Python Versions](https://img.shields.io/pypi/pyversions/autofit)](https://pypi.org/project/autofit/)
-[![PyPI Version](https://img.shields.io/pypi/v/autofit.svg)](https://pypi.org/project/autofit/)
-[![Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.11.9.1/notebooks/overview/overview_1_the_basics.ipynb)
-[![Tests](https://github.com/PyAutoLabs/PyAutoFit/actions/workflows/main.yml/badge.svg)](https://github.com/PyAutoLabs/PyAutoFit/actions)
-[![Build](https://github.com/PyAutoLabs/PyAutoHands/actions/workflows/release.yml/badge.svg)](https://github.com/PyAutoLabs/PyAutoHands/actions)
-[![Documentation Status](https://readthedocs.org/projects/pyautofit/badge/?version=latest)](https://pyautofit.readthedocs.io/en/latest/?badge=latest)
-[![JOSS](https://joss.theoj.org/papers/10.21105/joss.02550/status.svg)](https://doi.org/10.21105/joss.02550)
-
-[AI Assistant](https://github.com/PyAutoLabs/autofit_assistant) |
-[Documentation](https://pyautofit.readthedocs.io/en/latest/index.html) |
-[Installation Guide](https://pyautofit.readthedocs.io/en/latest/installation/overview.html) |
-[Introduction on Colab](https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.11.9.1/notebooks/overview/overview_1_the_basics.ipynb) |
-[HowToFit](https://github.com/PyAutoLabs/HowToFit)
-
-**PyAutoFit is designed so scientists can bring their models, data and likelihood code, then fit models, explore results and develop analyses using natural language with an AI coding agent.**
+**PyAutoFit** is a Python package for scientific model fitting and Bayesian inference. Bring your models, data and likelihood code, then fit models and explore results through natural language with an AI assistant or by writing Python yourself.
 
 ## Getting Started
 
-**PyAutoFit** and the **autofit_assistant** allow one to perform scientific inference using purely natural language.
-Simply open your AI coding agent (`codex` or `Claude Code` are recommended) and input the following prompt:
+### Explore with AI
 
-<sub><b>Example Natural Language Prompt for Claude Code, Codex or other AI coding agent</b></sub>
+The [**PyAutoFit AI Assistant**](https://github.com/PyAutoLabs/autofit_assistant) helps you compose models, choose priors, run inference and interpret results through conversation. To get started, paste this prompt into your AI coding agent:
 
 ```text
-I want to perform scientific inference with PyAutoFit (https://github.com/PyAutoLabs/PyAutoFit) and the
+I want to perform scientific inference with PyAutoFit
+(https://github.com/PyAutoLabs/PyAutoFit) and the
 autofit_assistant (https://github.com/PyAutoLabs/autofit_assistant).
 
+First clone the assistant repository, cd into it and follow its AGENTS.md.
 Begin the "start here" guide for a new user.
 ```
 
-**PyAutoFit** is designed to be used entirely through natural language — the
-[natural-language inference page](https://pyautofit.readthedocs.io/en/latest/overview/natural_language.html)
-walks through this, including its **AI First Design**.
+See [AI Options](https://github.com/PyAutoLabs/PyAutoScientist/blob/main/AI_OPTIONS.md) for tools and setup guidance.
 
-## Bring Your Own Likelihood (BYOL)
+### Explore It Yourself
 
-Already have a likelihood function for your science problem? **Point the assistant at your existing code and it can
-set it up with PyAutoFit** — defining the model, choosing priors with you, configuring a search and organising the
-results:
+- **[Try it in your browser](https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.11.9.1/notebooks/overview/overview_1_the_basics.ipynb)** — run the introductory notebook without installing anything.
+- **[Install PyAutoFit](https://pyautofit.readthedocs.io/en/latest/installation/overview.html)** — get set up on your computer.
+- **[Find examples](https://github.com/PyAutoLabs/autofit_workspace#find-your-examples)** — explore model fitting, sampling methods and plotting in the workspace.
 
-<sub><b>Example Natural Language Prompt for Claude Code, Codex or other AI coding agent</b></sub>
+## Bring Your Own Likelihood
+
+Already have a likelihood function for your science problem? The assistant can help connect your existing code to PyAutoFit:
 
 ```text
-Set up PyAutoFit with my existing science project. An example likelihood function can be found at
+Set up PyAutoFit with my existing science project:
 [GitHub link or local directory].
 
-First, give me an overview of my project and likelihood function. Compose an appropriate model, explain it to me,
-and recommend a non-linear search (for example MCMC, nested sampling or maximum-likelihood estimation).
+Explain my likelihood function, propose a model and priors,
+and recommend a search method.
 
-Do not begin inference until we have discussed the setup and I give you the go-ahead.
+Do not begin inference until we have discussed the setup
+and I give you the go-ahead.
 
-Once inference is running, explain how the results are written to disk and show me how to inspect and interpret
-them with PyAutoFit.
+Then show me how to inspect and interpret the results.
 ```
 
-The assistant answers this prompt with its
-[**BYOL** mode](https://github.com/PyAutoLabs/autofit_assistant/blob/main/modes/byol.md) — bring your own likelihood,
-the assistant brings the inference. It reads your code and restates what your likelihood scores, composes a model with
-priors chosen with you, wraps and validates your function unchanged, recommends a search, and runs nothing until you
-say go.
+The [Bring Your Own Likelihood guide](https://github.com/PyAutoLabs/autofit_assistant/blob/main/modes/byol.md) explains the workflow.
 
-Your existing science code remains the source of the likelihood. With PyAutoFit built around it, you can perform
-inference through natural language while gaining access to features such as flexible priors and model composition,
-MCMC and nested sampling, automated result handling, model comparison and scalable workflows.
+## Learn Bayesian Inference
 
-## What is PyAutoFit?
+[**HowToFit**](https://github.com/PyAutoLabs/HowToFit) teaches Bayesian inference and model fitting through worked notebooks, starting from undergraduate level. You can also read the [Markdown lectures](https://github.com/PyAutoLabs/HowToFit/tree/main/markdown) directly on GitHub.
 
-**PyAutoFit** is a domain-agnostic Python package for scientific model fitting and Bayesian inference. It supports
-nested sampling, MCMC and optimisation, alongside advanced methods such as hierarchical models, search chaining
-and Bayesian model comparison.
+The [PyAutoFit documentation](https://pyautofit.readthedocs.io/en/latest/index.html) covers the software’s features, from model composition and sampling to model comparison and hierarchical inference.
 
-[**autofit_assistant**](https://github.com/PyAutoLabs/autofit_assistant) connects natural-language requests to runnable
-**PyAutoFit** workflows. Ask it to compose a model, discuss priors, run inference or compare competing explanations.
-You guide the science; it writes and runs Python scripts you can inspect, rerun and share.
+## Community and Contributing
 
-## Human Readable Documentation
+Ask questions, suggest improvements and share your work in [PyAutoLabs Discussions](https://github.com/orgs/PyAutoLabs/discussions), or chat with us on [Slack](https://join.slack.com/t/pyautolens/shared_invite/zt-2cufp4eyf-fXfgMxRGuvg~bMrI3uOAxg).
 
-- [The PyAutoFit readthedocs](https://pyautofit.readthedocs.io/en/latest), which includes an [installation guide](https://pyautofit.readthedocs.io/en/latest/installation/overview.html) and an overview of **PyAutoFit**'s core features.
-- [The introduction Jupyter Notebook on Colab](https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.11.9.1/notebooks/overview/overview_1_the_basics.ipynb), where you can try **PyAutoFit** in a web browser (without installation).
-- [The autofit_workspace GitHub repository](https://github.com/PyAutoLabs/autofit_workspace), which includes example scripts demonstrating **PyAutoFit**'s features.
-- [The standalone HowToFit repository](https://github.com/PyAutoLabs/HowToFit), a series of Jupyter notebook lectures which give new users a step-by-step introduction to **PyAutoFit**.
+To contribute or explore community projects, visit the [PyAutoFit community page](https://pyautofit.readthedocs.io/en/latest/general/community.html).
 
-## HowToFit
+## Citations
 
-For users less familiar with Bayesian inference and scientific analysis you may wish to read through
-the **HowToFit** lectures. These teach you the basic principles of Bayesian inference, with the
-content pitched at undergraduate level and above.
+If you use PyAutoFit in your research, see the [citation guide](https://github.com/PyAutoLabs/PyAutoFit/blob/main/CITATIONS.md).
 
-The lectures are available in the [standalone HowToFit repository](https://github.com/PyAutoLabs/HowToFit).
+## License
 
-Use the [Jupyter notebooks](https://github.com/PyAutoLabs/HowToFit/tree/main/notebooks) if you want to run
-the code (recommended), or read the available [Markdown lectures](https://github.com/PyAutoLabs/HowToFit/tree/main/markdown)
-directly on GitHub.
-
-For help alongside the lectures, open the [autofit_assistant](https://github.com/PyAutoLabs/autofit_assistant)
-repository in your AI coding agent, following its setup instructions, and paste:
-
-```text
-Enter HowToFit mode.
-
-I want to work through the HowToFit lectures. Show me where to find them
-and how to use Jupyter Notebook or Markdown, then help me with questions
-as I go.
-```
-
-The assistant will answer questions about concepts, equations, code and results as you study, and help with
-notebook errors. Share the lecture link and section or the cell you are working on; you choose when to move on.
-
-## Community & Contributing
-
-**PyAutoFit** is built in the open by its users: everyone is welcome to ask questions,
-share what they have made with it, and contribute.
-
-Questions, ideas and bug reports: the [PyAutoLabs Discussions](https://github.com/orgs/PyAutoLabs/discussions).
-Chat with us on [Slack](https://join.slack.com/t/pyautolens/shared_invite/zt-2cufp4eyf-fXfgMxRGuvg~bMrI3uOAxg).
-
-Community-built tools and tutorials, and how to contribute: the [**PyAutoFit** community page](https://pyautofit.readthedocs.io/en/latest/general/community.html).
+See the [license](https://github.com/PyAutoLabs/PyAutoFit/blob/main/LICENSE).
