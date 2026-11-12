@@ -89,7 +89,7 @@ def test_sbatch_script_cache_root_exports_fill_if_unset():
     request.cache_root = "/mnt/ral/x/"
     lines = sbatch_script(request).splitlines()
     for line in [
-        'export TMPDIR="${TMPDIR:-/mnt/ral/x/tmp}"',
+        'if [ -z "${TMPDIR:-}" ] || [ "$TMPDIR" = /tmp ]; then export TMPDIR="/mnt/ral/x/tmp"; fi',
         'export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/mnt/ral/x/.cache}"',
         'export NUMBA_CACHE_DIR="${NUMBA_CACHE_DIR:-/mnt/ral/x/.cache/numba}"',
         # "-" not ":-": an explicitly empty value still disables the JAX cache.
@@ -98,8 +98,8 @@ def test_sbatch_script_cache_root_exports_fill_if_unset():
     ]:
         assert line in lines, line
     # After `set -euo pipefail` and before the stage env, so a stage env value wins.
-    assert lines.index("set -euo pipefail") < lines.index('export TMPDIR="${TMPDIR:-/mnt/ral/x/tmp}"')
-    assert lines.index('export TMPDIR="${TMPDIR:-/mnt/ral/x/tmp}"') < lines.index("export NAME='a b'")
+    assert lines.index("set -euo pipefail") < lines.index('if [ -z "${TMPDIR:-}" ] || [ "$TMPDIR" = /tmp ]; then export TMPDIR="/mnt/ral/x/tmp"; fi')
+    assert lines.index('if [ -z "${TMPDIR:-}" ] || [ "$TMPDIR" = /tmp ]; then export TMPDIR="/mnt/ral/x/tmp"; fi') < lines.index("export NAME='a b'")
 
 
 def _cache_env(tmp_path, cache_root, environment):
@@ -130,6 +130,9 @@ def test_sbatch_script_cache_block_runs_under_bash(tmp_path):
         tmp_path, root, {"PATH": "/usr/bin:/bin", "TMPDIR": "/scratch", "JAX_COMPILATION_CACHE_DIR": ""}
     )
     assert (tmpdir, jax) == ("/scratch", "")
+    # Slurm sets TMPDIR=/tmp itself when the submit environment has none: replace it.
+    tmpdir, _ = _cache_env(tmp_path, root, {"PATH": "/usr/bin:/bin", "TMPDIR": "/tmp"})
+    assert tmpdir == f"{root}/tmp"
 
 
 def _run_generated_script(tmp_path, fit_body, signal_usr1):

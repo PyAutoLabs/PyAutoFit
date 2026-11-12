@@ -78,4 +78,5 @@ def test_dry_run_carries_cache_root(tmp_path):
 
     path = write_campaign(tmp_path / "p", CAMPAIGN.replace("site: ral\n", "site: ral\ncache_root: /mnt/ral/x\n"))
     entries = submit(Campaign.load(path), None, dry_run=True)
-    assert 'export TMPDIR="${TMPDIR:-/mnt/ral/x/tmp}"' in entries[0]["script"].splitlines()
+    assert 'XDG_CACHE_HOME="${XDG_CACHE_HOME:-/mnt/ral/x/.cache}"' in entries[0]["script"]
+    assert 'export TMPDIR="/mnt/ral/x/tmp"' in entries[0]["script"]

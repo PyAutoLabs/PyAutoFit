@@ -71,16 +71,23 @@ def _cache_exports(cache_root: str) -> List[str]:
     Fill-if-unset exports sending temp files and caches under ``cache_root``.
 
     A value already in the job's environment (for example from the submitting shell)
-    wins. ``JAX_COMPILATION_CACHE_DIR`` uses ``${VAR-...}`` so an explicitly empty value
-    still disables the JAX cache. A stage's own ``env`` is exported afterwards and so
-    overrides these.
+    wins, with one exception: ``TMPDIR=/tmp`` is replaced too, because Slurm sets
+    ``TMPDIR`` to its ``TmpFS`` (``/tmp``) itself when the submit environment has none,
+    so a plain fill-if-unset would never fire. ``JAX_COMPILATION_CACHE_DIR`` uses
+    ``${VAR-...}`` so an explicitly empty value still disables the JAX cache. A stage's
+    own ``env`` is exported afterwards and so overrides these.
     """
     root = cache_root.rstrip("/") or "/"
     lines = []
     for key, relative in CACHE_DIRS:
-        operator = "-" if key == "JAX_COMPILATION_CACHE_DIR" else ":-"
-        # The default sits inside "${...}", so escape for a double-quoted context.
+        # The default sits inside double quotes, so escape for that context.
         path = re.sub(r'([\\"$`])', r"\\\1", f"{root}/{relative}")
+        if key == "TMPDIR":
+            lines.append(
+                f'if [ -z "${{TMPDIR:-}}" ] || [ "$TMPDIR" = /tmp ]; then export TMPDIR="{path}"; fi'
+            )
+            continue
+        operator = "-" if key == "JAX_COMPILATION_CACHE_DIR" else ":-"
         lines.append(f'export {key}="${{{key}{operator}{path}}}"')
     lines.append('mkdir -p "$TMPDIR" "$XDG_CACHE_HOME" 2>/dev/null || true')
     return lines
