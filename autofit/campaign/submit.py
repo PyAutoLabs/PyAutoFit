@@ -81,6 +81,7 @@ def requests_for(
                     manifest=str(campaign.path(campaign.manifest_path)),
                     env=dict(stage.env),
                     log_dir=campaign.log_dir,
+                    cache_root=campaign.cache_root,
                 )
             )
     return requests

@@ -9,6 +9,7 @@
     manifest_fields: [sample, tile]           # optional names for a line's fields
     chunk: 1000                               # tasks per array, ≤ the site's max_array_size
     site: ral                                 # autonerves site layer
+    cache_root: /mnt/ral/jnightin             # optional: TMPDIR + caches go here
     scheduler: slurm                          # slurm (default) or local
     status_root: output                       # where fits write *.status.json
     log_dir: hpc/logs
@@ -59,6 +60,7 @@ CAMPAIGN_FIELDS = {
     "manifest_separator",
     "chunk",
     "site",
+    "cache_root",
     "scheduler",
     "status_root",
     "log_dir",
@@ -185,6 +187,7 @@ class Campaign:
         self.manifest_separator = raw.get("manifest_separator")
         self.chunk = raw.get("chunk")
         self.site_name = raw.get("site")
+        self.cache_root = raw.get("cache_root")
         self.scheduler = raw.get("scheduler", "slurm")
         self.status_root = raw.get("status_root", "output")
         self.log_dir = raw.get("log_dir", "hpc/logs")
@@ -387,6 +390,10 @@ class Campaign:
             errors.append(f"scheduler: {self.scheduler!r} is not one of {sorted(SCHEDULERS)}")
         if self.chunk is not None and (not isinstance(self.chunk, int) or self.chunk < 1):
             errors.append(f"chunk: must be a positive integer, not {self.chunk!r}")
+        if self.cache_root is not None and (
+            not isinstance(self.cache_root, str) or not self.cache_root.startswith("/")
+        ):
+            errors.append(f"cache_root: must be an absolute path, not {self.cache_root!r}")
 
         site = None
         if self.site_name:

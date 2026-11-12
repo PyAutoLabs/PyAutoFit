@@ -71,3 +71,11 @@ def test_dry_run(campaign_file):
     assert "#SBATCH --dependency=aftercorr:<vis_lp@4>" in entries[4]["script"]
     assert entries[0]["lint"] == "ok"
     assert not campaign.directory.exists()
+
+
+def test_dry_run_carries_cache_root(tmp_path):
+    from test_autofit.campaign.conftest import CAMPAIGN, write_campaign
+
+    path = write_campaign(tmp_path / "p", CAMPAIGN.replace("site: ral\n", "site: ral\ncache_root: /mnt/ral/x\n"))
+    entries = submit(Campaign.load(path), None, dry_run=True)
+    assert 'export TMPDIR="${TMPDIR:-/mnt/ral/x/tmp}"' in entries[0]["script"].splitlines()

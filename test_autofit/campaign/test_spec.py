@@ -66,6 +66,13 @@ def test_unknown_retry_class(tmp_path):
     assert "unknown failure class 'segfault'" in _errors(tmp_path, "retry: {{timeout", "retry: {{segfault: none, timeout")
 
 
+def test_cache_root(tmp_path):
+    path = write_campaign(tmp_path / "p", CAMPAIGN.replace("site: ral\n", "site: ral\ncache_root: /mnt/ral/x\n"))
+    assert Campaign.load(path).cache_root == "/mnt/ral/x"
+    assert Campaign.load(write_campaign(tmp_path / "q")).cache_root is None
+    assert "cache_root: must be an absolute path" in _errors(tmp_path, "site: ral\n", "site: ral\ncache_root: scratch\n")
+
+
 def test_cycle(tmp_path):
     text = CAMPAIGN.replace("    script: scripts/fit.py --stage=vis_lp", "    after: {{sed: aftercorr}}\n    script: scripts/fit.py --stage=vis_lp")
     message = _errors(tmp_path, CAMPAIGN, text)
