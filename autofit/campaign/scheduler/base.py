@@ -179,6 +179,7 @@ class SubmitRequest:
     env: Dict[str, str] = field(default_factory=dict)
     after: Dict[str, str] = field(default_factory=dict)
     log_dir: Optional[str] = None
+    cache_root: Optional[str] = None
 
     @property
     def task_ids(self) -> List[int]:

@@ -78,6 +78,60 @@ def test_sbatch_script():
     assert "--gres" not in script
 
 
+def test_sbatch_script_without_cache_root_sets_no_cache_variables():
+    script = sbatch_script(_request())
+    assert "TMPDIR" not in script
+    assert "XDG_CACHE_HOME" not in script
+
+
+def test_sbatch_script_cache_root_exports_fill_if_unset():
+    request = _request()
+    request.cache_root = "/mnt/ral/x/"
+    lines = sbatch_script(request).splitlines()
+    for line in [
+        'export TMPDIR="${TMPDIR:-/mnt/ral/x/tmp}"',
+        'export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/mnt/ral/x/.cache}"',
+        'export NUMBA_CACHE_DIR="${NUMBA_CACHE_DIR:-/mnt/ral/x/.cache/numba}"',
+        # "-" not ":-": an explicitly empty value still disables the JAX cache.
+        'export JAX_COMPILATION_CACHE_DIR="${JAX_COMPILATION_CACHE_DIR-/mnt/ral/x/.cache/pyauto_jax}"',
+        'mkdir -p "$TMPDIR" "$XDG_CACHE_HOME" 2>/dev/null || true',
+    ]:
+        assert line in lines, line
+    # After `set -euo pipefail` and before the stage env, so a stage env value wins.
+    assert lines.index("set -euo pipefail") < lines.index('export TMPDIR="${TMPDIR:-/mnt/ral/x/tmp}"')
+    assert lines.index('export TMPDIR="${TMPDIR:-/mnt/ral/x/tmp}"') < lines.index("export NAME='a b'")
+
+
+def _cache_env(tmp_path, cache_root, environment):
+    """Run the cache block of a generated script under bash; return its TMPDIR and JAX cache."""
+    import shutil
+
+    if shutil.which("bash") is None:
+        pytest.skip("needs bash")
+    request = _request()
+    request.cache_root = cache_root
+    request.env = {}
+    script = sbatch_script(request).split("export PYTHONUNBUFFERED", 1)[0]
+    script += 'printf "%s\\n%s" "$TMPDIR" "${JAX_COMPILATION_CACHE_DIR-unset}"'
+    completed = subprocess.run(
+        ["bash", "-c", script], env=environment, capture_output=True, text=True, check=True
+    )
+    return completed.stdout.split("\n")
+
+
+def test_sbatch_script_cache_block_runs_under_bash(tmp_path):
+    root = str(tmp_path / "a b$c")
+    tmpdir, jax = _cache_env(tmp_path, root, {"PATH": "/usr/bin:/bin"})
+    assert tmpdir == f"{root}/tmp"
+    assert jax == f"{root}/.cache/pyauto_jax"
+    assert (tmp_path / "a b$c" / "tmp").is_dir()
+    # The job's own environment wins; an explicitly empty JAX cache stays empty.
+    tmpdir, jax = _cache_env(
+        tmp_path, root, {"PATH": "/usr/bin:/bin", "TMPDIR": "/scratch", "JAX_COMPILATION_CACHE_DIR": ""}
+    )
+    assert (tmpdir, jax) == ("/scratch", "")
+
+
 def _run_generated_script(tmp_path, fit_body, signal_usr1):
     """Run the generated batch script under bash, with a stand-in fit."""
     import os

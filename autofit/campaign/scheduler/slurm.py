@@ -12,6 +12,7 @@ Every ``submit`` and every ``update_pending`` that changes a partition is linted
 partition: CPU-only work never goes on a GPU partition.
 """
 import logging
+import re
 import shlex
 import subprocess
 from typing import Callable, Dict, List, Optional, Sequence
@@ -44,6 +45,45 @@ def _export(key: str, value: str) -> str:
     if "$" in value:
         return f'export {key}="{value}"'
     return f"export {key}={shlex.quote(value)}"
+
+
+# Where a job's temp files and tool caches go when the campaign names a ``cache_root``.
+# On many clusters (RAL: every compute node) $HOME and /tmp sit on a small local OS
+# disk that compute nodes do not share with the login node; pip, matplotlib, numba,
+# CUDA/Triton, astropy, the PyAutoNerves JAX compile cache and Python's tempfile all
+# default there and can fill it and crash the node (RAL admin, 2026-09-25 and
+# 2026-11-12). Values are relative to ``cache_root``.
+CACHE_DIRS = (
+    ("TMPDIR", "tmp"),
+    ("XDG_CACHE_HOME", ".cache"),
+    ("PIP_CACHE_DIR", ".cache/pip"),
+    ("MPLCONFIGDIR", ".cache/matplotlib"),
+    ("NUMBA_CACHE_DIR", ".cache/numba"),
+    ("CUDA_CACHE_PATH", ".cache/nv"),
+    ("TRITON_CACHE_DIR", ".cache/triton"),
+    ("ASTROPY_CACHE_DIR", ".cache/astropy"),
+    ("JAX_COMPILATION_CACHE_DIR", ".cache/pyauto_jax"),
+)
+
+
+def _cache_exports(cache_root: str) -> List[str]:
+    """
+    Fill-if-unset exports sending temp files and caches under ``cache_root``.
+
+    A value already in the job's environment (for example from the submitting shell)
+    wins. ``JAX_COMPILATION_CACHE_DIR`` uses ``${VAR-...}`` so an explicitly empty value
+    still disables the JAX cache. A stage's own ``env`` is exported afterwards and so
+    overrides these.
+    """
+    root = cache_root.rstrip("/") or "/"
+    lines = []
+    for key, relative in CACHE_DIRS:
+        operator = "-" if key == "JAX_COMPILATION_CACHE_DIR" else ":-"
+        # The default sits inside "${...}", so escape for a double-quoted context.
+        path = re.sub(r'([\\"$`])', r"\\\1", f"{root}/{relative}")
+        lines.append(f'export {key}="${{{key}{operator}{path}}}"')
+    lines.append('mkdir -p "$TMPDIR" "$XDG_CACHE_HOME" 2>/dev/null || true')
+    return lines
 
 
 def sbatch_script(request: SubmitRequest) -> str:
@@ -99,6 +139,7 @@ def sbatch_script(request: SubmitRequest) -> str:
     lines += [
         "",
         "set -euo pipefail",
+        *(_cache_exports(request.cache_root) if request.cache_root else []),
         *(_export(key, value) for key, value in env.items()),
         'export CAMPAIGN_INDEX=$((CAMPAIGN_OFFSET + SLURM_ARRAY_TASK_ID))',
         f"cd {shlex.quote(str(request.project_root))}",
