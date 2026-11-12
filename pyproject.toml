@@ -28,7 +28,7 @@ dependencies = [
     # in autonerves' base dependencies once it exists (PyAutoLens#702), so
     # backtracking cannot pair this autofit with a jax-optional autonerves.
     # The newer floor also requires the CPU LAPACK deadlock exclusions (Heart#274).
-    "autonerves>2026.10.4.1",
+    "autonerves>=2026.11.9.1.post1",  # jax>=0.12 floor (PyAutoNerves#215): excludes 2026.11.9.1, the last jax-0.11 Nerves; ">=…post1" (not ">2026.11.9.1") so a source Nerves built as 2026.11.9.1.postN still satisfies it
     # JAX-native gradient MAP searches (MultiStartAdam / MultiStartProdigy)
     # import optax; jax itself comes from autonerves' base deps. Both are
     # marker-gated for platforms with no jax wheels (Intel macOS) — optax
