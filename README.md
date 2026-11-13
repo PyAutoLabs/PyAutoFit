@@ -21,7 +21,7 @@ See [AI Options](https://github.com/PyAutoLabs/PyAutoScientist/blob/main/AI_OPTI
 
 ### Explore It Yourself
 
-- **[Try it in your browser](https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.11.12.1/notebooks/overview/overview_1_the_basics.ipynb)** — run the introductory notebook without installing anything.
+- **[Try it in your browser](https://colab.research.google.com/github/PyAutoLabs/autofit_workspace/blob/2026.11.13.1/notebooks/overview/overview_1_the_basics.ipynb)** — run the introductory notebook without installing anything.
 - **[Install PyAutoFit](https://pyautofit.readthedocs.io/en/latest/installation/overview.html)** — get set up on your computer.
 - **[Find examples](https://github.com/PyAutoLabs/autofit_workspace#find-your-examples)** — explore model fitting, sampling methods and plotting in the workspace.
 
