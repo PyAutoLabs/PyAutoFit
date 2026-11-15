@@ -145,7 +145,7 @@ class Analysis(af.Analysis):
 
         residual_map = self.data - model_data_1d
         chi_squared_map = (residual_map / self.noise_map) ** 2.0
-        log_likelihood = -0.5 * sum(chi_squared_map)
+        log_likelihood = -0.5 * self._xp.sum(chi_squared_map)
 
         return log_likelihood
 
