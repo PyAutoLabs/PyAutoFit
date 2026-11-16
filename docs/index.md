@@ -4,9 +4,14 @@
 classes, data and likelihood code; **PyAutoFit** provides priors, inference algorithms and tools for interpreting
 and organising the results. It is domain agnostic: inference can sit around your existing scientific software.
 
+Build **auto**mated inference workflows by composing models, chaining searches and organising results. With
+JAX-compatible likelihoods, use **auto**differentiable models for gradient-based optimisation or sampling,
+alongside GPU acceleration for supported calculations.
+
 We recommend getting started with [autofit_assistant](https://github.com/PyAutoLabs/autofit_assistant), which lets
-you **perform scientific inference using natural language**. Describe the model you want to fit, ask the assistant
-to run the analysis, and explore the results through follow-up requests —
+you **perform scientific inference using natural language**. It supports increasingly **auto**nomous workflows:
+describe the model you want to fit, ask the assistant to run the analysis, and explore the results through
+follow-up requests while you guide the scientific choices —
 see [Natural Language Inference](https://pyautofit.readthedocs.io/en/latest/overview/natural_language.html).
 
 Users can then set up a **PyAutoFit** scientific workflow, which enables streamlined modeling of small

@@ -2,6 +2,8 @@
 
 **PyAutoFit** is a Python package for scientific model fitting and Bayesian inference. Bring your models, data and likelihood code, then fit models and explore results through natural language with an AI assistant or by writing Python yourself.
 
+Build **auto**mated inference workflows by composing models, chaining searches and organising results. With JAX-compatible likelihoods, use **auto**differentiable models for gradient-based optimisation or sampling, alongside GPU acceleration for supported calculations. The PyAutoFit Assistant supports increasingly **auto**nomous workflows, helping you connect your science code to inference and inspect the results while you guide the scientific choices.
+
 ## Getting Started
 
 ### Explore with AI
