@@ -61,6 +61,71 @@ def test_projected_model():
     assert isinstance(projected_model.centre, af.UniformPrior)
 
 
+def _shared_prior_samples():
+    """
+    Two Gaussians sharing one `centre` prior. The kwargs hold the shared prior under
+    its LAST alias (`gaussian_1.centre`), as a fit's samples do, while the model's
+    `path_priors_tuples` names it by its FIRST (`gaussian_0.centre`).
+    """
+    centre = af.UniformPrior()
+    model = af.Collection(
+        gaussian_0=af.Model(af.ex.Gaussian, centre=centre),
+        gaussian_1=af.Model(af.ex.Gaussian, centre=centre),
+    )
+    rng = np.random.default_rng(1)
+    samples = af.Samples(
+        model,
+        [
+            af.Sample(
+                -1.0,
+                -1.0,
+                weight=float(rng.uniform()),
+                kwargs={
+                    ("gaussian_0", "normalization"): float(rng.uniform()),
+                    ("gaussian_0", "sigma"): float(rng.uniform()),
+                    ("gaussian_1", "centre"): float(rng.uniform()),
+                    ("gaussian_1", "normalization"): float(rng.uniform()),
+                    ("gaussian_1", "sigma"): float(rng.uniform()),
+                },
+            )
+            for _ in range(100)
+        ],
+    )
+    return model, samples
+
+
+def test_values_for_path_shared_prior_any_alias():
+    """PyAutoFit#1773: a shared prior is readable through any of its paths."""
+    _, samples = _shared_prior_samples()
+
+    first = samples.values_for_path(("gaussian_0", "centre"))
+    last = samples.values_for_path(("gaussian_1", "centre"))
+
+    assert len(first) == 100
+    assert first == last
+    assert first == [s.kwargs[("gaussian_1", "centre")] for s in samples.sample_list]
+
+
+def test_values_for_path_unknown_path_raises():
+    _, samples = _shared_prior_samples()
+    with pytest.raises(KeyError):
+        samples.values_for_path(("gaussian_2", "centre"))
+
+
+def test_projected_model_shared_prior():
+    """
+    PyAutoFit#1773: EP's projection used to raise KeyError for a prior shared across
+    paths (every factor with an MGE source); it now projects the shared prior once.
+    """
+    model, samples = _shared_prior_samples()
+    projected_model = af.mock.MockResult(samples=samples).projected_model
+
+    assert projected_model.prior_count == model.prior_count == 5
+    assert projected_model.gaussian_0.centre is projected_model.gaussian_1.centre
+    assert projected_model.gaussian_0.centre.id == model.gaussian_0.centre.id
+    assert isinstance(projected_model.gaussian_0.centre, af.UniformPrior)
+
+
 def test_projected_model_nonfinite_names_path_and_prior_id():
     """
     A non-finite sample for one parameter raises `ProjectionException` (not a

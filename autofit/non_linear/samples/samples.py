@@ -242,9 +242,32 @@ class Samples(SamplesInterface, ABC):
     def values_for_path(self, path: Tuple[str]) -> List[float]:
         """
         Returns the value for a variable with a given path
-        for each sample in the model
+        for each sample in the model.
+
+        A prior shared by several paths (e.g. one `centre` prior tied across the
+        Gaussians of a multi-Gaussian expansion) is stored in each sample's kwargs
+        under only one of its aliases, which need not be `path`. The path is
+        therefore resolved to the group of all paths naming the same prior, and the
+        value is read under whichever alias the sample holds — the rule
+        `Sample.parameter_lists_for_paths` uses (PyAutoFit#1773).
         """
-        return [sample.kwargs[path] for sample in self.sample_list]
+        path = tuple(path)
+        aliases = (path,)
+        if self.model is not None:
+            for group in self.paths:
+                if path in group:
+                    aliases = group
+                    break
+
+        def value_from(sample):
+            for alias in aliases:
+                if alias in sample.kwargs:
+                    return sample.kwargs[alias]
+            raise KeyError(
+                f"Could not find any of the following keys in kwargs {aliases}"
+            )
+
+        return [value_from(sample) for sample in self.sample_list]
 
     @property
     def total_iterations(self) -> int:
