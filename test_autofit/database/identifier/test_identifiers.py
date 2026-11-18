@@ -632,3 +632,27 @@ def test_assertion_name_does_not_change_identifier():
     collection.add_assertion(a.sigma < b.sigma, name="ordered")
 
     assert Identifier(collection) == Identifier(_asserted_collection())
+
+
+class ZeroDimProfile:
+    def __init__(self, centre=0.0, slope=1.0):
+        self.centre = centre
+        self.slope = slope
+
+
+def _zero_dim_model(centre, slope):
+    return af.Collection(
+        lens=ZeroDimProfile(centre=centre, slope=slope),
+        gaussian=af.Model(af.ex.Gaussian),
+    )
+
+
+def test_instance_with_0d_numpy_array_attribute():
+    model = _zero_dim_model(np.array(0.5), np.array(2.0))
+
+    first = str(Identifier(model))
+    second = str(Identifier(_zero_dim_model(np.array(0.5), np.array(2.0))))
+
+    assert first == second
+    assert first == str(Identifier(_zero_dim_model(0.5, 2.0)))
+    assert first != str(Identifier(_zero_dim_model(np.array(0.5), np.array(3.0))))
