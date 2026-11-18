@@ -102,6 +102,8 @@ class CompoundPrior(AbstractPriorModel, ArithmeticMixin, Compound, ABC):
             "right": self._right.dict()
             if isinstance(self._right, ModelObject)
             else self._right,
+            "left_name": self._left_name,
+            "right_name": self._right_name,
         }
 
     @classmethod
@@ -113,10 +115,36 @@ class CompoundPrior(AbstractPriorModel, ArithmeticMixin, Compound, ABC):
     ):
         from autofit import ModelObject
 
-        return cls(
+        compound = cls(
             ModelObject.from_dict(d["left"], reference, loaded_ids),
             ModelObject.from_dict(d["right"], reference, loaded_ids),
         )
+        compound._set_operand_names(d.get("left_name"), d.get("right_name"))
+        return compound
+
+    def _set_operand_names(
+        self, left_name: Optional[str], right_name: Optional[str]
+    ):
+        """
+        Restore the attribute names the operands were stored under when the
+        compound was serialised.
+
+        The names are found by inspecting the caller's frames when the
+        compound is first built, so a compound rebuilt by ``from_dict`` would
+        otherwise get different names. They are part of the model identifier,
+        so a reloaded model must keep them. Dictionaries written before the
+        names were serialised carry none and keep the rebuilt names.
+        """
+        left_name = left_name or self._left_name
+        right_name = right_name or self._right_name
+
+        for name in {self._left_name, self._right_name} - {left_name, right_name}:
+            self.__dict__.pop(name, None)
+
+        self._left_name = left_name
+        self._right_name = right_name
+        setattr(self, left_name, self._left)
+        setattr(self, right_name, self._right)
 
     @property
     def left(self):
@@ -359,12 +387,14 @@ class ModifiedPrior(AbstractPriorModel, ABC, ArithmeticMixin, Compound):
         self.prior = prior
 
     def dict(self):
+        from autofit import ModelObject
+
         return {
             "type": "modified",
             "modified_type": self.__class__.__name__,
             "name": self._prior_name,
             "prior": self.prior.dict()
-            if isinstance(self.prior, AbstractPriorModel)
+            if isinstance(self.prior, ModelObject)
             else self.prior,
         }
 
@@ -393,7 +423,9 @@ class ModifiedPrior(AbstractPriorModel, ABC, ArithmeticMixin, Compound):
 
     @property
     def cls(self):
-        return self.prior.cls
+        if isinstance(self.prior, AbstractPriorModel):
+            return self.prior.cls
+        return float
 
     @property
     def prior(self):

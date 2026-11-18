@@ -32,7 +32,14 @@ def test_sum_prior(prior_dict):
 
     sum_prior = prior + prior
 
-    assert sum_prior.dict() == prior_dict
+    d = sum_prior.dict()
+
+    # The operand names are found by inspecting the caller's frames, so their
+    # values depend on the call stack; check they are written, not what they are.
+    assert isinstance(d.pop("left_name"), str)
+    assert isinstance(d.pop("right_name"), str)
+
+    assert d == prior_dict
 
 
 def test_sum_prior_from_dict(prior_dict):
