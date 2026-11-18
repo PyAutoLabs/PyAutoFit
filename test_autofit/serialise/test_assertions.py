@@ -58,7 +58,15 @@ def make_model():
 def test_to_dict(model_dict, model):
     model.add_assertion(model.centre > 0)
 
-    assert model.dict() == model_dict
+    d = model.dict()
+
+    # The operand names are found by inspecting the caller's frames, so their
+    # values depend on the call stack; check they are written, not what they are.
+    (assertion,) = d["assertions"]
+    assert isinstance(assertion.pop("left_name"), str)
+    assert isinstance(assertion.pop("right_name"), str)
+
+    assert d == model_dict
 
 
 def test_from_dict(assertion_dict):

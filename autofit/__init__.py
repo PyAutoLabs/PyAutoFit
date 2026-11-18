@@ -158,6 +158,7 @@ for type_ in (
     "LogGaussian",
     "TruncatedGaussian",
     "compound",
+    "modified",
     "Constant",
 ):
     register_parser(type_, ModelObject.from_dict)
