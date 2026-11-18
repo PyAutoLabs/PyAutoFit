@@ -20,9 +20,9 @@ class DatasetModel:
         self.grid_offset = grid_offset
 
 
-def _make_model(free_grid_offset, free_sky):
+def _make_model(free_grid_offset, free_sky, fixed_sky=0.0):
     model = af.Model(DatasetModel)
-    model.background_sky_level = 0.0
+    model.background_sky_level = fixed_sky
     model.grid_offset.grid_offset_0 = 0.0
     model.grid_offset.grid_offset_1 = 0.0
     if free_grid_offset:
@@ -52,6 +52,45 @@ def test_model_with_tuple_prior_round_trips(free_grid_offset, free_sky, prior_co
 
     assert rebuilt.prior_count == prior_count
     assert isinstance(rebuilt.grid_offset, TuplePrior)
+
+
+@pytest.mark.parametrize(
+    "free_grid_offset, free_sky",
+    [
+        (False, False),
+        (True, False),
+        (True, True),
+    ],
+)
+def test_model_round_trip_keeps_fixed_attributes_for_instances(
+    free_grid_offset, free_sky
+):
+    model = _make_model(free_grid_offset, free_sky, fixed_sky=0.3)
+    register_model(model)
+
+    leaves, treedef = jax.tree_util.tree_flatten(model)
+    rebuilt = jax.tree_util.tree_unflatten(treedef, leaves)
+
+    if not free_sky:
+        assert rebuilt.background_sky_level == 0.3
+
+    original_instance = model.instance_from_prior_medians()
+    rebuilt_instance = rebuilt.instance_from_prior_medians()
+
+    assert rebuilt_instance.background_sky_level == original_instance.background_sky_level
+    assert rebuilt_instance.grid_offset == original_instance.grid_offset
+    if not free_sky:
+        assert rebuilt_instance.background_sky_level == 0.3
+
+    vector = [0.25] * model.prior_count
+    assert (
+        rebuilt.instance_from_vector(vector).background_sky_level
+        == model.instance_from_vector(vector).background_sky_level
+    )
+    assert (
+        rebuilt.instance_from_vector(vector).grid_offset
+        == model.instance_from_vector(vector).grid_offset
+    )
 
 
 def test_tuple_prior_round_trips_free_and_fixed_members():

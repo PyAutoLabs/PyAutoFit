@@ -334,20 +334,38 @@ class Model(AbstractPriorModel):
         ``TuplePrior`` attributes (e.g. a ``grid_offset`` tuple), so both
         survive ``tree_unflatten``. A model with neither flattens to empty
         children.
+
+        Fixed direct attributes (e.g. a fixed sky level) are not priors, so
+        they travel in the aux data and ``tree_unflatten`` restores them,
+        rather than the rebuilt model falling back to a prior-config lookup.
         """
         tuples = list(self.direct_prior_tuples) + list(self.direct_tuple_priors)
         names = tuple(name for name, _ in tuples)
         children = tuple(value for _, value in tuples)
-        return children, (names, self.cls)
+        return children, (names, self.cls, self._direct_fixed_tuples)
+
+    @property
+    def _direct_fixed_tuples(self):
+        """
+        (name, value) tuples for direct attributes that are fixed values: not
+        priors, tuple priors or child models.
+        """
+        return tuple(
+            (key, value)
+            for key, value in self.__dict__.items()
+            if not key.startswith("_")
+            and key not in ("cls", "id")
+            and not isinstance(value, (Prior, TuplePrior, AbstractPriorModel))
+        )
 
     @classmethod
     def tree_unflatten(cls, aux_data, children):
         """
         Unflatten a PyTree into a model.
         """
-        names, cls_ = aux_data
+        names, cls_, fixed = aux_data
         arguments = {name: child for name, child in zip(names, children)}
-        return cls(cls_, **arguments)
+        return cls(cls_, **dict(fixed), **arguments)
 
     def dict(self):
         return {"class_path": get_class_path(self.cls), **super().dict()}
