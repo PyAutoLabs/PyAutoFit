@@ -55,6 +55,7 @@ def enable_pytrees() -> bool:
     import autofit as af
     from autofit.mapper.prior_model.prior_model import Model
     from autofit.mapper.prior_model.collection import Collection
+    from autofit.mapper.prior.tuple_prior import TuplePrior
 
     for cls in (
         af.GaussianPrior,
@@ -64,6 +65,7 @@ def enable_pytrees() -> bool:
         af.TruncatedGaussianPrior,
         Model,
         Collection,
+        TuplePrior,
         af.ModelInstance,
     ):
         try:

@@ -329,9 +329,16 @@ class Model(AbstractPriorModel):
     def tree_flatten(self):
         """
         Flatten this model as a PyTree.
+
+        The children are the model's direct priors and its direct
+        ``TuplePrior`` attributes (e.g. a ``grid_offset`` tuple), so both
+        survive ``tree_unflatten``. A model with neither flattens to empty
+        children.
         """
-        names, priors = zip(*self.direct_prior_tuples)
-        return priors, (names, self.cls)
+        tuples = list(self.direct_prior_tuples) + list(self.direct_tuple_priors)
+        names = tuple(name for name, _ in tuples)
+        children = tuple(value for _, value in tuples)
+        return children, (names, self.cls)
 
     @classmethod
     def tree_unflatten(cls, aux_data, children):
