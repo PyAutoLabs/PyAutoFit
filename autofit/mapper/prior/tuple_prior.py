@@ -23,6 +23,32 @@ class TuplePrior(ModelObject):
         for key, value in kwargs.items():
             setattr(self, key, value)
 
+    def tree_flatten(self):
+        """
+        Flatten this tuple prior as a JAX PyTree.
+
+        The prior members are the children; their names and any fixed
+        (non-prior) members go in the aux data, so ``tree_unflatten``
+        rebuilds the same mix of free and fixed tuple entries.
+        """
+        prior_tuples = self.prior_tuples
+        names = tuple(name for name, _ in prior_tuples)
+        children = tuple(prior for _, prior in prior_tuples)
+        fixed = tuple(
+            (key, value)
+            for key, value in self.__dict__.items()
+            if key != "id" and not isinstance(value, Prior)
+        )
+        return children, (names, fixed)
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        """
+        Rebuild a tuple prior from its flattened PyTree.
+        """
+        names, fixed = aux_data
+        return cls(**dict(zip(names, children)), **dict(fixed))
+
     @property
     @cast_collection(PriorNameValue)
     def prior_tuples(self):
