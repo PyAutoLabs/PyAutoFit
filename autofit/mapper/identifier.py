@@ -182,6 +182,13 @@ class Identifier:
         elif isinstance(value, (str, int, bool)):
             self.hash_list.append(str(value))
         elif isinstance(value, Iterable):
+            if getattr(value, "ndim", None) == 0:
+                # A 0-d NumPy array is Iterable by type but cannot be iterated:
+                # hash the scalar it holds, so it matches the equivalent Python
+                # value. NumPy scalars such as np.float64 are not Iterable and JAX
+                # arrays take the __dict__ branch above, so neither reaches here.
+                self.add_value_to_hash_list(value.item())
+                return
             for value in value:
                 self.add_value_to_hash_list(value)
 
