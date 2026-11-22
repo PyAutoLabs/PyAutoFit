@@ -1,9 +1,11 @@
 import importlib.util
+import json
 
 import numpy as np
 import pytest
 
 import autofit as af
+from autonerves.conf import with_config
 
 pytestmark = pytest.mark.filterwarnings("ignore::FutureWarning")
 
@@ -18,17 +20,18 @@ requires_nautilus = pytest.mark.skipif(
 
 
 @pytest.mark.parametrize(
-    "steps, limit, expected_budgets, expected_updates",
+    "steps, limit, expected_budgets, expected_updates, reason",
     [
-        ([(40, True)], None, [300], 0),
-        ([(320, False), (360, True)], None, [300, 620], 1),
-        ([(320, False), (640, False)], 600, [300, 600], 1),
-        ([(300, False)], 300, [300], 0),
-        ([(0, False)], None, [300], 0),
+        ([(40, True)], None, [300], 0, None),
+        ([(320, False), (360, True)], None, [300, 620], 1, None),
+        ([(320, False), (640, False)], 600, [300, 600], 1, "n_like_max"),
+        ([(300, False)], 300, [300], 0, "n_like_max"),
+        ([(300, True)], 300, [300], 0, None),
+        ([(0, False)], None, [300], 0, None),
     ],
 )
 def test__completion_and_likelihood_budgets(
-    monkeypatch, steps, limit, expected_budgets, expected_updates
+    monkeypatch, steps, limit, expected_budgets, expected_updates, reason
 ):
     """Convergence ends immediately; incomplete chunks advance by real calls."""
     search = af.Nautilus(
@@ -40,11 +43,14 @@ def test__completion_and_likelihood_budgets(
 
     class Sampler:
         n_like = 0
+        n_live = 10
+        log_z = 0.0
 
         def __init__(self):
             self.budgets = []
 
         def run(self, **kwargs):
+            assert "timeout" not in kwargs
             self.budgets.append(kwargs["n_like_max"])
             self.n_like, converged = steps[len(self.budgets) - 1]
             return converged
@@ -54,9 +60,87 @@ def test__completion_and_likelihood_budgets(
 
     sampler = Sampler()
     assert search.call_search(sampler, None, None, None) is sampler
+    assert search.samples_info_from(sampler).get("termination_reason") == reason
     assert sampler.budgets == expected_budgets
     assert len(updates) == expected_updates
     assert all(update["during_analysis"] for update in updates)
+
+
+@pytest.mark.parametrize(
+    "update_duration, expected_timeouts", [(2.0, [10.0, 5.0]), (7.0, [10.0])]
+)
+def test__timeout_uses_one_deadline_across_chunks(
+    monkeypatch, update_duration, expected_timeouts
+):
+    from autofit.non_linear.search.nest.nautilus import search as nautilus_search
+
+    elapsed = 0.0
+    monkeypatch.setattr(nautilus_search, "monotonic", lambda: elapsed)
+    search = af.Nautilus(
+        name="timeout", n_live=10, iterations_per_full_update=300, timeout=10
+    )
+    timeouts = []
+
+    class Sampler:
+        n_like = 0
+        n_live = 10
+        log_z = 0.0
+
+        def run(self, *, timeout, n_like_max, **kwargs):
+            nonlocal elapsed
+            timeouts.append(timeout)
+            if len(timeouts) == 1:
+                self.n_like = n_like_max
+                elapsed += 3.0
+            else:
+                self.n_like += 20
+                elapsed += timeout
+            return False
+
+    def update(sampler):
+        nonlocal elapsed
+        elapsed += update_duration
+
+    sampler = search.call_search(Sampler(), None, None, None, update=update)
+    assert timeouts == expected_timeouts
+    assert search.samples_info_from(sampler)["termination_reason"] == "timeout"
+
+
+@requires_nautilus
+@with_config("general", "output", "samples_to_csv", value=True)
+@pytest.mark.parametrize("batches, force_x1_cpu", [(0, False), (1, False), (1, True)])
+def test__real_timeout_returns_or_reports_empty_posterior(
+    tmp_path, monkeypatch, batches, force_x1_cpu
+):
+    import nautilus.sampler
+    from autofit.conf import instance
+
+    monkeypatch.delenv("PYAUTO_TEST_MODE", raising=False)
+    monkeypatch.setattr(instance, "output_path", str(tmp_path))
+    # The real sampler reads time() at entry and before each batch.
+    clock = iter([0.0] * (1 + batches) + [100.0])
+    monkeypatch.setattr(nautilus.sampler, "time", lambda: next(clock))
+
+    search = af.Nautilus(
+        name="timeout_fit",
+        timeout=10,
+        n_live=20,
+        n_batch=10,
+        seed=1,
+        verbose=False,
+        force_x1_cpu=force_x1_cpu,
+    )
+    fit_args = dict(model=_vector_model(2), analysis=_VectorGaussianAnalysis(2))
+    if batches == 0:
+        with pytest.raises(af.exc.SearchBudgetExceeded) as error:
+            search.fit(**fit_args)
+        assert error.value.termination_reason == "timeout"
+    else:
+        result = search.fit(**fit_args)
+        assert result.samples.samples_info["termination_reason"] == "timeout"
+        assert result.samples.samples_info["total_samples"] == 10
+        info_file = search.paths.open_result() / "files" / "samples_info.json"
+        assert json.loads(info_file.read_text())["termination_reason"] == "timeout"
 
 
 @pytest.mark.parametrize("limit", [None, float("inf"), 100])
