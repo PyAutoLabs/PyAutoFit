@@ -50,17 +50,29 @@ class TruncatedNormalMessage(AbstractMessage):
         float
             The log-partition (log of the normalizing constant).
         """
-        from autofit.mapper.prior._erf_helpers import _norm_cdf
+        if xp is np:
+            from scipy.special import log_ndtr
+        else:
+            from jax.scipy.special import log_ndtr
 
         # Untruncated Gaussian log-partition — see NormalMessage.log_partition.
         gaussian = (self.mean ** 2) / (2 * self.sigma ** 2) + xp.log(self.sigma)
 
         a = (self.lower_limit - self.mean) / self.sigma
         b = (self.upper_limit - self.mean) / self.sigma
-        # `scipy.special.ndtr` is the routine `scipy.stats.norm.cdf` wraps: bit-identical,
-        # without the `rv_continuous` argument-checking overhead.
-        Z = _norm_cdf(b, np) - _norm_cdf(a, np)
-        log_Z = xp.log(Z) if Z > 0 else -xp.inf
+        # Reflect upper-tail intervals so their CDFs stay distinguishable.
+        upper_tail = a > 0
+        log_upper = log_ndtr(xp.where(upper_tail, -a, b))
+        log_lower = log_ndtr(xp.where(upper_tail, -b, a))
+
+        # Mask zero mass before subtracting to avoid inf - inf and log(0).
+        positive_mass = log_upper > log_lower
+        difference = xp.where(positive_mass, log_lower, -xp.inf) - xp.where(
+            positive_mass, log_upper, 0.0
+        )
+        log_Z = xp.where(
+            positive_mass, log_upper + xp.log(-xp.expm1(difference)), -xp.inf
+        )
         return gaussian + log_Z
 
     log_base_measure = -0.5 * np.log(2 * np.pi)

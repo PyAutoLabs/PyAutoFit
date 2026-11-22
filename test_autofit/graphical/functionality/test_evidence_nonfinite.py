@@ -1,17 +1,7 @@
-"""
-A non-finite term in the EP log evidence is reported by name, not summed (PyAutoFit#1713).
+"""EP evidence reports non-finite terms by name (PyAutoFit#1713).
 
-On the analytic_gaussian ensemble (seeds 25 and 172, default ``projection="mode"``)
-one member of a ``HierarchicalFactor`` sends the parent scatter a truncated-normal
-message centred thousands of sigma below its support (mean -7374, sigma 384 on
-[0, 100]). Its truncation mass ``Phi(b) - Phi(a)`` evaluates to ``1 - 1 = 0``, so its
-log-partition is ``-inf``: the scatter's variable evidence is ``+inf``, every adjacent
-factor term is ``-inf``, and ``EPMeanField.log_evidence`` added them, emitting numpy's
-``invalid value encountered in add`` once per evaluation and returning NaN. The
-posteriors are unaffected; only the evidence readout is.
-
-The fixture below is that state in miniature: two factors share ``x``, one message is
-the production message.
+The degenerate fixture injects the non-finite log-partition that triggered the
+reporting bug. The production tail message now has a finite normalizer.
 """
 
 import logging
@@ -41,18 +31,21 @@ def _degenerate(x):
     return -x
 
 
-def make_approx(x, bad_mean=-7374.0, bad_sigma=384.0):
+class NonfinitePartitionMessage(TruncatedNormalMessage):
+    def log_partition(self, xp=np):
+        return -xp.inf
+
+
+def make_approx(x, mean, sigma, message_type=TruncatedNormalMessage):
     ok_factor = g.Factor(_ok, x, name="f_ok")
     degenerate_factor = g.Factor(_degenerate, x, name="f_degenerate")
     ok = TruncatedNormalMessage(mean=10.0, sigma=5.0, lower_limit=0.0, upper_limit=100.0)
-    bad = TruncatedNormalMessage(
-        mean=bad_mean, sigma=bad_sigma, lower_limit=0.0, upper_limit=100.0
-    )
+    other = message_type(mean=mean, sigma=sigma, lower_limit=0.0, upper_limit=100.0)
     return g.EPMeanField(
         factor_graph=g.FactorGraph([ok_factor, degenerate_factor]),
         factor_mean_field={
             ok_factor: g.MeanField({x: ok}),
-            degenerate_factor: g.MeanField({x: bad}),
+            degenerate_factor: g.MeanField({x: other}),
         },
     )
 
@@ -64,12 +57,18 @@ def make_x():
 
 @pytest.fixture(name="degenerate")
 def make_degenerate(x):
-    return make_approx(x)
+    return make_approx(x, -7374.18, 384.36, NonfinitePartitionMessage)
 
 
 @pytest.fixture(name="healthy")
 def make_healthy(x):
-    return make_approx(x, bad_mean=20.0, bad_sigma=8.0)
+    return make_approx(x, 20.0, 8.0)
+
+
+def test_tail_message_has_finite_evidence(x):
+    approximation = make_approx(x, -7374.18, 384.36)
+    assert np.isfinite(approximation.log_evidence)
+    assert approximation.nonfinite_evidence_terms == {}
 
 
 def test_log_evidence_nan_without_runtime_warning(degenerate):

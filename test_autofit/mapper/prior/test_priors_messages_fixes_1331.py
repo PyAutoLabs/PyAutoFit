@@ -5,6 +5,7 @@ tests.
 import numpy as np
 import pytest
 from scipy import integrate
+from scipy.special import log_ndtr
 from scipy.stats import norm
 
 import autofit as af
@@ -53,7 +54,37 @@ def test__truncated_message_log_partition_normalises_pdf():
     a = (m.lower_limit - m.mean) / m.sigma
     b = (m.upper_limit - m.mean) / m.sigma
     expected = (m.mean ** 2) / (2 * m.sigma ** 2) + np.log(m.sigma) + np.log(norm.cdf(b) - norm.cdf(a))
-    assert float(m.log_partition()) == pytest.approx(expected, rel=1e-9)
+    assert float(m.log_partition()) == pytest.approx(expected, abs=1e-12, rel=0)
+
+
+@pytest.mark.parametrize(
+    ("lower", "upper"),
+    [(-1.0, 2.0), (-np.inf, 2.0), (-1.0, np.inf), (-np.inf, np.inf)],
+)
+def test_truncated_message_log_partition_matches_direct_cdf(lower, upper):
+    mean, sigma = 0.5, 1.2
+    message = TruncatedNormalMessage(mean, sigma, lower, upper)
+    a, b = (lower - mean) / sigma, (upper - mean) / sigma
+    expected = (mean / sigma) ** 2 / 2 + np.log(sigma) + np.log(
+        norm.cdf(b) - norm.cdf(a)
+    )
+
+    assert message.log_partition() == pytest.approx(expected, abs=1e-12, rel=0)
+
+
+@pytest.mark.parametrize(
+    ("mean", "lower", "upper"),
+    [(-7374.18, 0.0, 100.0), (7374.18, -100.0, 0.0)],
+)
+def test_truncated_message_log_partition_in_both_tails(mean, lower, upper):
+    sigma = 384.36
+    message = TruncatedNormalMessage(mean, sigma, lower, upper)
+    log_near = log_ndtr(-abs(mean) / sigma)
+    log_far = log_ndtr(-(abs(mean) + 100.0) / sigma)
+    log_mass = log_near + np.log1p(-np.exp(log_far - log_near))
+    expected = (mean / sigma) ** 2 / 2 + np.log(sigma) + log_mass
+
+    assert message.log_partition() == pytest.approx(expected, abs=1e-9, rel=0)
 
 
 # --- #10: FixedMessage.logpdf returns a fresh array (no aliased class-level cache) ---
