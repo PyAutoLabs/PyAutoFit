@@ -392,16 +392,10 @@ class NonLinearSearch(
 
     @configure_handler
     def start_resume_fit(self, analysis: Analysis, model: AbstractPriorModel) -> Result:
-        """
-        Start a non-linear search from scratch, or resume one which was previously
-        terminated mid-way through (from the samples it left off at), and return its
-        ``Result``.
+        """Run or resume the search and return its result.
 
-        When the search completes a `.completed` file is output, so a rerun is not
-        repeated and loads its results via `result_via_completed_fit`; results are also
-        output to the `files` folder via the analysis' `save_results`. Under
-        ``PYAUTO_TEST_MODE>=2`` the backend is bypassed (``TestModeBypass``); both
-        paths end in ``finalize_result``.
+        Both the real backend and the test-mode bypass finish in `finalize_result`.
+        Only successful finalization writes `.completed` for subsequent reuse.
         """
         if self.paths.has_timer:
             self.timer.start()
