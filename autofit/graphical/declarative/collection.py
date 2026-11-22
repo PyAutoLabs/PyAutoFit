@@ -279,20 +279,19 @@ class FactorGraphModel(AbstractDeclarativeFactor):
         -------
         A result with child results for each model factor
         """
-        child_results = [
-            model_factor.analysis.make_result(
-                samples_summary=samples_summary.subsamples(
-                    model_factor.prior_model,
-                ),
-                paths=paths,
-                samples=samples.subsamples(model_factor.prior_model)
-                if samples
-                else None,
-                search_internal=search_internal,
-                analysis=model_factor,
+        child_results = []
+        for index, model_factor in enumerate(self.model_factors):
+            # Use the fitted submodel, which may carry replacement priors in grid cells.
+            fitted_model = samples_summary.model[index]
+            child_results.append(
+                model_factor.analysis.make_result(
+                    samples_summary=samples_summary.subsamples(fitted_model),
+                    paths=paths,
+                    samples=samples.subsamples(fitted_model) if samples else None,
+                    search_internal=search_internal,
+                    analysis=model_factor,
+                )
             )
-            for model_factor in self.model_factors
-        ]
         return CombinedResult(
             child_results,
             samples_summary=samples_summary,
