@@ -135,6 +135,8 @@ def test__real_timeout_returns_or_reports_empty_posterior(
         with pytest.raises(af.exc.SearchBudgetExceeded) as error:
             search.fit(**fit_args)
         assert error.value.termination_reason == "timeout"
+        assert not search.paths.is_complete
+        fit_args["model"].x0 = af.UniformPrior(lower_limit=0.0, upper_limit=2.0)
     else:
         result = search.fit(**fit_args)
         assert result.samples.samples_info["termination_reason"] == "timeout"
