@@ -13,6 +13,22 @@ jax = pytest.importorskip("jax")
 jnp = pytest.importorskip("jax.numpy")
 
 
+def test_truncated_message_log_partition_is_jittable_in_both_tails():
+    message = TruncatedNormalMessage(
+        mean=np.array([-7374.18, 7474.18]),
+        sigma=384.36,
+        lower_limit=0.0,
+        upper_limit=100.0,
+    )
+    actual = jax.jit(lambda: message.log_partition(xp=jnp))()
+
+    assert np.isfinite(actual).all()
+    tolerance = 1e-9 if jax.config.jax_enable_x64 else 1e-4
+    np.testing.assert_allclose(
+        np.asarray(actual), message.log_partition(), atol=tolerance, rtol=0
+    )
+
+
 MESSAGE_ARRAY_CASES = [
     pytest.param(
         lambda value, xp: NormalMessage.calc_natural_parameters(

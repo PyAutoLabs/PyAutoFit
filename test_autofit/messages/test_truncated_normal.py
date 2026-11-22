@@ -313,10 +313,10 @@ _NDTR_GRID = [
 
 def test__ndtr_swap_bit_identical():
     """
-    The truncated-normal message maths uses `scipy.special.ndtr` (via
+    The truncated-normal KL and gradient use `scipy.special.ndtr` (via
     `_erf_helpers._norm_cdf`) instead of `scipy.stats.norm.cdf` (#1642): the same
     Cephes routine without the `rv_continuous` wrapper. The swap must be bit
-    identical, including infinite truncation limits, for `log_partition`, `kl` and
+    identical, including infinite truncation limits, for `kl` and
     `_normal_gradient_hessian_from`, each checked against a reference evaluated with
     `scipy.stats.norm.cdf` directly.
     """
@@ -337,11 +337,6 @@ def test__ndtr_swap_bit_identical():
 
         Z = norm.cdf(b) - norm.cdf(a)
         log_Z = np.log(Z) if Z > 0 else -np.inf
-        expected_log_partition = (
-            mean**2 / (2 * sigma**2) + np.log(sigma) + log_Z
-        )
-        assert message.log_partition() == expected_log_partition
-
         x = np.array([lower + 1e-3 if np.isfinite(lower) else mean - sigma, mean])
         logl, grad, hess = message._normal_gradient_hessian_from(mean, sigma, x)
         deltax = x - mean
