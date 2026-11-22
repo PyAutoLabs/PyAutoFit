@@ -221,7 +221,8 @@ SAMPLES_INFO_KEYS = {
     },
     "DynestyStatic": _DYNESTY_NAUTILUS_KEYS,
     "DynestyDynamic": _DYNESTY_NAUTILUS_KEYS,
-    "Nautilus": _DYNESTY_NAUTILUS_KEYS,
+    # The reduced-budget fixture stops Nautilus at n_like_max=1.
+    "Nautilus": _DYNESTY_NAUTILUS_KEYS | {"termination_reason"},
     "NSS": _DYNESTY_NAUTILUS_KEYS
     | {
         "log_evidence_error",
@@ -610,6 +611,8 @@ def test_samples_info_key_set(entry, backend_run):
 
     assert FAMILY_SAMPLES_INFO_CORE[entry.family] <= keys
     assert keys == SAMPLES_INFO_KEYS[entry.name]
+    if entry.name == "Nautilus":
+        assert backend_run(entry).samples_info["termination_reason"] == "n_like_max"
 
 
 @pytest.mark.parametrize(
