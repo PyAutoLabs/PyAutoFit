@@ -211,6 +211,39 @@ class TestGridNLOBehaviour:
         assert grid_search.paths.output_path != search.paths.output_path
 
 
+def test_grid_search_over_shared_factor_graph_priors(monkeypatch):
+    class GaussianAnalysis(af.Analysis):
+        def log_likelihood_function(self, instance):
+            return -instance.centre**2 - (instance.sigma - 1.0) ** 2
+
+    monkeypatch.setenv("PYAUTO_TEST_MODE", "1")
+    centre = af.UniformPrior(-5.0, 5.0)
+    sigma = af.UniformPrior(0.5, 2.0)
+    models = [
+        af.Model(af.ex.Gaussian, centre=centre, sigma=sigma, normalization=value)
+        for value in (1.0, 2.0)
+    ]
+    graph = af.FactorGraphModel(
+        *(af.AnalysisFactor(model, GaussianAnalysis()) for model in models)
+    )
+    grid_search = af.SearchGridSearch(
+        search=af.DynestyStatic(nlive=10, number_of_cores=1), number_of_steps=2
+    )
+
+    result = grid_search.fit(
+        model=graph.global_prior_model, analysis=graph, grid_priors=[centre, sigma]
+    )
+
+    assert len(result.samples) == 4
+    first, second = result.model[0], result.model[1]
+    assert first.normalization == 1.0
+    assert second.normalization == 2.0
+    assert first.centre == second.centre
+    assert first.sigma == second.sigma
+    assert first.centre.width == centre.width / 2
+    assert first.sigma.width == sigma.width / 2
+
+
 @pytest.fixture(name="grid_search_result")
 def make_grid_search_result():
     one = af.m.MockResultGrid(1)
