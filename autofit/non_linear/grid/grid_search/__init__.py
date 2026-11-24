@@ -51,9 +51,13 @@ class GridSearch:
 
         self.logger.info("Creating grid search")
 
-        self.number_of_cores = number_of_cores or 1
+        # "auto" is the detected cores: each job is a whole fit, so there is no one
+        # analysis to cap the count by.
+        from autofit.non_linear.parallel.resources import resolve_job_cores
 
-        self.logger.info(f"Using {number_of_cores} core(s)")
+        self.number_of_cores = resolve_job_cores(number_of_cores, where="GridSearch")
+
+        self.logger.info(f"Using {self.number_of_cores} core(s)")
 
         self._result_output_interval = result_output_interval
 

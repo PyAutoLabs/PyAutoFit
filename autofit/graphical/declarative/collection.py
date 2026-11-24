@@ -1,5 +1,6 @@
-from typing import List, Union, Optional
+from typing import Dict, List, Union, Optional
 
+from autofit.graphical.declarative.factor.analysis import AnalysisFactor
 from autofit.graphical.declarative.factor.hierarchical import HierarchicalFactor
 
 from autofit.tools.namer import namer
@@ -140,6 +141,90 @@ class FactorGraphModel(AbstractDeclarativeFactor):
                 f"derives it from its factors. Per-factor expectation propagation "
                 f"(graph.optimise) allows mixed factors."
             )
+
+    def modify_before_fit(self, paths: AbstractPaths, model):
+        """
+        Forward ``modify_before_fit`` to every factor's analysis before a whole-graph fit,
+        so each factor resolves its own compute setup (e.g. a PyAutoGalaxy / PyAutoLens
+        ``setup=``) exactly as it would fitted alone.
+
+        Each analysis factor gets its own sub-paths (``analyses/analysis_<i>``, as
+        ``_for_each_analysis`` names them) and its own model: the ``i``-th child of the
+        fitted ``model`` (which may carry replacement priors, e.g. in a grid-search
+        cell), else the factor's ``prior_model``. ``AnalysisFactor.modify_before_fit``
+        rebinds both of the factor's analysis references to the object returned.
+        Hierarchical factors carry no analysis and are skipped. The factors must then
+        agree on their resolved setup (``check_setup_agreement``).
+
+        Returns
+        -------
+        This graph, its factors now holding their modified analyses.
+        """
+        factors = self.model_factors
+        for i, factor in enumerate(factors):
+            if not isinstance(factor, (AnalysisFactor, FactorGraphModel)):
+                continue
+            child_paths = paths.for_sub_analysis(analysis_name=f"analyses/analysis_{i}")
+            factor.modify_before_fit(child_paths, self._factor_model(model, i, factor))
+
+        self.check_setup_agreement()
+        return self
+
+    def _factor_model(self, model, index: int, factor):
+        """
+        The model of factor ``index`` within the fitted graph ``model``, or the factor's
+        own ``prior_model`` when ``model`` does not have one child per factor.
+        """
+        try:
+            if model is not None and len(model) == len(self.model_factors):
+                return model[index]
+        except (TypeError, KeyError, IndexError, AttributeError):
+            pass
+        return factor.prior_model
+
+    def setup_ids(self) -> Dict[str, str]:
+        """
+        The resolved compute setup of each factor that has one, as {factor name:
+        setup_id} (``analysis.setup.setup_id``, duck-typed: factors whose analysis has
+        no ``setup`` are left out).
+        """
+        from autofit.non_linear.parallel.pool import setup_id_of
+
+        ids = {}
+        for factor in self._flat_factors():
+            setup_id = setup_id_of(factor)
+            if setup_id is not None:
+                ids[factor.name] = setup_id
+        return ids
+
+    def check_setup_agreement(self):
+        """
+        Raise ``SearchException`` when the factors resolved different compute setups.
+
+        A whole-graph fit evaluates every factor in one process, so every factor that
+        has a setup must have resolved the same one (factors without a setup are
+        ignored). Called at the end of ``modify_before_fit`` and by the runtime gates
+        beside ``check_backend_agreement``.
+        """
+        ids = self.setup_ids()
+        if len(set(ids.values())) <= 1:
+            return
+
+        from autofit import exc
+
+        by_setup = {}
+        for name, setup_id in ids.items():
+            by_setup.setdefault(setup_id, []).append(name)
+        listing = "; ".join(
+            f"{setup_id}: {', '.join(names)}" for setup_id, names in by_setup.items()
+        )
+        raise exc.SearchException(
+            f"The FactorGraphModel {self.name} is fitted as one analysis, but its "
+            f"factors resolved different compute setups ({listing}). Whole-graph "
+            f"fitting evaluates every factor in one process, so every factor must use "
+            f"the same setup: build every factor's analysis with the same setup= (or "
+            f"none, so each resolves the default)."
+        )
 
     @property
     def gradient_mode(self) -> str:

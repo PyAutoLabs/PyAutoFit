@@ -94,13 +94,16 @@ _THREAD_VARIABLES = (
 )
 
 
-def warn_if_threads_unpinned(number_of_cores: int):
+def warn_if_threads_unpinned(number_of_cores):
     """
     Warn when a search uses multiprocessing (``number_of_cores > 1``) while the
     numerical libraries' thread-count environment variables are not pinned to 1.
     Disabled by ``general.yaml -> parallel -> warn_environment_variables``.
+
+    Only an int count is checked: an ``"auto"`` request is checked once the fit
+    resolves it (``resolve_fit_parallel``).
     """
-    if number_of_cores <= 1 or all(
+    if not isinstance(number_of_cores, int) or number_of_cores <= 1 or all(
         os.environ.get(key) == "1" for key in _THREAD_VARIABLES
     ):
         return
@@ -241,8 +244,12 @@ def configure_handler(func):
 
 def log_fit_start(search, analysis):
     """
-    Log, once at the start of a fit, the device (JAX) or core count it runs on and the
+    Log, once at the start of a fit, the JAX device a JAX analysis runs on and the
     quick-update cadence (``NonLinearSearch.quick_update_message``).
+
+    The worker count is not logged here: it is only known once ``modify_before_fit``
+    has resolved the analysis's compute setup, and the fit's one ``Parallel:`` banner
+    line reports it (``resolve_fit_parallel``).
     """
     if analysis.is_jax:
         try:
@@ -257,10 +264,77 @@ def log_fit_start(search, analysis):
         except Exception:
             logger.info("Starting non-linear search with JAX.")
     else:
-        logger.info(
-            f"Starting non-linear search with {search.number_of_cores} cores."
-        )
+        logger.info("Starting non-linear search.")
     logger.info(search.quick_update_message)
+
+
+def resolve_fit_parallel(search, analysis):
+    """
+    Resolve a fit's worker count once ``modify_before_fit`` has resolved the analysis's
+    compute setup (``autofit.non_linear.parallel.pool.resolve_number_of_cores``:
+    ``"auto"`` becomes the detected cores, 1 for a JAX analysis or an
+    expectation-propagation factor search, capped by memory when the analysis declares
+    ``resources_per_eval()``), log the fit's one ``Parallel:`` banner line and record
+    the resolution for the pools, ``search.summary`` and ``files/parallel.json``.
+
+    ``search.number_of_cores`` keeps the request, so ``search.json`` records it; an
+    ``"auto"`` request gets its thread warning here, for the resolved count. Writes
+    ``files/parallel.json`` unless the fit is already complete (a completed fit keeps
+    the record of the run that produced it).
+    """
+    from autofit.non_linear.parallel.pool import resolve_number_of_cores
+    from autofit.non_linear.parallel.resources import is_auto
+
+    resolution = resolve_number_of_cores(
+        requested=getattr(search, "number_of_cores", 1),
+        analysis=analysis,
+        where=type(search).__name__,
+        ep_factor_search=bool(getattr(search, "_ep_factor_search", False)),
+    )
+    search._parallel_resolution = resolution
+    search._parallel_summary = resolution.summary
+
+    getattr(search, "logger", logger).info(resolution.banner)
+
+    if is_auto(resolution.requested):
+        warn_if_threads_unpinned(resolution.number_of_cores)
+
+    paths = getattr(search, "paths", None)
+    if paths is not None and not paths.is_complete:
+        paths.save_json("parallel", resolution.to_dict())
+
+    return resolution
+
+
+def fit_pools(search, analysis):
+    """
+    The fit's ``PoolFactory``, built on the resolution ``resolve_fit_parallel`` made
+    after ``modify_before_fit`` (or resolved here when there is none), with the one JAX
+    fork rule applied once; records the resolution for ``search.summary``.
+    """
+    from autofit.non_linear.parallel import PoolFactory
+
+    pools = PoolFactory(
+        search, analysis, resolution=search.__dict__.get("_parallel_resolution")
+    )
+    search._parallel_resolution = pools.resolution
+    search._parallel_summary = pools.summary
+    return pools
+
+
+def number_of_cores_request(search, number_of_cores):
+    """
+    The validated ``number_of_cores`` request a search stores (and ``search.json``
+    records): an int >= 1 or ``"auto"`` (``validate_number_of_cores``; ``None`` is 1).
+    An int count gets its thread warning now; ``"auto"`` gets it once a fit resolves it.
+    """
+    from autofit.non_linear.parallel.resources import validate_number_of_cores
+
+    number_of_cores = validate_number_of_cores(
+        number_of_cores, where=type(search).__name__
+    )
+    warn_if_threads_unpinned(number_of_cores)
+    return number_of_cores
 
 
 def quick_update_message(iterations: float) -> str:

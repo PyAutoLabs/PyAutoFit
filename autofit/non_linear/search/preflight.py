@@ -328,7 +328,8 @@ def check_runtime_gates(search, analysis, model):
     The fail-fast gates ``NonLinearSearch.start_resume_fit`` runs after the test-mode
     bypass return and before any backend state exists:
 
-    - whole-graph backend agreement (``FactorGraphModel.check_backend_agreement``),
+    - whole-graph backend and compute-setup agreement
+      (``FactorGraphModel.check_backend_agreement`` / ``check_setup_agreement``),
       through the analysis wrappers that forward their wrapped analysis's likelihood
       (``ModelAnalysis``, ``AnalysisFactor``), so a wrapped graph is still checked as
       one whole graph;
@@ -349,6 +350,7 @@ def check_runtime_gates(search, analysis, model):
         inner = inner.__dict__.get("analysis")
     if isinstance(inner, FactorGraphModel):
         inner.check_backend_agreement()
+        inner.check_setup_agreement()
 
     cap.check_jax_required(search, analysis)
 

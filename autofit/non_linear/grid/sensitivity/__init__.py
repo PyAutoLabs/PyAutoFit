@@ -84,7 +84,8 @@ class Sensitivity:
             mapping. This is useful for removing regions of the sensitivity grid that are expected to have no
             sensitivity, for example because they have no signal.
         number_of_cores
-            How many cores does this computer have?
+            The number of jobs run in parallel: a whole number >= 1, or "auto" for every core this process may
+            use (`SLURM_CPUS_PER_TASK`, then the CPU affinity, then `os.cpu_count()`).
         limit_scale
             Scales the priors for each perturbation model.
                 A scale of 1 means priors have limits the same size as the grid square.
@@ -130,7 +131,11 @@ class Sensitivity:
                     """
                 )
 
-        self.number_of_cores = number_of_cores
+        # "auto" is the detected cores: each job is a whole fit, so there is no one
+        # analysis to cap the count by.
+        from autofit.non_linear.parallel.resources import resolve_job_cores
+
+        self.number_of_cores = resolve_job_cores(number_of_cores, where="Sensitivity")
 
         self.limit_scale = limit_scale
 

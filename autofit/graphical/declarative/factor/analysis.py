@@ -86,6 +86,29 @@ class AnalysisFactor(AbstractModelFactor):
             name=name,
         )
 
+    def modify_before_fit(self, paths: AbstractPaths, model: AbstractPriorModel):
+        """
+        Forward ``modify_before_fit`` to the wrapped analysis and rebind this factor to
+        the analysis it returns (``rebind_analysis``), so the factor evaluates the
+        modified analysis (e.g. one whose compute setup is resolved).
+
+        Returns
+        -------
+        This factor.
+        """
+        self.rebind_analysis(self.analysis.modify_before_fit(paths=paths, model=model))
+        return self
+
+    def rebind_analysis(self, analysis: Analysis):
+        """
+        Point both of this factor's analysis references at ``analysis``: the factor's own
+        ``analysis`` and the ``FactorCallable`` the graph evaluates.
+        """
+        self.analysis = analysis
+        factor = self.__dict__.get("_factor")
+        if isinstance(factor, FactorCallable):
+            factor.analysis = analysis
+
     @property
     def is_jax(self) -> bool:
         """
