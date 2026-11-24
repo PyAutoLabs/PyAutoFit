@@ -363,6 +363,7 @@ def test_fit_logs_one_banner_after_modify_before_fit_and_writes_parallel_json(
         "detected_cores": 64,
         "available_memory_gb": None,
         "setup_id": "numba_cpu_sparse_fp64",
+        "estimate_line": None,
     }
 
     assert search_json["arguments"]["number_of_cores"] == "auto"
@@ -381,3 +382,94 @@ def test_fit_banner_for_jax_auto(monkeypatch, caplog, tmp_path):
     assert [r.getMessage() for r in _banner_records(caplog)] == [
         "Parallel: 1 worker (requested auto; JAX analyses run single-process)"
     ]
+
+
+# ------------------------------------------------- runtime_estimate hook (5E-2)
+
+
+class _EstimateAnalysis(_SetupAnalysis):
+    """An analysis with a duck-typed ``runtime_estimate`` hook that records its call."""
+
+    def __init__(self, *args, line="Estimate: ~2 ms/eval", raises=False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.line = line
+        self.raises = raises
+        self.calls = []
+
+    def runtime_estimate(self, search, model, number_of_cores):
+        self.calls.append((search, model, number_of_cores))
+        if self.raises:
+            raise RuntimeError("no estimate data")
+        return self.line
+
+
+def _fit_with(analysis, tmp_path, monkeypatch, caplog, name):
+    monkeypatch.setenv("PYAUTO_TEST_MODE", "2")
+    search = af.Emcee(name=name, path_prefix=str(tmp_path), number_of_cores="auto")
+    model = af.Model(af.ex.Gaussian)
+    with caplog.at_level(logging.INFO):
+        search.fit(model=model, analysis=analysis)
+    with zipfile.ZipFile(search.paths._zip_path) as archive:
+        record = json.loads(archive.read("files/parallel.json"))
+    messages = [r.getMessage() for r in caplog.records]
+    return search, model, record, messages
+
+
+def test_runtime_estimate_hook_is_logged_after_the_banner_and_recorded(
+    monkeypatch, caplog, tmp_path
+):
+    analysis = _EstimateAnalysis(data=np.ones(10), noise_map=np.ones(10))
+    search, model, record, messages = _fit_with(
+        analysis, tmp_path, monkeypatch, caplog, "estimate_hook"
+    )
+
+    banner = next(i for i, m in enumerate(messages) if m.startswith("Parallel:"))
+    assert messages[banner + 1] == "Estimate: ~2 ms/eval"
+    assert record["estimate_line"] == "Estimate: ~2 ms/eval"
+
+    assert len(analysis.calls) == 1
+    called_search, called_model, called_cores = analysis.calls[0]
+    assert called_search is search
+    assert called_model.prior_count == model.prior_count
+    assert called_cores == 64
+
+
+def test_runtime_estimate_hook_that_raises_is_ignored(monkeypatch, caplog, tmp_path):
+    analysis = _EstimateAnalysis(
+        data=np.ones(10), noise_map=np.ones(10), raises=True
+    )
+    _, _, record, messages = _fit_with(
+        analysis, tmp_path, monkeypatch, caplog, "estimate_raises"
+    )
+
+    assert record["estimate_line"] is None
+    assert not [m for m in messages if m.startswith("Estimate:")]
+    assert len([m for m in messages if m.startswith("Parallel:")]) == 1
+
+
+@pytest.mark.parametrize("line", [None, "", "   ", 42])
+def test_runtime_estimate_hook_non_string_or_empty_is_ignored(line):
+    from autofit.non_linear.search.runtime import runtime_estimate_line
+
+    class _Analysis:
+        def runtime_estimate(self, search, model, number_of_cores):
+            return line
+
+    assert (
+        runtime_estimate_line(
+            search=None, analysis=_Analysis(), model=None, number_of_cores=1
+        )
+        is None
+    )
+
+
+def test_runtime_estimate_line_without_hook_is_none():
+    from autofit.non_linear.search.runtime import runtime_estimate_line
+
+    assert (
+        runtime_estimate_line(
+            search=None, analysis=object(), model=None, number_of_cores=4
+        )
+        is None
+    )
+
