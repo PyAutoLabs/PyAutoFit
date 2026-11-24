@@ -268,7 +268,7 @@ def log_fit_start(search, analysis):
     logger.info(search.quick_update_message)
 
 
-def resolve_fit_parallel(search, analysis):
+def resolve_fit_parallel(search, analysis, model=None):
     """
     Resolve a fit's worker count once ``modify_before_fit`` has resolved the analysis's
     compute setup (``autofit.non_linear.parallel.pool.resolve_number_of_cores``:
@@ -281,6 +281,12 @@ def resolve_fit_parallel(search, analysis):
     ``"auto"`` request gets its thread warning here, for the resolved count. Writes
     ``files/parallel.json`` unless the fit is already complete (a completed fit keeps
     the record of the run that produced it).
+
+    After the banner, an analysis that defines ``runtime_estimate(search, model,
+    number_of_cores)`` (duck-typed; PyAutoLens implements it) is asked for a one-line
+    run-time estimate, which is logged and recorded as ``estimate_line`` in
+    ``files/parallel.json``. The hook is advisory: an analysis without it, a hook
+    returning anything but a non-empty string, or a hook that raises never affects the fit.
     """
     from autofit.non_linear.parallel.pool import resolve_number_of_cores
     from autofit.non_linear.parallel.resources import is_auto
@@ -294,16 +300,49 @@ def resolve_fit_parallel(search, analysis):
     search._parallel_resolution = resolution
     search._parallel_summary = resolution.summary
 
-    getattr(search, "logger", logger).info(resolution.banner)
+    search_logger = getattr(search, "logger", logger)
+    search_logger.info(resolution.banner)
+
+    estimate_line = runtime_estimate_line(
+        search=search,
+        analysis=analysis,
+        model=model,
+        number_of_cores=resolution.number_of_cores,
+    )
+    if estimate_line is not None:
+        search_logger.info(estimate_line)
 
     if is_auto(resolution.requested):
         warn_if_threads_unpinned(resolution.number_of_cores)
 
     paths = getattr(search, "paths", None)
     if paths is not None and not paths.is_complete:
-        paths.save_json("parallel", resolution.to_dict())
+        record = resolution.to_dict()
+        record["estimate_line"] = estimate_line
+        paths.save_json("parallel", record)
 
     return resolution
+
+
+def runtime_estimate_line(search, analysis, model, number_of_cores):
+    """
+    The one-line run-time estimate an analysis gives for this fit, or ``None``.
+
+    Calls ``analysis.runtime_estimate(search=..., model=..., number_of_cores=...)`` when
+    the analysis defines it. Only a non-empty string is used; any exception is logged at
+    debug level and ignored, so an estimate can never stop or change a fit.
+    """
+    hook = getattr(analysis, "runtime_estimate", None)
+    if not callable(hook):
+        return None
+    try:
+        line = hook(search=search, model=model, number_of_cores=number_of_cores)
+    except Exception as e:
+        logger.debug(f"runtime_estimate failed and was ignored: {e!r}")
+        return None
+    if isinstance(line, str) and line.strip():
+        return line.strip()
+    return None
 
 
 def fit_pools(search, analysis):

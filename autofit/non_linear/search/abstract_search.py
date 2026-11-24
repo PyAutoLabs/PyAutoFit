@@ -317,7 +317,7 @@ class NonLinearSearch(
         model.freeze()
         analysis = analysis.modify_before_fit(paths=self.paths, model=model)
         model.unfreeze()
-        resolve_fit_parallel(self, analysis)
+        resolve_fit_parallel(self, analysis, model=model)
 
         if not skip_fit_output():
             self.pre_fit_output(analysis=analysis, model=model, info=info)
