@@ -324,7 +324,7 @@ class NSS(NonLinearSearch):
         self.termination = termination
         self.checkpoint_interval = checkpoint_interval
 
-        if number_of_cores is not None and number_of_cores > 1:
+        if isinstance(self.number_of_cores, int) and self.number_of_cores > 1:
             logger.warning(
                 "af.NSS received number_of_cores=%d. NSS is JAX-native and "
                 "runs on whatever device JAX is configured for; the value is "

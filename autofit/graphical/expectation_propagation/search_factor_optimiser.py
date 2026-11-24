@@ -140,11 +140,16 @@ class SearchFactorOptimiser(AbstractFactorOptimiser):
         search._visualize_fit = visualize_ep_factor_searches
         search._visualize_before_fit = visualize_ep_factor_searches or number == 0
 
+        # Marks the fit as an EP factor search, so a `number_of_cores="auto"` request
+        # resolves to 1 (`autofit.non_linear.parallel.pool.resolve_number_of_cores`).
+        search._ep_factor_search = True
+
         try:
             result = search.fit(model=model, analysis=analysis)
         finally:
             search._visualize_fit = True
             search._visualize_before_fit = True
+            search._ep_factor_search = False
 
         # Record the sampler's log-evidence of this tilted-distribution fit on
         # the projected mean field — the per-factor Ẑₐ that README §5 documents

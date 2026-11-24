@@ -21,14 +21,35 @@ process. So:
 ``effective_number_of_cores`` is the rule; ``PoolFactory`` applies it to a search's fit and
 builds the pools the searches use, with the same pool classes, start method and arguments
 as before (``fork_context``), so pool semantics are unchanged wherever forking is allowed.
+
+**``number_of_cores="auto"``.** ``resolve_number_of_cores`` turns a search's request into
+the worker count of one fit, after ``Analysis.modify_before_fit`` has resolved the
+analysis's compute setup: an int request is honoured (the fork rule aside); ``"auto"`` is
+the detected cores (``SLURM_CPUS_PER_TASK`` -> CPU affinity -> ``os.cpu_count()``), 1 for a
+JAX analysis or an expectation-propagation factor search, and is capped by
+``min(cores // cpus_per_eval, available memory // peak_rss_gb)`` only when the analysis
+declares ``resources_per_eval()``. There is deliberately no parallel-efficiency cap: the one
+measured curve (imaging, rectangular pixelization, numba) has cores x efficiency rising at
+every step up to 32 cores, so throughput favours every core. The result
+(``ParallelResolution``) drives the fit's one ``Parallel: ...`` banner line,
+``search.summary`` and ``files/parallel.json``; ``search.json`` keeps the request.
 """
 import logging
+import math
 import sys
-from typing import Optional
+from dataclasses import dataclass, asdict
+from typing import Optional, Union
 
 from autofit import exc
 
 from .context import fork_context
+from .resources import (
+    AUTO,
+    available_memory_gb,
+    detected_cores,
+    is_auto,
+    validate_number_of_cores,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +129,12 @@ def check_factor_search_cores(search):
     """
     number_of_cores = getattr(search, "number_of_cores", 1)
 
-    if number_of_cores > 1:
+    # "auto" asks PyAutoFit to choose, and a factor search resolves it to 1
+    # (`resolve_number_of_cores`), so only an explicit count above 1 is refused.
+    if is_auto(number_of_cores):
+        return
+
+    if (number_of_cores or 1) > 1:
         raise exc.SearchException(
             f"Expectation propagation never runs a factor search through a "
             f"Python multiprocessing pool (human ruling 2026-09-09), but the "
@@ -127,9 +153,287 @@ def check_factor_search_cores(search):
             f"with vectorized=True and no pool at all."
         )
 
+JAX_REASON = "JAX analyses run single-process"
+EP_REASON = "expectation-propagation factor searches run single-process"
+
+
+@dataclass
+class ParallelResolution:
+    """
+    The worker count of one fit and why (``resolve_number_of_cores``).
+
+    Attributes
+    ----------
+    requested
+        The search's ``number_of_cores``: an int or ``"auto"``.
+    number_of_cores
+        The resolved worker count.
+    reason
+        Why: ``"requested"`` (an int honoured), ``"detected_cores"`` (auto, uncapped),
+        ``"jax"``, ``"expectation_propagation"``, ``"cores_per_eval"`` or ``"memory"``.
+    detected_cores
+        The cores this process may use (``None`` when not probed).
+    available_memory_gb
+        The memory available when the memory cap was evaluated (``None`` otherwise).
+    setup_id
+        The analysis's resolved compute setup (``analysis.setup.setup_id``), or ``None``.
+    cpus_per_eval, peak_rss_gb
+        The analysis's ``resources_per_eval()`` (``None`` when it declares none).
+    """
+
+    requested: Union[int, str]
+    number_of_cores: int
+    reason: str
+    detected_cores: Optional[int] = None
+    available_memory_gb: Optional[float] = None
+    setup_id: Optional[str] = None
+    cpus_per_eval: Optional[float] = None
+    peak_rss_gb: Optional[float] = None
+
+    @property
+    def reason_text(self) -> str:
+        """
+        The reason as the banner and ``search.summary`` say it; empty for an honoured
+        int request.
+        """
+        if self.reason == "detected_cores":
+            return "detected cores"
+        if self.reason == "jax":
+            return JAX_REASON
+        if self.reason == "expectation_propagation":
+            return EP_REASON
+        if self.reason == "cores_per_eval":
+            return (
+                f"capped by cores: {self.detected_cores} cores / "
+                f"{_number(self.cpus_per_eval)} CPUs per evaluation"
+            )
+        if self.reason == "memory":
+            return (
+                f"capped by memory: {self.available_memory_gb:.1f} GB available / "
+                f"{_number(self.peak_rss_gb)} GB per evaluation"
+            )
+        return ""
+
+    @property
+    def banner(self) -> str:
+        """
+        The one INFO line a fit logs once its compute setup is resolved, e.g.
+        ``Parallel: 64 workers (requested auto; detected cores) · setup numba_cpu_sparse_fp64``.
+        """
+        workers = "worker" if self.number_of_cores == 1 else "workers"
+        detail = f"requested {self.requested}"
+        if self.reason_text:
+            detail += f"; {self.reason_text}"
+        line = f"Parallel: {self.number_of_cores} {workers} ({detail})"
+        if self.setup_id is not None:
+            line += f" · setup {self.setup_id}"
+        return line
+
+    @property
+    def summary(self) -> str:
+        """
+        The ``search.summary`` lines recording the requested and effective worker
+        counts, the reason and the compute setup.
+        """
+        line = (
+            f"Number of cores = {self.number_of_cores} "
+            f"(requested {self.requested})"
+        )
+        if self.reason == "jax" and not is_auto(self.requested):
+            line += f": {JAX_FORK_REASON}"
+        elif self.reason_text:
+            line += f": {self.reason_text}"
+        line += "\n"
+        if self.setup_id is not None:
+            line += f"Setup = {self.setup_id}\n"
+        return line
+
+    def to_dict(self) -> dict:
+        """
+        The ``files/parallel.json`` record.
+        """
+        record = asdict(self)
+        return {
+            key: record[key]
+            for key in (
+                "requested",
+                "number_of_cores",
+                "reason",
+                "detected_cores",
+                "available_memory_gb",
+                "setup_id",
+            )
+        }
+
+
+def _number(value) -> str:
+    """
+    ``value`` without a trailing ``.0`` when it is whole.
+    """
+    try:
+        if float(value).is_integer():
+            return str(int(value))
+    except (TypeError, ValueError):
+        pass
+    return str(value)
+
+
+def _unwrap_analysis(analysis):
+    """
+    The analysis a wrapper (``ModelAnalysis``, ``AnalysisFactor``) forwards to; the
+    analysis itself when it wraps nothing.
+    """
+    seen = set()
+    while analysis is not None and id(analysis) not in seen:
+        seen.add(id(analysis))
+        inner = getattr(analysis, "__dict__", {}).get("analysis")
+        if inner is None or inner is analysis:
+            break
+        analysis = inner
+    return analysis
+
+
+def setup_id_of(analysis) -> Optional[str]:
+    """
+    The resolved compute setup of ``analysis`` (``analysis.setup.setup_id``, set by a
+    PyAutoGalaxy / PyAutoLens ``modify_before_fit``), duck-typed so PyAutoFit never
+    imports autoarray. A factor graph reports the setup its factors agree on
+    (``FactorGraphModel.setup_ids``). ``None`` when there is none.
+    """
+    analysis = _unwrap_analysis(analysis)
+    if analysis is None:
+        return None
+
+    setup_ids = getattr(type(analysis), "setup_ids", None)
+    if callable(setup_ids):
+        ids = set(analysis.setup_ids().values())
+        return ids.pop() if len(ids) == 1 else None
+
+    setup = getattr(analysis, "__dict__", {}).get("setup")
+    if setup is None:
+        try:
+            setup = getattr(analysis, "setup", None)
+        except Exception:
+            setup = None
+    setup_id = getattr(setup, "setup_id", None)
+    return None if setup_id is None else str(setup_id)
+
+
+def resources_per_eval_of(analysis):
+    """
+    ``(cpus_per_eval, peak_rss_gb)`` from the analysis's optional ``resources_per_eval()``
+    hook (a dict or an object with those attributes), each ``None`` when not declared.
+    """
+    analysis = _unwrap_analysis(analysis)
+    hook = getattr(analysis, "resources_per_eval", None)
+    if not callable(hook):
+        return None, None
+
+    resources = hook()
+    if resources is None:
+        return None, None
+
+    def read(name):
+        if isinstance(resources, dict):
+            value = resources.get(name)
+        else:
+            value = getattr(resources, name, None)
+        try:
+            value = float(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+        return value if value is not None and value > 0 else None
+
+    return read("cpus_per_eval"), read("peak_rss_gb")
+
+
+def resolve_number_of_cores(
+    requested,
+    analysis=None,
+    is_jax: Optional[bool] = None,
+    where: str = "search",
+    ep_factor_search: bool = False,
+) -> ParallelResolution:
+    """
+    The worker count of one fit: the request, resolved after
+    ``Analysis.modify_before_fit``.
+
+    - An int request is honoured, except a JAX analysis runs one process (the fork
+      rule; ``effective_number_of_cores`` logs its INFO line where the pools are built).
+    - ``"auto"`` is 1 for a JAX analysis or an expectation-propagation factor search,
+      otherwise the detected cores, capped by
+      ``min(cores // cpus_per_eval, floor(available_gb / peak_rss_gb))`` (never below
+      1) only when the analysis declares ``resources_per_eval()``.
+
+    Logs nothing; the fit logs ``ParallelResolution.banner``.
+
+    Parameters
+    ----------
+    requested
+        The search's ``number_of_cores`` (validated here).
+    analysis
+        The analysis being fitted, after ``modify_before_fit`` (or ``None``).
+    is_jax
+        Whether the analysis is JAX; defaults to ``analysis.is_jax``.
+    where
+        What is asking, for the validation error.
+    ep_factor_search
+        Whether the search is an expectation-propagation factor search.
+    """
+    requested = validate_number_of_cores(requested, where=where)
+    if is_jax is None:
+        is_jax = bool(getattr(analysis, "is_jax", False))
+    setup_id = setup_id_of(analysis)
+
+    def resolution(n, reason, **kwargs):
+        return ParallelResolution(
+            requested=requested,
+            number_of_cores=n,
+            reason=reason,
+            setup_id=setup_id,
+            **kwargs,
+        )
+
+    if requested != AUTO:
+        if is_jax and requested > 1:
+            return resolution(1, "jax")
+        return resolution(requested, "requested")
+
+    if is_jax:
+        return resolution(1, "jax")
+    if ep_factor_search:
+        return resolution(1, "expectation_propagation")
+
+    cores = detected_cores()
+    cpus_per_eval, peak_rss_gb = resources_per_eval_of(analysis)
+
+    n, reason = cores, "detected_cores"
+    available = None
+
+    if cpus_per_eval is not None:
+        by_cores = max(1, int(cores // cpus_per_eval))
+        if by_cores < n:
+            n, reason = by_cores, "cores_per_eval"
+
+    if peak_rss_gb is not None:
+        available = available_memory_gb()
+        if available is not None:
+            by_memory = max(1, int(math.floor(available / peak_rss_gb)))
+            if by_memory < n:
+                n, reason = by_memory, "memory"
+
+    return resolution(
+        n,
+        reason,
+        detected_cores=cores,
+        available_memory_gb=None if available is None else round(available, 3),
+        cpus_per_eval=cpus_per_eval,
+        peak_rss_gb=peak_rss_gb,
+    )
+
 
 class PoolFactory:
-    def __init__(self, search, analysis=None):
+    def __init__(self, search, analysis=None, resolution=None):
         """
         The pools one fit of ``search`` may use, with the JAX fork rule applied once.
 
@@ -146,16 +450,35 @@ class PoolFactory:
         analysis
             The analysis being fitted, whose ``is_jax`` drives the fork rule. ``None``
             (no fit context) applies no JAX rule.
+        resolution
+            The fit's ``ParallelResolution``, when ``NonLinearSearch`` already resolved
+            it after ``modify_before_fit``; otherwise it is resolved here
+            (``resolve_number_of_cores``).
         """
         self.search = search
-        self.requested = getattr(search, "number_of_cores", 1) or 1
         self.is_jax = bool(getattr(analysis, "is_jax", False))
 
-        self.number_of_cores = effective_number_of_cores(
-            requested=self.requested,
-            is_jax=self.is_jax,
-            where=type(search).__name__,
-        )
+        if resolution is None:
+            resolution = resolve_number_of_cores(
+                requested=getattr(search, "number_of_cores", 1),
+                analysis=analysis,
+                is_jax=self.is_jax,
+                where=type(search).__name__,
+                ep_factor_search=bool(getattr(search, "_ep_factor_search", False)),
+            )
+        self.resolution = resolution
+        self.requested = resolution.requested
+
+        # The JAX fork rule's one INFO line for an explicit count above 1 (an "auto"
+        # request is explained by the fit's `Parallel:` banner instead).
+        if not is_auto(self.requested):
+            effective_number_of_cores(
+                requested=self.requested,
+                is_jax=self.is_jax,
+                where=type(search).__name__,
+            )
+
+        self.number_of_cores = resolution.number_of_cores
 
         self._created = []
 
@@ -191,15 +514,10 @@ class PoolFactory:
     @property
     def summary(self) -> str:
         """
-        The ``search.summary`` line recording the requested and effective worker counts.
+        The ``search.summary`` lines recording the requested and effective worker
+        counts, the reason and the compute setup (``ParallelResolution.summary``).
         """
-        line = (
-            f"Number of cores = {self.number_of_cores} "
-            f"(requested {self.requested})"
-        )
-        if self.number_of_cores < self.requested:
-            line += f": {JAX_FORK_REASON}"
-        return line + "\n"
+        return self.resolution.summary
 
     def __call__(self, n_cores: Optional[int] = None, **pool_kwargs):
         """

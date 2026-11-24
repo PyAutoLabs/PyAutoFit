@@ -27,7 +27,10 @@ from autofit.non_linear.fitness import ITERATIONS_NEVER, get_timeout_seconds  # 
 from autofit.non_linear.search.runtime import (  # noqa: F401
     SearchRuntimeSettings,
     configure_handler,
+    fit_pools,
     log_fit_start,
+    number_of_cores_request,
+    resolve_fit_parallel,
     quick_update_message,
     warn_deprecated_jax_knob,
     warn_if_threads_unpinned,
@@ -95,7 +98,7 @@ class NonLinearSearch(
         iterations_per_quick_update: Optional[int] = None,
         iterations_per_full_update: int = None,
         live_visual_update: Optional[bool] = None,
-        number_of_cores: int = 1,
+        number_of_cores: Union[int, str] = 1,
         silence: bool = False,
         session: Optional[sa.orm.Session] = None,
         paths: Optional[AbstractPaths] = None,
@@ -165,8 +168,7 @@ class NonLinearSearch(
 
         warn_unknown_kwargs(self, kwargs, known=self._known_kwargs)
 
-        self.number_of_cores = number_of_cores
-        warn_if_threads_unpinned(number_of_cores)
+        self.number_of_cores = number_of_cores_request(self, number_of_cores)
 
         self.optimisation_counter = Counter()
 
@@ -300,9 +302,8 @@ class NonLinearSearch(
         """The body of ``fit``, inside its status record (``status_recorded``)."""
         self.check_model(model=model)
 
-        # Per-fit: set by `start_resume_fit` when the fit's pools are resolved, and read
-        # by `search.summary`; cleared so a reused search never reports a stale count.
-        self._parallel_summary = None
+        # Per-fit (`resolve_fit_parallel`); cleared so a reuse never reports a stale count.
+        self._parallel_summary = self._parallel_resolution = None
 
         log_fit_start(self, analysis)
         log_process_state()
@@ -316,6 +317,7 @@ class NonLinearSearch(
         model.freeze()
         analysis = analysis.modify_before_fit(paths=self.paths, model=model)
         model.unfreeze()
+        resolve_fit_parallel(self, analysis)
 
         if not skip_fit_output():
             self.pre_fit_output(analysis=analysis, model=model, info=info)
@@ -419,10 +421,8 @@ class NonLinearSearch(
 
         preflight.check_runtime_gates(self, analysis, model)
 
-        # The fit's pools, with the one JAX fork rule applied once (one INFO line when it
-        # downgrades) and the effective worker count recorded for `search.summary`.
-        self._fit_pools = PoolFactory(self, analysis)
-        self._parallel_summary = self._fit_pools.summary
+        # The fit's pools, on the count resolved after `modify_before_fit`.
+        self._fit_pools = fit_pools(self, analysis)
 
         model.freeze()
         try:

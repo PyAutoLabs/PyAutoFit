@@ -89,6 +89,7 @@ _GENERIC_FILES = frozenset(
         "search.summary",
         "files/model.json",
         "files/search.json",
+        "files/parallel.json",
         "files/samples.csv",
         "files/samples_info.json",
         "files/samples_summary.json",

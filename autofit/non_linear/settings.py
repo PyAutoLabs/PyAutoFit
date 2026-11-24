@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import inspect
-from typing import Optional, List, TYPE_CHECKING
+from typing import Optional, List, Union, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from autofit.database.sqlalchemy_ import sa
@@ -13,7 +13,7 @@ class SettingsSearch:
         self,
         path_prefix: str,
         unique_tag: Optional[str] = None,
-        number_of_cores: Optional[int] = 1,
+        number_of_cores: Optional[Union[int, str]] = 1,
         session: Optional[sa.orm.Session] = None,
         info: Optional[dict] = None,
         use_jax_vmap: Optional[bool] = None,
@@ -34,6 +34,9 @@ class SettingsSearch:
         number_of_cores
             The number of CPU cores used to parallelize the model-fit. This is used internally in a non-linear search
             for most model fits, but is done on a per-fit basis for grid based searches (e.g. sensitivity mapping).
+            A whole number >= 1, or `"auto"` to use every core this process may use, resolved when the fit starts
+            (after the analysis has resolved its compute setup; 1 for a JAX analysis, and capped by memory when the
+            analysis declares `resources_per_eval()`). The default is 1.
         session
             The SQLite database session which is active means results are directly wrtten to the SQLite database
             at the end of a fit and loaded from the database at the start.
@@ -58,7 +61,11 @@ class SettingsSearch:
 
         self.path_prefix = path_prefix
         self.unique_tag = unique_tag
-        self.number_of_cores = number_of_cores
+        from autofit.non_linear.parallel.resources import validate_number_of_cores
+
+        self.number_of_cores = validate_number_of_cores(
+            number_of_cores, where="SettingsSearch"
+        )
         self.session = session
         self.use_jax_vmap = use_jax_vmap
 
