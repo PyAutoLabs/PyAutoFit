@@ -62,6 +62,20 @@ class SearchException(Exception):
     pass
 
 
+class SearchBudgetExceeded(SearchException):
+    """A search reached its budget before it produced any posterior samples."""
+
+    def __init__(self, termination_reason: str):
+        super().__init__(termination_reason)
+        self.termination_reason = termination_reason
+
+    def __str__(self):
+        return (
+            f"The search reached its {self.termination_reason} budget "
+            "without posterior samples."
+        )
+
+
 class ProjectionException(ValueError):
     """
     Raised when an importance-weighted message projection

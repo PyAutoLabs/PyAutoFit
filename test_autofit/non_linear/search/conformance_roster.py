@@ -498,6 +498,7 @@ GOLDEN = {
             "n_update",
             "seed",
             "split_threshold",
+            "timeout",
             "use_jax_vmap",
             "vectorized",
             "verbose",

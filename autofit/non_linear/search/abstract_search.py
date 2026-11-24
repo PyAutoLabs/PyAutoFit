@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from autofit.database.sqlalchemy_ import sa
     from autofit.non_linear.result import Result
 
+from autofit.exc import SearchBudgetExceeded
 from autofit.graphical import FactorApproximation, MeanField
 from autofit.graphical.utils import Status
 from autofit.graphical.expectation_propagation import (
@@ -391,16 +392,10 @@ class NonLinearSearch(
 
     @configure_handler
     def start_resume_fit(self, analysis: Analysis, model: AbstractPriorModel) -> Result:
-        """
-        Start a non-linear search from scratch, or resume one which was previously
-        terminated mid-way through (from the samples it left off at), and return its
-        ``Result``.
+        """Run or resume the search and return its result.
 
-        When the search completes a `.completed` file is output, so a rerun is not
-        repeated and loads its results via `result_via_completed_fit`; results are also
-        output to the `files` folder via the analysis' `save_results`. Under
-        ``PYAUTO_TEST_MODE>=2`` the backend is bypassed (``TestModeBypass``); both
-        paths end in ``finalize_result``.
+        Both the real backend and the test-mode bypass finish in `finalize_result`.
+        Only successful finalization writes `.completed` for subsequent reuse.
         """
         if self.paths.has_timer:
             self.timer.start()
@@ -438,13 +433,19 @@ class NonLinearSearch(
         if hasattr(fitness, "shutdown_quick_update"):
             fitness.shutdown_quick_update()
 
-        samples = self.perform_update(
-            model=model,
-            analysis=analysis,
-            search_internal=search_internal,
-            fitness=fitness,
-            during_analysis=False,
-        )
+        try:
+            samples = self.perform_update(
+                model=model,
+                analysis=analysis,
+                search_internal=search_internal,
+                fitness=fitness,
+                during_analysis=False,
+            )
+        except SearchBudgetExceeded:
+            # Finalization normally unfreezes the model. A caller can recover
+            # from a budget stop without samples and reuse this model.
+            model.unfreeze()
+            raise
 
         samples_summary = None
 

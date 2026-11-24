@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import multiprocessing
 import numpy as np
 import logging
@@ -7,6 +8,7 @@ import os
 import sys
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
+from time import monotonic
 from typing import Dict, Optional, Tuple, TYPE_CHECKING
 
 
@@ -346,6 +348,7 @@ class Nautilus(NonLinearSearch):
         session: Optional[sa.orm.Session] = None,
         use_jax_vmap: Optional[bool] = None,
         checkpoint: bool = True,
+        timeout: Optional[float] = None,
         **kwargs,
     ):
         """
@@ -382,6 +385,13 @@ class Nautilus(NonLinearSearch):
             Number of likelihood evaluations performed at each step.
         n_like_max
             Maximum number of likelihood evaluations before stopping.
+        timeout
+            Optional positive wall-clock budget in seconds across the sampling
+            loop, including intervening full updates. Nautilus checks it between
+            batches, so in-flight work can finish after the deadline. If a budget
+            stops the search early, the samples record the ``termination_reason``.
+            If there are no posterior samples, the fit raises
+            ``SearchBudgetExceeded`` with the same reason.
         f_live
             Maximum fraction of evidence in the live set before terminating.
         n_eff
@@ -444,6 +454,11 @@ class Nautilus(NonLinearSearch):
         self.n_shell = n_shell
         self.n_eff = n_eff
         self.n_like_max = n_like_max
+        if timeout is not None and (not math.isfinite(timeout) or timeout <= 0):
+            raise ValueError(
+                "Nautilus timeout must be a finite positive number of seconds."
+            )
+        self.timeout = timeout
         self.discard_exploration = discard_exploration
         self.verbose = verbose
 
@@ -810,7 +825,9 @@ class Nautilus(NonLinearSearch):
             the log likelihood the search maximizes.
         """
 
-        finished = False
+        timeout = getattr(self, "timeout", None)
+        deadline = monotonic() + timeout if timeout is not None else None
+        termination_reason = None
 
         minimum_iterations_per_full_updates = 3 * self.n_live
 
@@ -834,9 +851,16 @@ class Nautilus(NonLinearSearch):
                 """
             )
 
-        while not finished:
+        while True:
+            run_options = {}
+            if deadline is not None:
+                remaining = deadline - monotonic()
+                if remaining <= 0:
+                    termination_reason = "timeout"
+                    break
+                run_options["timeout"] = remaining
 
-            iterations, total_iterations = self.iterations_from(
+            iterations, calls_before_run = self.iterations_from(
                 search_internal=search_internal,
                 iterations_per_full_update=iterations_per_full_update,
             )
@@ -848,33 +872,38 @@ class Nautilus(NonLinearSearch):
                 discard_exploration=self.discard_exploration,
                 verbose=self.verbose,
                 n_like_max=iterations,
+                **run_options,
             )
+            calls_after_run = search_internal.n_like
 
-            iterations_after_run = self.iterations_from(search_internal=search_internal)[1]
-
-            if (
-                converged
-                or total_iterations == iterations_after_run
-                or (
-                    self.n_like_max is not None
-                    and iterations_after_run >= self.n_like_max
-                )
+            if converged:
+                break
+            if self.n_like_max is not None and calls_after_run >= self.n_like_max:
+                termination_reason = "n_like_max"
+                break
+            if deadline is not None and (
+                calls_after_run < iterations or monotonic() >= deadline
             ):
-                finished = True
+                # Nautilus returns False only for a likelihood or time limit.
+                # Below the chunk's likelihood limit it stopped on its timeout.
+                termination_reason = "timeout"
+                break
+            if calls_before_run == calls_after_run:
+                break
 
-            if not finished:
+            if update is not None:
+                update(search_internal)
+            else:
+                self.perform_update(
+                    model=model,
+                    analysis=analysis,
+                    during_analysis=True,
+                    fitness=fitness,
+                    search_internal=search_internal,
+                )
 
-                if update is not None:
-                    update(search_internal)
-                else:
-                    self.perform_update(
-                        model=model,
-                        analysis=analysis,
-                        during_analysis=True,
-                        fitness=fitness,
-                        search_internal=search_internal
-                    )
-
+        # Keep the outcome with the sampler through archival and sample conversion.
+        search_internal._autofit_termination_reason = termination_reason
         return search_internal
 
     def progress(self, search_internal) -> Optional[Dict]:
@@ -941,13 +970,17 @@ class Nautilus(NonLinearSearch):
         return iterations, total_iterations
 
     def samples_info_from(self, search_internal=None):
-        return {
+        info = {
             "log_evidence": search_internal.log_z,
             "total_samples": int(search_internal.n_like),
             "total_accepted_samples": int(search_internal.n_like),
             "time": self.timer.time if self.timer else None,
             "number_live_points": int(search_internal.n_live),
         }
+        termination_reason = getattr(search_internal, "_autofit_termination_reason", None)
+        if termination_reason is not None:
+            info["termination_reason"] = termination_reason
+        return info
 
     def raw_samples_from(self, model, search_internal):
         """
@@ -961,7 +994,15 @@ class Nautilus(NonLinearSearch):
         search_internal
             The nautilus sampler.
         """
+        termination_reason = getattr(search_internal, "_autofit_termination_reason", None)
+        if termination_reason is not None and search_internal.n_like == 0:
+            # Nautilus can reach its timeout before its first batch.
+            raise exc.SearchBudgetExceeded(termination_reason)
+
         parameters, log_weights, log_likelihoods = search_internal.posterior()
+        if termination_reason is not None and len(parameters) == 0:
+            # For example, discard_exploration can exclude every point collected.
+            raise exc.SearchBudgetExceeded(termination_reason)
 
         return RawSamples(
             parameters=parameters,
