@@ -179,5 +179,5 @@ def test_whole_graph_fit_banner_reports_the_agreed_setup(monkeypatch, caplog, tm
 
     banners = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Parallel:")]
     assert banners == [
-        "Parallel: 8 workers (requested auto; detected cores) · setup numba_cpu_sparse_fp64"
+        "Parallel: 8 workers (auto: detected cores)"
     ]

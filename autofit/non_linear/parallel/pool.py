@@ -179,6 +179,8 @@ class ParallelResolution:
         The analysis's resolved compute setup (``analysis.setup.setup_id``), or ``None``.
     cpus_per_eval, peak_rss_gb
         The analysis's ``resources_per_eval()`` (``None`` when it declares none).
+    is_jax
+        Whether the analysis is JAX (the banner then reports the JAX device).
     """
 
     requested: Union[int, str]
@@ -189,6 +191,7 @@ class ParallelResolution:
     setup_id: Optional[str] = None
     cpus_per_eval: Optional[float] = None
     peak_rss_gb: Optional[float] = None
+    is_jax: bool = False
 
     @property
     def reason_text(self) -> str:
@@ -218,16 +221,27 @@ class ParallelResolution:
     def banner(self) -> str:
         """
         The one INFO line a fit logs once its compute setup is resolved, e.g.
-        ``Parallel: 64 workers (requested auto; detected cores) · setup numba_cpu_sparse_fp64``.
+        ``Parallel: 64 workers (auto: detected cores)``, ``Parallel: 4 workers (requested 4)``
+        or ``Parallel: 1 worker (JAX on GPU: NVIDIA A100-SXM4-80GB)``.
+
+        The compute setup is not repeated here (the fit's ``Setup:`` line reports it);
+        ``search.summary`` and ``files/parallel.json`` still record ``setup_id``.
         """
         workers = "worker" if self.number_of_cores == 1 else "workers"
-        detail = f"requested {self.requested}"
-        if self.reason_text:
-            detail += f"; {self.reason_text}"
-        line = f"Parallel: {self.number_of_cores} {workers} ({detail})"
-        if self.setup_id is not None:
-            line += f" · setup {self.setup_id}"
-        return line
+        auto = is_auto(self.requested)
+
+        if self.is_jax or self.reason == "jax":
+            detail = jax_device_text()
+            if not auto and self.requested != 1:
+                detail = f"requested {self.requested}; {detail}"
+        elif self.reason == "expectation_propagation":
+            detail = "expectation-propagation factor search"
+        elif self.reason == "requested" or not auto:
+            detail = f"requested {self.requested}"
+        else:
+            detail = f"auto: {self.reason_text}"
+
+        return f"Parallel: {self.number_of_cores} {workers} ({detail})"
 
     @property
     def summary(self) -> str:
@@ -264,6 +278,26 @@ class ParallelResolution:
                 "setup_id",
             )
         }
+
+
+def jax_device_text() -> str:
+    """
+    ``"JAX on CPU"`` or ``"JAX on GPU: <device name>"`` for the first JAX device, read
+    only when JAX is already imported (this never imports JAX just to report it);
+    ``"JAX"`` when it is not imported or the device cannot be read.
+    """
+    jax = sys.modules.get("jax")
+    if jax is None:
+        return "JAX"
+    try:
+        device = jax.devices()[0]
+        platform = str(device.platform).upper()
+        if platform == "CPU":
+            return "JAX on CPU"
+        name = getattr(device, "device_kind", None)
+        return f"JAX on {platform}: {name}" if name else f"JAX on {platform}"
+    except Exception:
+        return "JAX"
 
 
 def _number(value) -> str:
@@ -391,6 +425,7 @@ def resolve_number_of_cores(
             number_of_cores=n,
             reason=reason,
             setup_id=setup_id,
+            is_jax=bool(is_jax),
             **kwargs,
         )
 
