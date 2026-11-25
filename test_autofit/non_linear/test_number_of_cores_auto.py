@@ -131,27 +131,74 @@ def test_auto_resolves_to_detected_cores():
     assert resolution.reason == "detected_cores"
     assert resolution.detected_cores == 64
     assert resolution.available_memory_gb is None
-    assert resolution.banner == (
-        "Parallel: 64 workers (requested auto; detected cores) · setup numba_cpu_sparse_fp64"
-    )
+    assert resolution.banner == "Parallel: 64 workers (auto: detected cores)"
+    # The setup is reported by the fit's `Setup:` line, not repeated in `Parallel:`, but
+    # `search.summary` and `parallel.json` keep it.
+    assert resolution.setup_id == "numba_cpu_sparse_fp64"
+    assert "Setup = numba_cpu_sparse_fp64" in resolution.summary
+    assert resolution.to_dict()["setup_id"] == "numba_cpu_sparse_fp64"
 
 
-def test_auto_under_jax_is_one():
+class _FakeDevice:
+    def __init__(self, platform, device_kind):
+        self.platform = platform
+        self.device_kind = device_kind
+
+
+class _FakeJax:
+    def __init__(self, device):
+        self._device = device
+
+    def devices(self):
+        return [self._device]
+
+
+def test_auto_under_jax_is_one_and_says_jax_when_jax_is_not_imported(monkeypatch):
+    import sys
+
+    monkeypatch.delitem(sys.modules, "jax", raising=False)
     resolution = resolve_number_of_cores("auto", _Analysis(is_jax=True))
     assert resolution.number_of_cores == 1
-    assert resolution.banner == (
-        "Parallel: 1 worker (requested auto; JAX analyses run single-process)"
+    assert resolution.banner == "Parallel: 1 worker (JAX)"
+    assert "jax" not in sys.modules
+
+
+def test_jax_banner_reports_the_cpu_device(monkeypatch):
+    import sys
+
+    monkeypatch.setitem(sys.modules, "jax", _FakeJax(_FakeDevice("cpu", "cpu")))
+    resolution = resolve_number_of_cores("auto", _Analysis(is_jax=True))
+    assert resolution.banner == "Parallel: 1 worker (JAX on CPU)"
+
+
+def test_jax_banner_reports_the_gpu_device(monkeypatch):
+    import sys
+
+    monkeypatch.setitem(
+        sys.modules, "jax", _FakeJax(_FakeDevice("gpu", "NVIDIA A100-SXM4-80GB"))
     )
+    resolution = resolve_number_of_cores("auto", _Analysis(is_jax=True))
+    assert resolution.banner == "Parallel: 1 worker (JAX on GPU: NVIDIA A100-SXM4-80GB)"
+
+    one = resolve_number_of_cores(1, _Analysis(is_jax=True))
+    assert one.banner == "Parallel: 1 worker (JAX on GPU: NVIDIA A100-SXM4-80GB)"
 
 
-def test_int_request_under_jax_is_one():
+def test_int_request_under_jax_is_one(monkeypatch):
+    import sys
+
+    monkeypatch.setitem(sys.modules, "jax", _FakeJax(_FakeDevice("cpu", "cpu")))
     resolution = resolve_number_of_cores(4, _Analysis(is_jax=True))
     assert (resolution.number_of_cores, resolution.reason) == (1, "jax")
+    assert resolution.banner == "Parallel: 1 worker (requested 4; JAX on CPU)"
 
 
 def test_auto_ep_factor_search_is_one():
     resolution = resolve_number_of_cores("auto", _Analysis(), ep_factor_search=True)
     assert (resolution.number_of_cores, resolution.reason) == (1, "expectation_propagation")
+    assert resolution.banner == (
+        "Parallel: 1 worker (expectation-propagation factor search)"
+    )
 
 
 def test_ep_check_accepts_auto_and_refuses_an_explicit_count():
@@ -173,7 +220,7 @@ def test_memory_cap(monkeypatch):
     assert resolution.reason == "memory"
     assert resolution.available_memory_gb == 120.0
     assert resolution.banner == (
-        "Parallel: 48 workers (requested auto; capped by memory: 120.0 GB available "
+        "Parallel: 48 workers (auto: capped by memory: 120.0 GB available "
         "/ 2.5 GB per evaluation)"
     )
 
@@ -182,6 +229,9 @@ def test_cores_per_eval_cap():
     analysis = _Analysis(resources_per_eval={"cpus_per_eval": 4, "peak_rss_gb": 0.5})
     resolution = resolve_number_of_cores("auto", analysis)
     assert (resolution.number_of_cores, resolution.reason) == (16, "cores_per_eval")
+    assert resolution.banner == (
+        "Parallel: 16 workers (auto: capped by cores: 64 cores / 4 CPUs per evaluation)"
+    )
 
 
 def test_memory_cap_never_below_one(monkeypatch):
@@ -337,10 +387,11 @@ def test_fit_logs_one_banner_after_modify_before_fit_and_writes_parallel_json(
 
     banners = _banner_records(caplog)
     assert [r.getMessage() for r in banners] == [
-        "Parallel: 64 workers (requested auto; detected cores) · setup numba_cpu_sparse_fp64"
+        "Parallel: 64 workers (auto: detected cores)"
     ]
-    assert not [r for r in caplog.records if "cores." in r.getMessage()
-                and r.getMessage().startswith("Starting non-linear search")]
+    starts = [r.getMessage() for r in caplog.records
+              if r.getMessage().startswith("Starting non-linear search")]
+    assert starts == ["Starting non-linear search."]
 
     assert search.number_of_cores == "auto"
 
@@ -379,9 +430,14 @@ def test_fit_banner_for_jax_auto(monkeypatch, caplog, tmp_path):
     with caplog.at_level(logging.INFO):
         search.fit(model=af.Model(af.ex.Gaussian), analysis=analysis)
 
-    assert [r.getMessage() for r in _banner_records(caplog)] == [
-        "Parallel: 1 worker (requested auto; JAX analyses run single-process)"
-    ]
+    banners = [r.getMessage() for r in _banner_records(caplog)]
+    assert len(banners) == 1
+    # "JAX on CPU" here; "JAX on GPU: <name>" on a GPU machine.
+    assert banners[0].startswith("Parallel: 1 worker (JAX on ")
+    # The start line makes no backend claim: the device is reported in `Parallel:`.
+    starts = [r.getMessage() for r in caplog.records
+              if r.getMessage().startswith("Starting non-linear search")]
+    assert starts == ["Starting non-linear search."]
 
 
 # ------------------------------------------------- runtime_estimate hook (5E-2)

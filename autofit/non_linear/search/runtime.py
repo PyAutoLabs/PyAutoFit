@@ -244,27 +244,15 @@ def configure_handler(func):
 
 def log_fit_start(search, analysis):
     """
-    Log, once at the start of a fit, the JAX device a JAX analysis runs on and the
-    quick-update cadence (``NonLinearSearch.quick_update_message``).
+    Log, once at the start of a fit, that the search is starting and its quick-update
+    cadence (``NonLinearSearch.quick_update_message``).
 
-    The worker count is not logged here: it is only known once ``modify_before_fit``
-    has resolved the analysis's compute setup, and the fit's one ``Parallel:`` banner
-    line reports it (``resolve_fit_parallel``).
+    Neither the backend nor the worker count is claimed here: both are only known once
+    ``modify_before_fit`` has resolved the analysis's compute setup, and the fit's
+    ``Setup:`` and ``Parallel:`` lines report them (the JAX device is in ``Parallel:``,
+    ``resolve_fit_parallel``).
     """
-    if analysis.is_jax:
-        try:
-            import jax
-
-            device = jax.devices()[0]
-            backend = device.platform.upper()
-            device_name = getattr(device, "device_kind", backend)
-            logger.info(
-                f"Starting non-linear search with JAX ({backend}: {device_name})."
-            )
-        except Exception:
-            logger.info("Starting non-linear search with JAX.")
-    else:
-        logger.info("Starting non-linear search.")
+    logger.info("Starting non-linear search.")
     logger.info(search.quick_update_message)
 
 
