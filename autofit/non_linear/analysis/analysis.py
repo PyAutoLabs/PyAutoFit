@@ -307,6 +307,17 @@ class Analysis(ABC):
         """
         return self
 
+    def prepare_for_model(self, model: AbstractPriorModel):
+        """
+        Let this analysis finish any model-dependent setup before its likelihood is used
+        outside a fit, e.g. by ``print_vram_use`` or ``batched_memory_bytes``.
+
+        A fit does this in ``modify_before_fit``; this hook is the pre-fit equivalent for
+        calls that are handed a model. The default does nothing. A PyAutoGalaxy /
+        PyAutoLens analysis built with ``setup="auto"`` overrides it to resolve its
+        compute setup (and therefore its backend) from ``model``.
+        """
+
     def modify_model(self, model):
         return model
 
@@ -418,6 +429,9 @@ class Analysis(ABC):
         The projected bytes, or ``None`` when this analysis is not on the JAX
         path (nothing to measure).
         """
+        # As in `print_vram_use`: resolve any model-dependent backend first.
+        self.prepare_for_model(model)
+
         if not self.is_jax:
             return None
 
@@ -467,6 +481,11 @@ class Analysis(ABC):
             ``af.MultiStartProdigy``) — see ``batched_memory_bytes``.
         """
         from autofit.non_linear.test_mode import skip_fit_output
+
+        # The backend may depend on the model (e.g. a `setup="auto"` analysis), so let
+        # the analysis resolve it before `is_jax` is read. Done before the test-mode
+        # skip so a script behaves the same (setup resolved, banner logged) either way.
+        self.prepare_for_model(model)
 
         if skip_fit_output():
             return
