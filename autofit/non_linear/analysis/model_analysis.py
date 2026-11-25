@@ -42,6 +42,63 @@ class ModelAnalysis(Analysis):
         """
         return self.analysis.gradient_mode
 
+    def modify_before_fit(self, paths: AbstractPaths, model: AbstractPriorModel):
+        """
+        Forward ``modify_before_fit`` to the wrapped analysis, rebind this wrapper to the
+        analysis it returns and refresh the wrapper's backend from it.
+
+        The base ``Analysis.modify_before_fit`` (which returns ``self``) would otherwise
+        shadow ``__getattr__`` forwarding, so the wrapped analysis's own
+        ``modify_before_fit`` (e.g. a PyAutoGalaxy / PyAutoLens ``setup="auto"``
+        resolution) would never run.
+
+        The wrapped analysis receives this wrapper's own ``self.model``, not the
+        search's ``model``: the wrapper evaluates the wrapped likelihood on instances of
+        ``self.model`` (see ``Analysis.with_model``), so that is the model whose
+        structure any model-dependent setup must be resolved from. The rebinding mirrors
+        ``AnalysisFactor.modify_before_fit`` / ``rebind_analysis``.
+
+        Returns
+        -------
+        This wrapper, its wrapped analysis now the modified one.
+        """
+        self._rebind(self.analysis.modify_before_fit(paths=paths, model=self.model))
+        return self
+
+    def modify_after_fit(self, paths: AbstractPaths, model: AbstractPriorModel, result):
+        """
+        Forward ``modify_after_fit`` to the wrapped analysis with this wrapper's own
+        ``self.model`` (as ``modify_before_fit`` does), rebinding to the analysis it
+        returns.
+
+        Returns
+        -------
+        This wrapper.
+        """
+        self._rebind(
+            self.analysis.modify_after_fit(paths=paths, model=self.model, result=result)
+        )
+        return self
+
+    def prepare_for_model(self, model: AbstractPriorModel):
+        """
+        Forward ``Analysis.prepare_for_model`` to the wrapped analysis with this
+        wrapper's own ``self.model`` (the model its likelihood is evaluated on), then
+        refresh the wrapper's backend, which the wrapped analysis may only now know.
+        """
+        self.analysis.prepare_for_model(self.model)
+        self._use_jax = self.analysis.is_jax
+
+    def _rebind(self, analysis: Optional[Analysis]):
+        """
+        Point this wrapper at ``analysis`` (when not ``None``) and refresh its
+        ``is_jax`` from it, so the wrapper and the analysis it wraps never disagree
+        about the backend once the wrapped analysis has resolved its setup.
+        """
+        if analysis is not None:
+            self.analysis = analysis
+        self._use_jax = self.analysis.is_jax
+
     def __getattr__(self, item):
         if item in ("__getstate__", "__setstate__"):
             raise AttributeError(item)
