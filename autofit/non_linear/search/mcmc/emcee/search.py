@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Dict, Optional, TYPE_CHECKING
+from typing import Dict, Optional, TYPE_CHECKING, Union
 
 import numpy as np
 
@@ -75,7 +75,7 @@ class Emcee(NonLinearSearch):
         auto_correlation_settings: Optional[AutoCorrelationsSettings] = None,
         iterations_per_quick_update: int = None,
         iterations_per_full_update: int = None,
-        number_of_cores: int = 1,
+        number_of_cores: Union[int, str] = "auto",
         silence: bool = False,
         session: Optional[sa.orm.Session] = None,
         **kwargs,
@@ -110,7 +110,9 @@ class Emcee(NonLinearSearch):
         auto_correlation_settings
             Customizes and performs auto correlation calculations performed during and after the search.
         number_of_cores
-            The number of cores sampling is performed using a Python multiprocessing Pool instance.
+            The number of cores sampling is performed using a Python multiprocessing Pool instance: a whole
+            number >= 1, or `"auto"` (the default), every core this process may use, resolved when the fit starts
+            (1 for a JAX analysis).
         silence
             If True, the default print output of the non-linear search is silenced.
         session

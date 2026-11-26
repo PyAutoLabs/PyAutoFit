@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict, Optional, TYPE_CHECKING
+from typing import Dict, Optional, TYPE_CHECKING, Union
 
 import numpy as np
 import os
@@ -81,7 +81,7 @@ class Zeus(NonLinearSearch):
         auto_correlation_settings: Optional[AutoCorrelationsSettings] = None,
         iterations_per_quick_update: int = None,
         iterations_per_full_update: int = None,
-        number_of_cores: int = 1,
+        number_of_cores: Union[int, str] = "auto",
         silence: bool = False,
         session: Optional[sa.orm.Session] = None,
         **kwargs
@@ -116,7 +116,9 @@ class Zeus(NonLinearSearch):
         auto_correlation_settings
             Customizes and performs auto correlation calculations performed during and after the search.
         number_of_cores
-            The number of cores Zeus sampling is performed using a Python multiprocessing Pool instance.
+            The number of cores Zeus sampling is performed using a Python multiprocessing Pool instance: a whole
+            number >= 1, or `"auto"` (the default), every core this process may use, resolved when the fit starts
+            (1 for a JAX analysis).
         silence
             If True, the default print output of the non-linear search is silenced.
         session
@@ -210,7 +212,6 @@ class Zeus(NonLinearSearch):
                 nwalkers=self.nwalkers,
                 ndim=model.prior_count,
                 logprob_fn=ctx.fitness.call_wrap,
-                pool=ctx.pool(),
             )
 
             search_internal.ncall_total = 0
@@ -225,6 +226,11 @@ class Zeus(NonLinearSearch):
             total_iterations = 0
             iterations_remaining = self.nsteps
 
+        # The pool (``None`` on one core) is attached only while zeus samples: a
+        # multiprocessing pool cannot be pickled, and the sampler is saved (resume state,
+        # quick updates, the final archive) between and after the sampling calls.
+        pool = ctx.pool() if iterations_remaining > 0 else None
+
         while iterations_remaining > 0:
             # zeus casts internally (``self.nsteps = int(iterations)``), so a
             # float never crashes it — but ``total_iterations`` below is
@@ -233,13 +239,19 @@ class Zeus(NonLinearSearch):
             # (PyAutoFit#1422).
             iterations = ctx.schedule.next_budget(total_iterations, self.nsteps)
 
-            for sample in search_internal.sample(
-                start=state,
-                log_prob0=log_posterior_list,
-                iterations=iterations,
-                progress=True,
-            ):
-                pass
+            search_internal.pool = pool
+
+            try:
+                for sample in search_internal.sample(
+                    start=state,
+                    log_prob0=log_posterior_list,
+                    iterations=iterations,
+                    progress=True,
+                ):
+                    pass
+            finally:
+                search_internal.pool = None
+                search_internal.distribute = map
 
             search_internal.ncall_total += search_internal.ncall
 

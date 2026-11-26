@@ -9,7 +9,7 @@ import sys
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from time import monotonic
-from typing import Dict, Optional, Tuple, TYPE_CHECKING
+from typing import Dict, Optional, Tuple, TYPE_CHECKING, Union
 
 
 from autofit import exc
@@ -342,7 +342,7 @@ class Nautilus(NonLinearSearch):
         verbose: bool = True,
         iterations_per_quick_update: Optional[int] = None,
         iterations_per_full_update: int = None,
-        number_of_cores: int = 1,
+        number_of_cores: Union[int, str] = "auto",
         silence: bool = False,
         force_x1_cpu: bool = False,
         session: Optional[sa.orm.Session] = None,
@@ -399,7 +399,9 @@ class Nautilus(NonLinearSearch):
         iterations_per_full_update
             The number of iterations performed between update (e.g. output latest model to hard-disk, visualization).
         number_of_cores
-            The number of cores sampling is performed using a Python multiprocessing Pool instance.
+            The number of cores sampling is performed using a Python multiprocessing Pool instance: a whole
+            number >= 1, or `"auto"` (the default), every core this process may use, resolved when the fit starts
+            (1 for a JAX analysis).
 
             Not used by expectation-propagation factor searches, which refuse
             `number_of_cores > 1` outright (`AbstractSearch.optimise`, human

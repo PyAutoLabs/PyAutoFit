@@ -46,7 +46,7 @@ def test__explicit_params():
     assert search.auto_correlation_settings.check_size == 100
     assert search.auto_correlation_settings.required_length == 50
     assert search.auto_correlation_settings.change_threshold == 0.01
-    assert search.number_of_cores == 1
+    assert search.number_of_cores == "auto"
 
 
 requires_zeus = pytest.mark.skipif(

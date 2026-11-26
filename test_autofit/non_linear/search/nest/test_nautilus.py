@@ -187,7 +187,7 @@ def test__explicit_params():
     assert search.n_shell == 1
     assert search.n_eff == 500
     assert search.discard_exploration is False
-    assert search.number_of_cores == 1
+    assert search.number_of_cores == "auto"
 
 
 def test__identifier_fields():

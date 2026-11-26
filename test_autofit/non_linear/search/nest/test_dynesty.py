@@ -42,7 +42,7 @@ def test__explicit_params():
 
     assert search.nlive == 50
     assert search.dlogz is None
-    assert search.number_of_cores == 1
+    assert search.number_of_cores == "auto"
 
     search = af.DynestyDynamic(
         facc=0.4,
@@ -61,7 +61,7 @@ def test__explicit_params():
 
     assert search.facc == 0.2
     assert search.dlogz_init == 0.01
-    assert search.number_of_cores == 1
+    assert search.number_of_cores == "auto"
 
 
 def test__dynamic_n_effective_passed_to_run_nested_only_when_set():

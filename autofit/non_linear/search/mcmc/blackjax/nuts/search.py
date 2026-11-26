@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING, Union
 
 import numpy as np
 
@@ -88,7 +88,7 @@ class BlackJAXNUTS(NonLinearSearch):
         auto_correlation_settings: Optional[AutoCorrelationsSettings] = None,
         iterations_per_quick_update: Optional[int] = None,
         iterations_per_full_update: Optional[int] = None,
-        number_of_cores: int = 1,
+        number_of_cores: Union[int, str] = "auto",
         silence: bool = False,
         session: Optional[sa.orm.Session] = None,
         **kwargs,

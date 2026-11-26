@@ -7,7 +7,7 @@ conformance suite on it. It is not exported, registered or documented.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Union
 
 import numpy as np
 
@@ -56,7 +56,7 @@ class ToyHillClimb(NonLinearSearch):
         initializer: Optional[AbstractInitializer] = None,
         iterations_per_quick_update: int = None,
         iterations_per_full_update: int = None,
-        number_of_cores: int = 1,
+        number_of_cores: Union[int, str] = "auto",
         silence: bool = False,
         session=None,
         **kwargs,

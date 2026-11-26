@@ -130,7 +130,7 @@ class AbstractDynesty(NonLinearSearch, ABC):
         maxcall: Optional[int] = None,
         iterations_per_quick_update: int = None,
         iterations_per_full_update: int = None,
-        number_of_cores: int = 1,
+        number_of_cores: Union[int, str] = "auto",
         silence: bool = False,
         force_x1_cpu: bool = False,
         use_jax_jit: Optional[bool] = None,
@@ -163,8 +163,9 @@ class AbstractDynesty(NonLinearSearch, ABC):
         iterations_per_full_update
             The number of iterations performed between every Dynesty back-up.
         number_of_cores
-            The number of cores sampling is performed using a Python multiprocessing Pool instance. A value of 1
-            builds no pool and runs serially.
+            The number of cores sampling is performed using a Python multiprocessing Pool instance: a whole
+            number >= 1, or `"auto"` (the default), every core this process may use, resolved when the fit starts
+            (1 for a JAX analysis). A resolved value of 1 builds no pool and runs serially.
         silence
             If True, the default print output of the non-linear search is silenced.
         force_x1_cpu

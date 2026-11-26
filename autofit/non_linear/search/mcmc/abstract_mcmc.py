@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING, Union
 
 from autofit.non_linear.search.abstract_search import NonLinearSearch
 from autofit.non_linear.initializer import Initializer
@@ -40,7 +40,7 @@ class AbstractMCMC(NonLinearSearch):
             auto_correlation_settings=AutoCorrelationsSettings(),
             iterations_per_full_update: Optional[int] = None,
             iterations_per_quick_update: int = None,
-            number_of_cores: int = 1,
+            number_of_cores: Union[int, str] = "auto",
             silence: bool = False,
             session: Optional[sa.orm.Session] = None,
             **kwargs

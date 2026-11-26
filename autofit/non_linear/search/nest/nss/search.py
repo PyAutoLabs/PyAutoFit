@@ -4,7 +4,7 @@ import logging
 import os
 import pickle
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING, Union
 
 import numpy as np
 
@@ -185,7 +185,7 @@ class NSS(NonLinearSearch):
         checkpoint_interval: int = 100,
         iterations_per_quick_update: Optional[int] = None,
         iterations_per_full_update: Optional[int] = None,
-        number_of_cores: int = 1,
+        number_of_cores: Union[int, str] = "auto",
         seed: int = 42,
         silence: bool = False,
         session: Optional[sa.orm.Session] = None,

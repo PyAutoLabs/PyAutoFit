@@ -187,7 +187,9 @@ class CovarianceInterpolator(AbstractInterpolator):
         """
         analysis = self._analysis_for_path(path)
         model = self.model(path_relationship_map=path_relationship_map or {})
-        search = DynestyStatic()
+        # A small internal fit, run on one core: the `number_of_cores="auto"` default
+        # would fork a pool of every core for it.
+        search = DynestyStatic(number_of_cores=1)
         result = search.fit(model=model, analysis=analysis)
         return result.instance
 

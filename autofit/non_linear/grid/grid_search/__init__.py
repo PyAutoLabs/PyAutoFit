@@ -27,7 +27,7 @@ class GridSearch:
         self,
         search,
         number_of_steps: int = 4,
-        number_of_cores: int = 1,
+        number_of_cores: Union[int, str] = 1,
         result_output_interval: int = 100,
     ):
         """
@@ -41,6 +41,11 @@ class GridSearch:
             The number of steps to go in each direction
         search
             The class of the search that is run at each step
+        number_of_cores
+            The number of processes the grid's jobs (one fit each) run across: a whole number >= 1 (default 1,
+            the jobs run in turn and each job's search resolves its own `number_of_cores`), or `"auto"`, the
+            detected cores. A JAX analysis runs its jobs serially (the JAX fork rule); when the jobs run in
+            parallel each job's search runs with one core.
         result_output_interval
             The interval between saving a GridSearchResult object via paths
         """
