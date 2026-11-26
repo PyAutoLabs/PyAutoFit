@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sys
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 
 from autofit.mapper.prior_model.abstract import AbstractPriorModel
 
@@ -50,7 +50,7 @@ class DynestyDynamic(AbstractDynesty):
             n_effective: Optional[int] = None,
             iterations_per_quick_update: int = None,
             iterations_per_full_update: int = None,
-            number_of_cores: int = 1,
+            number_of_cores: Union[int, str] = "auto",
             silence: bool = False,
             **kwargs
     ):
@@ -85,7 +85,9 @@ class DynestyDynamic(AbstractDynesty):
         iterations_per_full_update
             The number of iterations performed between update (e.g. output latest model to hard-disk, visualization).
         number_of_cores
-            The number of cores sampling is performed using a Python multiprocessing Pool instance.
+            The number of cores sampling is performed using a Python multiprocessing Pool instance: a whole
+            number >= 1, or `"auto"` (the default), every core this process may use, resolved when the fit starts
+            (1 for a JAX analysis).
         """
 
         super().__init__(

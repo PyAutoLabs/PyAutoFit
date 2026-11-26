@@ -98,7 +98,7 @@ class NonLinearSearch(
         iterations_per_quick_update: Optional[int] = None,
         iterations_per_full_update: int = None,
         live_visual_update: Optional[bool] = None,
-        number_of_cores: Union[int, str] = 1,
+        number_of_cores: Union[int, str] = "auto",
         silence: bool = False,
         session: Optional[sa.orm.Session] = None,
         paths: Optional[AbstractPaths] = None,

@@ -32,7 +32,7 @@ def make_dynesty_dict():
             "maxiter": None,
             "name": "",
             "nlive": 50,
-            "number_of_cores": 1,
+            "number_of_cores": "auto",
             "path_prefix": None,
             "paths": {
                 "arguments": {},
