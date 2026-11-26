@@ -21,6 +21,43 @@ def dereference(reference: Optional[dict], name: str):
     return updated
 
 
+def _restore_prior_order(loaded_ids: dict):
+    """
+    Give the priors created while parsing a dictionary the relative order of
+    the ids they were saved with.
+
+    ``loaded_ids`` maps each saved prior id to the prior created for it. The
+    new priors keep the set of ids they were given, so no id collides with a
+    prior outside the loaded model, but those ids are handed out again in the
+    order of the saved ids.
+
+    Parameters
+    ----------
+    loaded_ids
+        A dictionary mapping saved ids to the objects created for them.
+    """
+    from autofit.mapper.prior.abstract import Prior
+    from autofit.mapper.prior.constant import Constant
+
+    saved = {}
+    for saved_id, obj in loaded_ids.items():
+        if (
+            isinstance(obj, Prior)
+            and not isinstance(obj, Constant)
+            and isinstance(saved_id, int)
+        ):
+            saved.setdefault(id(obj), (saved_id, obj))
+
+    if len(saved) < 2:
+        return
+
+    by_saved_id = sorted(saved.values(), key=lambda item: item[0])
+    new_ids = sorted(prior.id for _, prior in by_saved_id)
+    for (_, prior), new_id in zip(by_saved_id, new_ids):
+        prior.id = new_id
+        prior.message.id_ = new_id
+
+
 class ModelObject:
     _ids = itertools.count()
 
@@ -113,6 +150,49 @@ class ModelObject:
 
     @classmethod
     def from_dict(
+        cls,
+        d,
+        reference: Optional[Dict[str, str]] = None,
+        loaded_ids: Optional[dict] = None,
+    ):
+        """
+        Recursively parse a dictionary returning the model, collection or
+        instance that is represents.
+
+        A model's free parameters are ordered by prior id, which is creation
+        order. The priors made while parsing are created in the order the
+        dictionary is walked, which differs from the original order whenever a
+        prior was replaced after the model was built. The outermost call
+        therefore gives the new priors their original relative order once
+        parsing is done (see ``_restore_prior_order``), so a parameter vector
+        maps to the same parameters on the reloaded model as on the original.
+
+        Parameters
+        ----------
+        d
+            A dictionary representation of some object
+        reference
+            An optional dictionary mapping names to class paths. See
+            ``_from_dict``.
+        loaded_ids
+            A dictionary mapping ids to instances. Callers leave it out: it is
+            passed down the recursion so that all instances with the same id
+            are the same object.
+
+        Returns
+        -------
+        An instance
+        """
+        if loaded_ids is not None:
+            return cls._from_dict(d, reference=reference, loaded_ids=loaded_ids)
+
+        loaded_ids = {}
+        instance = cls._from_dict(d, reference=reference, loaded_ids=loaded_ids)
+        _restore_prior_order(loaded_ids)
+        return instance
+
+    @classmethod
+    def _from_dict(
         cls,
         d,
         reference: Optional[Dict[str, str]] = None,
