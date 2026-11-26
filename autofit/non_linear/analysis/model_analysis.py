@@ -89,6 +89,22 @@ class ModelAnalysis(Analysis):
         self.analysis.prepare_for_model(self.model)
         self._use_jax = self.analysis.is_jax
 
+    @property
+    def setup_is_default(self) -> bool:
+        """
+        The wrapped analysis's ``setup_is_default`` (the base ``Analysis`` property would
+        otherwise shadow ``__getattr__`` forwarding).
+        """
+        return self.analysis.setup_is_default
+
+    def adopt_backend(self, use_jax: bool):
+        """
+        Forward ``adopt_backend`` to the wrapped analysis, then refresh this wrapper's
+        backend from it.
+        """
+        self.analysis.adopt_backend(use_jax)
+        self._use_jax = self.analysis.is_jax
+
     def _rebind(self, analysis: Optional[Analysis]):
         """
         Point this wrapper at ``analysis`` (when not ``None``) and refresh its

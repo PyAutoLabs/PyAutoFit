@@ -318,6 +318,31 @@ class Analysis(ABC):
         compute setup (and therefore its backend) from ``model``.
         """
 
+    @property
+    def setup_is_default(self) -> bool:
+        """
+        Whether this analysis's compute setup is the implicit default, chosen without the user
+        passing one (a PyAutoGalaxy / PyAutoLens analysis constructed with neither ``setup`` nor
+        ``use_jax`` resolves ``setup="auto"``).
+
+        A ``FactorGraphModel`` fitted as one analysis may move such a factor onto the graph's
+        shared backend (``adopt_backend``) when the factors' default setups disagree; a setup the
+        user passed is never changed. The default, ``False``, is for analyses with no setup.
+        """
+        return False
+
+    def adopt_backend(self, use_jax: bool):
+        """
+        Move this analysis onto the backend ``use_jax`` chosen for it by a ``FactorGraphModel``
+        whose factors resolved different default compute setups (see ``setup_is_default``).
+
+        Called by ``FactorGraphModel.modify_before_fit`` after forwarding ``modify_before_fit`` to
+        every factor, only on factors whose ``setup_is_default`` is ``True``. An analysis that
+        resolves a default setup overrides it to drop that setup and run with no setup on
+        ``use_jax`` (a PyAutoGalaxy / PyAutoLens analysis undoes any dataset operator the setup
+        attached). The default does nothing.
+        """
+
     def modify_model(self, model):
         return model
 
