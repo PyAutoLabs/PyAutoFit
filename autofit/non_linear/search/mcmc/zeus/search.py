@@ -81,7 +81,7 @@ class Zeus(NonLinearSearch):
         auto_correlation_settings: Optional[AutoCorrelationsSettings] = None,
         iterations_per_quick_update: int = None,
         iterations_per_full_update: int = None,
-        number_of_cores: Union[int, str] = "auto",
+        number_of_cores: Union[int, str] = 1,
         silence: bool = False,
         session: Optional[sa.orm.Session] = None,
         **kwargs
@@ -117,8 +117,9 @@ class Zeus(NonLinearSearch):
             Customizes and performs auto correlation calculations performed during and after the search.
         number_of_cores
             The number of cores Zeus sampling is performed using a Python multiprocessing Pool instance: a whole
-            number >= 1, or `"auto"` (the default), every core this process may use, resolved when the fit starts
-            (1 for a JAX analysis).
+            number >= 1 (default 1), or `"auto"`, every core this process may use, resolved when the fit starts
+            (1 for a JAX analysis). Zeus stays on one core by default: its pooled path currently returns wrong
+            log probabilities (slice-sampler contraction failures), so `"auto"` is opt-in until that is fixed.
         silence
             If True, the default print output of the non-linear search is silenced.
         session
