@@ -8,6 +8,7 @@ from autonerves.dictable import to_dict
 from autofit import exc
 from autofit.mapper import prior as p
 from autofit.non_linear.parallel import Process, effective_number_of_cores
+from autofit.non_linear.paths.database import DatabasePaths
 from autofit.text.formatter import write_table
 from .job import Job
 from .result import GridSearchResult
@@ -27,7 +28,7 @@ class GridSearch:
         self,
         search,
         number_of_steps: int = 4,
-        number_of_cores: Union[int, str] = 1,
+        number_of_cores: Union[int, str] = "auto",
         result_output_interval: int = 100,
     ):
         """
@@ -42,10 +43,12 @@ class GridSearch:
         search
             The class of the search that is run at each step
         number_of_cores
-            The number of processes the grid's jobs (one fit each) run across: a whole number >= 1 (default 1,
-            the jobs run in turn and each job's search resolves its own `number_of_cores`), or `"auto"`, the
-            detected cores. A JAX analysis runs its jobs serially (the JAX fork rule); when the jobs run in
-            parallel each job's search runs with one core.
+            The number of processes the grid's jobs (one fit each) run across: `"auto"` (the default), the
+            detected cores (`SLURM_CPUS_PER_TASK`, then the CPU affinity, then `os.cpu_count()`), or a whole
+            number >= 1 (with 1 the jobs run in turn and each job's search resolves its own
+            `number_of_cores`). A JAX analysis runs its jobs serially (the JAX fork rule); when the jobs run
+            in parallel each job's search runs with one core, and every job's result must be picklable (a
+            result that is not raises a `JobError` naming the job).
         result_output_interval
             The interval between saving a GridSearchResult object via paths
         """
@@ -199,6 +202,17 @@ class GridSearch:
             where="GridSearch",
         ) > 1
 
+        # A database-backed search's session cannot be pickled into the worker processes
+        # (`DatabasePaths.__getstate__` drops it), so its jobs run in turn.
+        if parallel and isinstance(
+            getattr(self.search, "paths", None), DatabasePaths
+        ):
+            self.logger.info(
+                "Running the grid's jobs in turn: a database-backed search cannot share its "
+                "session with worker processes"
+            )
+            parallel = False
+
         process_class = Process if parallel else Sequential
         # noinspection PyArgumentList
         return self._fit(
@@ -282,6 +296,8 @@ class GridSearch:
         for i, job_result in enumerate(
             process_class.run_jobs(jobs, self.number_of_cores)
         ):
+            if isinstance(job_result, Exception):
+                raise job_result
             builder.add(job_result)
             results_list.append(job_result.result_list_row)
             write_results()

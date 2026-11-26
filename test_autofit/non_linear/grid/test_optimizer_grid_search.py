@@ -211,11 +211,14 @@ class TestGridNLOBehaviour:
         assert grid_search.paths.output_path != search.paths.output_path
 
 
-def test_grid_search_over_shared_factor_graph_priors(monkeypatch):
-    class GaussianAnalysis(af.Analysis):
-        def log_likelihood_function(self, instance):
-            return -instance.centre**2 - (instance.sigma - 1.0) ** 2
+class GaussianAnalysis(af.Analysis):
+    # Module level so grid jobs run in parallel (GridSearch defaults to number_of_cores="auto")
+    # can pickle results that hold it back to the parent process.
+    def log_likelihood_function(self, instance):
+        return -instance.centre**2 - (instance.sigma - 1.0) ** 2
 
+
+def test_grid_search_over_shared_factor_graph_priors(monkeypatch):
     monkeypatch.setenv("PYAUTO_TEST_MODE", "1")
     centre = af.UniformPrior(-5.0, 5.0)
     sigma = af.UniformPrior(0.5, 2.0)

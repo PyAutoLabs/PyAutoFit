@@ -1,8 +1,11 @@
 import logging
 import multiprocessing
+import pickle
 from abc import ABC, abstractmethod
 from collections import abc
 from itertools import count
+from multiprocessing.connection import wait
+from multiprocessing.reduction import ForkingPickler
 from typing import Iterable
 
 from .context import fork_context
@@ -10,6 +13,47 @@ from .context import fork_context
 logger = logging.getLogger(
     __name__
 )
+
+
+class JobError(Exception):
+    """
+    A job run by a `Process` pool produced no usable result: its result (or the exception it raised)
+    could not be pickled back to the parent process, or the worker processes exited with jobs still
+    outstanding. Constructed from one message string, so it always pickles.
+    """
+
+
+class _PickledResult:
+    """
+    A job's result (or exception), pickled by the worker before it is queued.
+
+    `multiprocessing.Queue.put` pickles in a background feeder thread, which only prints a pickling
+    error and drops the item, so the parent would wait for it forever. Pickling in the worker turns
+    that failure into a `JobError` the parent receives.
+    """
+
+    def __init__(self, payload: bytes):
+        self.payload = payload
+
+    @classmethod
+    def from_result(cls, result, job) -> "_PickledResult":
+        try:
+            return cls(bytes(ForkingPickler.dumps(result)))
+        except Exception as e:
+            kind = "exception" if isinstance(result, BaseException) else "result"
+            message = (
+                f"Job {getattr(job, 'number', '?')} returned a {kind} of type {type(result).__name__} "
+                f"that cannot be pickled back to the parent process ({e!r}). Results of parallel jobs "
+                f"must be picklable: define classes they hold (e.g. an Analysis) at module level, not "
+                f"inside a function, or run with number_of_cores=1."
+            )
+            if isinstance(result, BaseException):
+                message += f" The job raised: {result!r}"
+            logger.error(message)
+            return cls(bytes(ForkingPickler.dumps(JobError(message))))
+
+    def load(self):
+        return pickle.loads(self.payload)
 
 
 class AbstractJobResult(ABC):
@@ -105,19 +149,22 @@ class Process(fork_context().Process):
 
         self.logger.debug("starting")
         while True:
-            if self.job_queue.empty():
+            # The parent queues one `StopCommand` per worker after every job. Polling
+            # `job_queue.empty()` instead races the parent's feeder thread: a worker that
+            # starts before the jobs reach the pipe sees an empty queue and exits at once.
+            job = self.job_queue.get()
+            if isinstance(job, StopCommand):
                 break
-            else:
-                job = self.job_queue.get()
-                try:
-                    self.queue.put(
-                        job.perform(
-                            *self.job_args
-                        )
-                    )
-                except Exception as e:
-                    logger.exception(e)
-                    self.queue.put(e)
+            try:
+                result = job.perform(
+                    *self.job_args
+                )
+            except Exception as e:
+                logger.exception(e)
+                result = e
+            self.queue.put(
+                _PickledResult.from_result(result, job)
+            )
         self.logger.debug("terminating")
         self.job_queue.close()
 
@@ -165,6 +212,8 @@ class Process(fork_context().Process):
         for job in jobs:
             job_queue.put(job)
             total += 1
+        for _ in processes:
+            job_queue.put(StopCommand())
 
         logger.info(
             f"Running {total} jobs across {number_of_cores} processes"
@@ -179,15 +228,44 @@ class Process(fork_context().Process):
         exception = None
 
         while process_count < total:
+            received = False
             for process in processes:
                 while not process.queue.empty():
                     result = process.queue.get()
+                    if isinstance(result, _PickledResult):
+                        result = result.load()
+                    received = True
+                    process_count += 1
                     if isinstance(result, Exception):
-                        process_count += 1
                         logger.exception(result)
                         exception = result
-                    process_count += 1
                     yield result
+
+            if received:
+                continue
+
+            # A worker's queue is flushed before it exits, so once every worker has exited and
+            # every queue is empty no further result can arrive: a job's worker died (e.g. it was
+            # killed or crashed) without returning one.
+            if not any(process.is_alive() for process in processes) and all(
+                process.queue.empty() for process in processes
+            ):
+                # Unread jobs would block interpreter exit while the feeder thread waits
+                # to flush them into a pipe no worker reads.
+                job_queue.cancel_join_thread()
+                job_queue.close()
+                raise JobError(
+                    f"{total - process_count} of {total} parallel jobs returned no result: every "
+                    f"worker process has exited (exit codes "
+                    f"{[process.exitcode for process in processes]}). A worker that is killed or "
+                    f"crashes mid-job loses that job; check the log above for the cause."
+                )
+
+            # Block until a running worker exits or a short time passes, rather than spinning.
+            wait(
+                [process.sentinel for process in processes if process.is_alive()],
+                timeout=0.1,
+            )
 
         job_queue.close()
 

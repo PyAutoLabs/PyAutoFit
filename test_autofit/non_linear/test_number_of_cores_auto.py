@@ -111,6 +111,8 @@ def test_auto_defers_the_thread_warning(monkeypatch):
 def test_grid_search_and_sensitivity_resolve_auto_to_detected_cores():
     grid = af.SearchGridSearch(search=af.m.MockSearch(), number_of_cores="auto")
     assert grid.number_of_cores == 64
+    assert af.SearchGridSearch(search=af.m.MockSearch()).number_of_cores == 64
+    assert af.SearchGridSearch(search=af.m.MockSearch(), number_of_cores=1).number_of_cores == 1
     assert resources.resolve_job_cores(None, where="x") == 1
     with pytest.raises(ValueError):
         resources.resolve_job_cores(0, where="x")
