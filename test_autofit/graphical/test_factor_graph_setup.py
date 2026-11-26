@@ -181,3 +181,135 @@ def test_whole_graph_fit_banner_reports_the_agreed_setup(monkeypatch, caplog, tm
     assert banners == [
         "Parallel: 8 workers (auto: detected cores)"
     ]
+
+
+class _DefaultAnalysis(af.Analysis):
+    """
+    Resolves a default setup (`setup_is_default`) in `modify_before_fit`, whose backend
+    follows the setup_id prefix, and records `adopt_backend` calls.
+    """
+
+    def __init__(self, setup_id, default=True):
+        super().__init__(use_jax=False)
+        self._setup_id = setup_id
+        self._default = default
+        self.setup = None
+        self.adopted = []
+
+    @property
+    def setup_is_default(self):
+        return self._default
+
+    def adopt_backend(self, use_jax):
+        self.adopted.append(use_jax)
+        self.setup = None
+        self._use_jax = use_jax
+
+    def log_likelihood_function(self, instance):
+        return 0.0
+
+    def modify_before_fit(self, paths, model):
+        if not self.adopted:
+            self.setup = _Setup(self._setup_id)
+            self._use_jax = self._setup_id.startswith("jax")
+        return self
+
+
+def _modify(graph, name):
+    return graph.modify_before_fit(paths=af.DirectoryPaths(name=name), model=None)
+
+
+def test_base_analysis_has_no_default_setup_and_adopt_is_a_no_op():
+    analysis = _Analysis()
+    assert analysis.setup_is_default is False
+    analysis.adopt_backend(True)
+    assert analysis.is_jax is False
+
+
+def test_disagreeing_default_setups_adopt_one_backend(monkeypatch):
+    monkeypatch.delenv("PYAUTO_DISABLE_JAX", raising=False)
+    a = _DefaultAnalysis("numba_cpu_sparse_fp64")
+    b = _DefaultAnalysis("jax_cpu_dense_fp64_nufft")
+    graph = g.FactorGraphModel(_factor(a, "a"), _factor(b, "b"))
+
+    _modify(graph, "graph_default_mixed")
+
+    import importlib.util
+
+    expected = importlib.util.find_spec("jax") is not None
+    assert a.adopted == [expected] and b.adopted == [expected]
+    assert graph.setup_ids() == {}
+    assert graph.factors_disagreeing_on_backend() == []
+    graph.check_setup_agreement()
+
+
+def test_agreeing_default_setups_are_kept():
+    a = _DefaultAnalysis("numba_cpu_sparse_fp64")
+    b = _DefaultAnalysis("numba_cpu_sparse_fp64")
+    graph = g.FactorGraphModel(_factor(a, "a"), _factor(b, "b"))
+
+    _modify(graph, "graph_default_agree")
+
+    assert a.adopted == [] and b.adopted == []
+    assert setup_id_of(graph) == "numba_cpu_sparse_fp64"
+
+
+def test_graph_use_jax_false_pushes_numpy_down_to_default_factors():
+    a = _DefaultAnalysis("numba_cpu_sparse_fp64")
+    b = _DefaultAnalysis("jax_cpu_dense_fp64_nufft")
+    graph = g.FactorGraphModel(_factor(a, "a"), _factor(b, "b"), use_jax=False)
+
+    _modify(graph, "graph_default_numpy")
+
+    assert a.adopted == [False] and b.adopted == [False]
+    assert graph.is_jax is False
+    graph.check_backend_agreement()
+
+
+def test_graph_use_jax_pushes_down_even_when_default_setups_agree():
+    a = _DefaultAnalysis("jax_cpu_dense_fp64")
+    b = _DefaultAnalysis("jax_cpu_dense_fp64")
+    graph = g.FactorGraphModel(_factor(a, "a"), _factor(b, "b"), use_jax=False)
+
+    _modify(graph, "graph_default_agree_numpy")
+
+    assert a.adopted == [False] and b.adopted == [False]
+    graph.check_backend_agreement()
+
+
+def test_default_factors_follow_an_explicit_setup():
+    explicit = _DefaultAnalysis("numba_cpu_sparse_fp64", default=False)
+    default = _DefaultAnalysis("jax_cpu_dense_fp64_nufft")
+    graph = g.FactorGraphModel(_factor(explicit, "a"), _factor(default, "b"))
+
+    _modify(graph, "graph_explicit_lead")
+
+    assert explicit.adopted == []
+    assert default.adopted == [False]
+    assert graph.setup_ids() == {"a": "numba_cpu_sparse_fp64"}
+
+
+def test_disagreeing_explicit_setups_still_raise():
+    a = _DefaultAnalysis("numba_cpu_sparse_fp64", default=False)
+    b = _DefaultAnalysis("jax_cpu_dense_fp64", default=False)
+    c = _DefaultAnalysis("jax_cpu_dense_fp64_nufft")
+    graph = g.FactorGraphModel(_factor(a, "a"), _factor(b, "b"), _factor(c, "c"))
+
+    with pytest.raises(exc.SearchException, match="setups passed explicitly"):
+        _modify(graph, "graph_explicit_bad")
+
+    assert a.adopted == [] and b.adopted == [] and c.adopted == []
+
+
+def test_model_analysis_forwards_default_setup_and_adopt_backend():
+    from autofit.non_linear.analysis.model_analysis import ModelAnalysis
+
+    inner = _DefaultAnalysis("jax_cpu_dense_fp64")
+    inner._use_jax = True
+    wrapper = ModelAnalysis(analysis=inner, model=af.Model(af.ex.Gaussian))
+
+    assert wrapper.setup_is_default is True
+    wrapper.adopt_backend(False)
+
+    assert inner.adopted == [False]
+    assert wrapper.is_jax is False

@@ -110,6 +110,22 @@ class AnalysisFactor(AbstractModelFactor):
             factor.analysis = analysis
 
     @property
+    def setup_is_default(self) -> bool:
+        """
+        Whether the wrapped analysis's compute setup is the implicit default
+        (``Analysis.setup_is_default``).
+        """
+        return self.analysis.setup_is_default
+
+    def adopt_backend(self, use_jax: bool):
+        """
+        Forward ``adopt_backend`` to the wrapped analysis (``Analysis.adopt_backend``),
+        which ``FactorGraphModel.modify_before_fit`` calls on factors whose default setups
+        disagree.
+        """
+        self.analysis.adopt_backend(use_jax)
+
+    @property
     def is_jax(self) -> bool:
         """
         Whether this factor's analysis is JAX (``Analysis.is_jax`` of the wrapped

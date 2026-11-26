@@ -153,8 +153,14 @@ class FactorGraphModel(AbstractDeclarativeFactor):
         fitted ``model`` (which may carry replacement priors, e.g. in a grid-search
         cell), else the factor's ``prior_model``. ``AnalysisFactor.modify_before_fit``
         rebinds both of the factor's analysis references to the object returned.
-        Hierarchical factors carry no analysis and are skipped. The factors must then
-        agree on their resolved setup (``check_setup_agreement``).
+        Hierarchical factors carry no analysis and are skipped.
+
+        Factors whose setup is the implicit default (``setup_is_default``, e.g. a
+        PyAutoGalaxy / PyAutoLens analysis built with neither ``setup`` nor ``use_jax``)
+        then adopt one shared backend when their default setups disagree
+        (``adopt_shared_backend``), so a graph mixing dataset types fits without pins.
+        The factors must then agree on their resolved setup (``check_setup_agreement``);
+        setups the user passed are never changed, so disagreeing explicit setups raise.
 
         Returns
         -------
@@ -167,8 +173,122 @@ class FactorGraphModel(AbstractDeclarativeFactor):
             child_paths = paths.for_sub_analysis(analysis_name=f"analyses/analysis_{i}")
             factor.modify_before_fit(child_paths, self._factor_model(model, i, factor))
 
+        self.adopt_shared_backend()
         self.check_setup_agreement()
         return self
+
+    def _setup_factors(self) -> List:
+        """
+        The factors that may carry a compute setup: analysis factors and nested graphs
+        (the flattened factors, so a ``HierarchicalFactor``'s generated factors, which
+        have no analysis, report no default setup).
+        """
+        return [
+            factor
+            for factor in self._flat_factors()
+            if isinstance(factor, (AnalysisFactor, FactorGraphModel))
+        ]
+
+    @property
+    def setup_is_default(self) -> bool:
+        """
+        Whether this graph, as a factor of an enclosing graph, has only default setups:
+        ``True`` when at least one of its factors has a default setup and none has a
+        setup the user passed.
+        """
+        ids = self.setup_ids()
+        factors = self._setup_factors()
+        defaulted = [factor for factor in factors if factor.setup_is_default]
+        explicit = [
+            factor
+            for factor in factors
+            if factor.name in ids and not factor.setup_is_default
+        ]
+        return bool(defaulted) and not explicit
+
+    def adopt_backend(self, use_jax: bool):
+        """
+        Move every factor of this graph with a default setup onto ``use_jax``
+        (``Analysis.adopt_backend``), when this graph is a factor of an enclosing graph.
+        """
+        for factor in self._setup_factors():
+            if factor.setup_is_default:
+                factor.adopt_backend(use_jax)
+
+    def _shared_backend(self, explicit_factors) -> Optional[bool]:
+        """
+        The backend factors with a default setup adopt: the graph's explicit ``use_jax``
+        when one was given, else the backend of the factors the user configured (an
+        explicit ``setup=`` or ``use_jax=``), else JAX, unless JAX is disabled
+        (``PYAUTO_DISABLE_JAX=1``) or not installed. ``None`` when the configured
+        factors disagree on their backend (``check_backend_agreement`` then raises).
+        """
+        explicit = self.__dict__.get("_explicit_use_jax")
+        if explicit is not None:
+            return bool(explicit)
+        if explicit_factors:
+            backends = {bool(factor.is_jax) for factor in explicit_factors}
+            return backends.pop() if len(backends) == 1 else None
+
+        import importlib.util
+        import os
+
+        if os.environ.get("PYAUTO_DISABLE_JAX") == "1":
+            return False
+        return importlib.util.find_spec("jax") is not None
+
+    def adopt_shared_backend(self) -> Optional[bool]:
+        """
+        Put every factor whose compute setup is the implicit default on one shared
+        backend, when the factors would otherwise disagree.
+
+        Each factor resolves its own setup (``modify_before_fit``), so a graph mixing
+        dataset types (e.g. imaging and interferometer, or imaging and a point source)
+        resolves a different default setup per factor, which a whole-graph fit cannot
+        run. When the resolved setups disagree, or a factor with a default setup runs on
+        a different backend from the graph's ``use_jax`` or from the factors the user
+        configured, every factor with a default setup (``setup_is_default``) drops it
+        and runs with no setup on the shared backend (``adopt_backend``, see
+        ``_shared_backend``). Factors the user configured (``setup=`` or ``use_jax=``)
+        are never changed: when their setups or backends disagree with one another
+        nothing is adopted and ``check_setup_agreement`` / ``check_backend_agreement``
+        raise.
+
+        Returns
+        -------
+        The backend adopted (``True`` for JAX), or ``None`` when nothing changed.
+        """
+        factors = self._setup_factors()
+        defaulted = [factor for factor in factors if factor.setup_is_default]
+        if not defaulted:
+            return None
+
+        configured = [factor for factor in factors if not factor.setup_is_default]
+
+        ids = self.setup_ids()
+        configured_ids = {ids[f.name] for f in configured if f.name in ids}
+        if len(configured_ids) > 1:
+            return None
+
+        use_jax = self._shared_backend(explicit_factors=configured)
+        if use_jax is None:
+            return None
+
+        backend_is_set = (
+            self.__dict__.get("_explicit_use_jax") is not None or bool(configured)
+        )
+        setups_disagree = len(set(ids.values())) > 1
+        backends_disagree = backend_is_set and any(
+            bool(factor.is_jax) != use_jax for factor in defaulted
+        )
+
+        if not (setups_disagree or backends_disagree):
+            return None
+
+        for factor in defaulted:
+            factor.adopt_backend(use_jax)
+
+        return use_jax
 
     def _factor_model(self, model, index: int, factor):
         """
@@ -203,8 +323,9 @@ class FactorGraphModel(AbstractDeclarativeFactor):
 
         A whole-graph fit evaluates every factor in one process, so every factor that
         has a setup must have resolved the same one (factors without a setup are
-        ignored). Called at the end of ``modify_before_fit`` and by the runtime gates
-        beside ``check_backend_agreement``.
+        ignored). Called at the end of ``modify_before_fit`` (after factors with a
+        default setup have adopted a shared backend, ``adopt_shared_backend``) and by
+        the runtime gates beside ``check_backend_agreement``.
         """
         ids = self.setup_ids()
         if len(set(ids.values())) <= 1:
@@ -222,8 +343,11 @@ class FactorGraphModel(AbstractDeclarativeFactor):
             f"The FactorGraphModel {self.name} is fitted as one analysis, but its "
             f"factors resolved different compute setups ({listing}). Whole-graph "
             f"fitting evaluates every factor in one process, so every factor must use "
-            f"the same setup: build every factor's analysis with the same setup= (or "
-            f"none, so each resolves the default)."
+            f"the same setup. Factors left on the default setup (neither setup= nor "
+            f"use_jax= passed) adopt one shared backend automatically; setups passed "
+            f"explicitly are never changed, so build every factor's analysis with the "
+            f"same setup=, or pass none so the graph chooses the backend "
+            f"(FactorGraphModel(use_jax=...) sets it)."
         )
 
     @property
