@@ -8,8 +8,8 @@ setting up a fit, so an EP run with Nautilus as the default optimiser raised
 reads it through ``getattr(self, "_use_jax", False)``; these tests stop the unguarded
 read coming back.
 
-``PYAUTO_TEST_MODE=1`` caps Nautilus at one likelihood call, so one EP step takes
-seconds while still running the real search setup (preflight, fitness, sampler).
+``PYAUTO_TEST_MODE=1`` cuts Nautilus to a tiny run, so one EP step takes seconds
+while still running the real search setup (preflight, fitness, sampler).
 
 Nautilus refuses models with fewer than two parameters, so each one-parameter
 ``PriorFactor`` step fails with a ``ValueError`` that EP records and skips. That is a
@@ -97,6 +97,9 @@ def test_unguarded_use_jax_read_raises(monkeypatch):
 
     monkeypatch.setattr(Analysis, "is_jax", property(unguarded_is_jax))
 
+    # The first unguarded read on a PriorFactor is the EP factor step's log line
+    # (`search_factor_optimiser.py`), before Nautilus's own `fitness_overrides` read;
+    # either one raising is the regression.
     with pytest.raises(AttributeError):
         _run_one_ep_step(monkeypatch)
 
